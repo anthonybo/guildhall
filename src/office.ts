@@ -78,6 +78,8 @@ export type Character = {
 	seatId: string | null
 	activity: Activity | null
 	wasWorking: boolean
+	/** rolled a social urge and is waiting for the broker to find a partner */
+	chatWanted: boolean
 	bubble: 'permission' | 'done' | 'chat' | null
 	bubbleTimer: number
 }
@@ -289,7 +291,7 @@ export class Office {
 		this.workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 1 : 1
 		const workBottom = this.workBottom + 2
 		const socialBands = bandRows.slice(band).filter((r) => r >= workBottom).slice(-2)
-		let wish = ['kitchen', 'pingpong', 'couch']
+		let wish = ['couch', 'kitchen', 'couch', 'pingpong', 'couch']
 		while (socialBands.length * 2 < wish.length - 1 && DROP_ORDER.some((d) => wish.includes(d))) {
 			const drop = DROP_ORDER.find((d) => wish.includes(d))!
 			wish = wish.filter((w) => w !== drop)
@@ -581,6 +583,7 @@ export class Office {
 			seatId: seat.id,
 			activity: null,
 			wasWorking: true,
+			chatWanted: false,
 			bubble: null,
 			bubbleTimer: 0,
 		}
@@ -594,7 +597,6 @@ export class Office {
 	update(dt: number, sessions: Session[]) {
 		this.ballT += dt * 1.6
 		const byId = new Map(sessions.map((s) => [s.id, s]))
-		let wantChat = 0
 		for (const ch of this.chars.values()) {
 			const s = byId.get(ch.id)
 			if (!s) continue
@@ -676,9 +678,9 @@ export class Office {
 					ch.idleTimer -= dt
 					if (ch.idleTimer > 0) break
 					ch.idleTimer = this.rand(IDLE_PAUSE_MIN, IDLE_PAUSE_MAX)
-					if (this.rng() < 0.3) {
-						wantChat++
-						break // the broker pairs us up after this loop
+					if (this.rng() < 0.35) {
+						ch.chatWanted = true
+						break // the broker pairs us up once a second one wants to
 					}
 					if (this.goToSpot(ch)) break
 					// nothing free: drift to a tile nobody else has claimed
@@ -734,7 +736,7 @@ export class Office {
 				}
 			}
 		}
-		if (wantChat >= 2) this.brokerChats(byId)
+		if ([...this.chars.values()].filter((c) => c.chatWanted).length >= 2) this.brokerChats(byId)
 	}
 
 	private bubbleFor(ch: Character, s: Session, dt: number) {
@@ -778,12 +780,14 @@ export class Office {
 			}
 		}
 		ch.activity = null
+		ch.chatWanted = false
 	}
 
 	/** Prefer a facility someone is already at, which is what makes a group read
 	 *  as a group without any explicit socialising logic. */
 	private goToSpot(ch: Character) {
-		const free = [...this.spots.values()].filter((s) => s.kind !== 'desk' && !s.taken)
+		// ping pong is pair-only: a solo player looks broken, so the broker owns it
+		const free = [...this.spots.values()].filter((s) => s.kind !== 'desk' && s.kind !== 'pingpong' && !s.taken)
 		if (!free.length) return false
 		const busyGroups = new Set([...this.spots.values()].filter((s) => s.taken && s.kind !== 'desk').map((s) => s.group))
 		const scored = free
@@ -805,7 +809,7 @@ export class Office {
 	/** Deterministic id-ordered pairing: two idle characters stand and talk. */
 	private brokerChats(byId: Map<string, Session>) {
 		const waiting = [...this.chars.values()]
-			.filter((c) => c.state === 'idle' && !c.activity && !this.atDesk(byId.get(c.id)!))
+			.filter((c) => c.state === 'idle' && c.chatWanted && !c.activity && !this.atDesk(byId.get(c.id)!))
 			.sort((a, b) => a.id.localeCompare(b.id))
 		for (let i = 0; i < waiting.length; i++) {
 			const a = waiting[i]
@@ -814,6 +818,22 @@ export class Office {
 				const b = waiting[j]
 				if (b.activity) continue
 				if (Math.abs(a.col - b.col) + Math.abs(a.row - b.row) > CHAT_RADIUS) continue
+				// a free table with BOTH ends open becomes a game
+				const table = [...new Set([...this.spots.values()].filter((x) => x.kind === 'pingpong').map((x) => x.group))]
+					.map((g) => [...this.spots.values()].filter((x) => x.group === g))
+					.find((pair) => pair.length === 2 && pair.every((x) => !x.taken))
+				if (table) {
+					const [t0, t1] = table
+					const d = this.rand(...DWELL.pingpong)
+					t0.taken = a.id
+					t1.taken = b.id
+					a.activity = { kind: 'pingpong', spotId: t0.id, partner: b.id, timer: d }
+					b.activity = { kind: 'pingpong', spotId: t1.id, partner: a.id, timer: d }
+					a.chatWanted = b.chatWanted = false
+					if (this.walkTo(a, t0.col, t0.row, `${t0.col},${t0.row}`) && this.walkTo(b, t1.col, t1.row, `${t1.col},${t1.row}`)) break
+					this.release(a)
+					this.release(b)
+				}
 				const dur = this.rand(...DWELL.talk)
 				// prefer the room's talk area so a conversation happens somewhere,
 				// rather than two people standing in the middle of an empty floor
@@ -824,6 +844,7 @@ export class Office {
 					s1.taken = b.id
 					a.activity = { kind: 'talk', spotId: s0.id, partner: b.id, timer: dur }
 					b.activity = { kind: 'talk', spotId: s1.id, partner: a.id, timer: dur }
+					a.chatWanted = b.chatWanted = false
 					if (this.walkTo(a, s0.col, s0.row, `${s0.col},${s0.row}`) && this.walkTo(b, s1.col, s1.row, `${s1.col},${s1.row}`)) break
 					this.release(a)
 					this.release(b)
@@ -832,6 +853,7 @@ export class Office {
 				if (!pair) continue
 				a.activity = { kind: 'talk', spotId: null, partner: b.id, timer: dur }
 				b.activity = { kind: 'talk', spotId: null, partner: a.id, timer: dur }
+				a.chatWanted = b.chatWanted = false
 				this.walkTo(a, pair[0].col, pair[0].row)
 				this.walkTo(b, pair[1].col, pair[1].row)
 				break
@@ -1014,8 +1036,11 @@ export class Office {
 			const s = byId.get(ch.id)
 			if (!s) continue
 			const seated = ch.state === 'type' || (ch.state === 'act' && this.postureOf(ch) === 'sit')
-			const pose: Pose = ch.state === 'walk' ? 'walk' : ch.state === 'act' && !seated ? 'reading' : 'typing'
-			const step = ch.state === 'idle' ? 1 : ch.frame
+			// the typing/reading frames have no legs, so they may only be used for a
+			// seated character; anyone on their feet uses the walk set
+			const pose: Pose = seated ? 'typing' : 'walk'
+			const rally = ch.activity?.kind === 'pingpong'
+			const step = seated || rally || ch.state === 'walk' ? ch.frame : 1
 			// feet at the tile CENTRE, matching the reference — anchoring at the
 			// tile bottom put the body a half tile low and it read as standing
 			const y = Math.round(ch.y - CHAR_H + (seated ? SIT_SINK : 0))
