@@ -24,7 +24,8 @@ import {
 	upscale,
 } from './kitty.ts'
 import { collect, needsAttention, order, type Session } from './data.ts'
-import { Canvas, Town, type Placement } from './town.ts'
+import { Canvas } from './canvas.ts'
+import { Office, type Placed } from './office.ts'
 import * as T from './table.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -80,15 +81,21 @@ function jump(tab: number) {
 type Mode = 'town' | 'split' | 'table'
 let mode: Mode = 'split'
 let faultsOnly = false
+/** All labels on, or only the ones that need you plus the selection. */
+let labels = true
 let selectedId: string | null = null
 let sessions: Session[] = []
 let timers: NodeJS.Timeout[] = []
 
-// The town owns the creatures' positions, so it is created once and resized —
-// never rebuilt — or every creature would jump back to its start position.
-const town = new Town(80, 40)
+// The office owns the characters' positions, so it is created once and refitted
+// — never rebuilt — or everyone would jump back to the doorway.
+const office = new Office()
 let cv = new Canvas(80, 40)
 let geom = { cols: 0, rows: 0, townRows: 0, tableRows: 0 }
+let lastTick = 0
+/** A stalled event loop must not teleport anyone across the room. */
+const MAX_DT = 0.25
+const SPRITE_H = 14
 
 const visible = () => (faultsOnly ? sessions.filter((s) => needsAttention(s)) : sessions)
 
@@ -117,10 +124,10 @@ function layout() {
 
 	if (cols !== geom.cols || townRows !== geom.townRows) {
 		cv = new Canvas(cols, Math.max(2, townRows) * 2)
-		town.resize(cols, Math.max(2, townRows) * 2)
+		office.fit(cv.w, cv.h)
 	}
 	geom = { cols, rows, townRows, tableRows }
-	town.layout(list)
+	office.assign(list)
 }
 
 /** Render the current state. Draws only — advancing the animation is separate. */
@@ -130,11 +137,11 @@ function draw() {
 	let townLines: string[] = []
 	let images = ''
 	if (townRows > 0) {
-		const placements = town.draw(cv)
-		if (!IMAGES) for (const p of placements) cv.blit(p.x, p.y, loadSprite(path.join(TILES, p.tile), town.spriteH))
-		town.overlay(cv, placements, selectedId ?? undefined)
+		const placed = office.draw(cv, list, SPRITE_H)
+		if (!IMAGES) for (const p of placed) cv.blit(p.x, p.y, loadSprite(path.join(TILES, p.tile), SPRITE_H))
+		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
-		if (IMAGES) images = drawImages(placements, town.spriteH)
+		if (IMAGES) images = drawImages(placed, SPRITE_H)
 	}
 
 	const body: string[] = [...townLines]
@@ -148,16 +155,19 @@ function draw() {
 		body.push(...det)
 	}
 	while (body.length < rows) body.push('')
-	paint([T.summary(sessions, cols), ...body.slice(0, rows), T.footer(cols, town.hiddenLots, faultsOnly, mode)], images)
+	paint([T.summary(sessions, cols), ...body.slice(0, rows), T.footer(cols, office.hiddenCount, faultsOnly, mode)], images)
 }
 
-/** One animation step, then redraw. Only the animation timer calls this. */
+/** One simulation step, then redraw. Only the animation timer calls this. */
 function animate() {
-	town.tick()
+	const now = Date.now()
+	const dt = lastTick ? Math.min((now - lastTick) / 1000, MAX_DT) : 0
+	lastTick = now
+	office.update(dt, visible())
 	draw()
 }
 
-function drawImages(placements: Placement[], spriteH: number) {
+function drawImages(placements: Placed[], spriteH: number) {
 	const pre: string[] = []
 	let out = ''
 	let pid = 1
@@ -194,6 +204,8 @@ function onKey(b: Buffer) {
 	} else if (k === 'f') {
 		faultsOnly = !faultsOnly
 		layout()
+	} else if (k === 'l') {
+		labels = !labels
 	} else if (/^[0-9]$/.test(k)) jump(k === '0' ? 10 : Number(k))
 	// keys only ever redraw; they must not advance the animation or the creatures
 	// lurch forward once per keystroke

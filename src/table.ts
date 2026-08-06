@@ -97,6 +97,6 @@ export function footer(total: number, hidden: number, faultsOnly: boolean, mode:
 		`tab ${mode}`,
 		'q quit',
 	]
-	const tail = hidden ? `  ${fg(C.faint)}+${hidden} project(s) below only${R}` : ''
+	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
 	return clip(`${fg(C.faint)} ${bits.join('  ·  ')}${R}${tail}`, total)
 }
