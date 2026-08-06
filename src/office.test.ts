@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Canvas } from './canvas.ts'
-import { Office, TILE } from './office.ts'
+import { CHAR_H, CHAR_W, Office, TILE } from './office.ts'
 import type { Session, State } from './data.ts'
 
 /** Seeded LCG so every behavioural test is reproducible. */
@@ -366,4 +366,24 @@ test('only mid-turn sessions get a label, plus the selection', () => {
 	// the selection is 'c', which is done — it is labelled because it is selected
 	const labelled = list.filter((s) => text.includes(`⌘${s.tab}`)).length
 	assert.ok(labelled >= 1, 'nothing was labelled at all')
+})
+
+test('a label never lands inside a character sprite', () => {
+	const list = Array.from({ length: 6 }, (_, i) => session(`s${i}`, i < 3 ? 'alpha' : 'beta', i === 0 ? 'working' : 'parked'))
+	const { cv, office } = room(list)
+	for (let i = 0; i < 60; i++) office.update(0.1, list)
+	const placed = office.draw(cv, list)
+	office.overlay(cv, placed, placed[0]?.s.id)
+	const boxes = placed.map((p) => ({ x0: p.x, x1: p.x + CHAR_W, r0: p.y >> 1, r1: (p.y >> 1) + CHAR_H / 2 - 1 }))
+	let hits = 0
+	cv.render().forEach((line, row) => {
+		const bare = line.replace(/\x1b\[[0-9;]*m/g, '')
+		for (let c = 0; c < bare.length; c++) {
+			if (bare[c] === ' ' || bare[c] === '▀') continue
+			// a character is drawn as an image over the text layer, so any label cell
+			// inside its box would be invisible
+			if (boxes.some((b) => row >= b.r0 && row <= b.r1 && c >= b.x0 && c < b.x1)) hits++
+		}
+	})
+	assert.equal(hits, 0, `${hits} text cells hidden behind a character`)
 })
