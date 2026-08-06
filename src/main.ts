@@ -24,7 +24,7 @@ import {
 } from './kitty.ts'
 import { collect, needsAttention, order, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
-import { CHAR_H, CHAR_W, Office, TILE, type Placed } from './office.ts'
+import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, loadSheets, shrink } from './characters.ts'
 import { monitor } from './screens.ts'
 import { PROP_SIZE, prop } from './props.ts'
@@ -240,7 +240,7 @@ function drawMonitors() {
 			const up = upscale(monitor(m.lit, screenFrame, m.seed).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
-		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, CHAR_W, CHAR_W / 2 + 1, pid++)
+		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++)
 	}
 	return pre.join('') + out
 }

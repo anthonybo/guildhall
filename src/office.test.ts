@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Canvas } from './canvas.ts'
-import { CHAR_H, CHAR_W, Office, TILE } from './office.ts'
+import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE } from './office.ts'
 import type { Session, State } from './data.ts'
 
 /** Seeded LCG so every behavioural test is reproducible. */
@@ -386,4 +386,25 @@ test('a label never lands inside a character sprite', () => {
 		}
 	})
 	assert.equal(hits, 0, `${hits} text cells hidden behind a character`)
+})
+
+test('what an image blocks matches what gets drawn', () => {
+	// a monitor placed three cell rows tall but blocking two let labels land in the
+	// third row and be covered by it
+	assert.equal(MON_ROWS, TILE / 2 + 1)
+	assert.equal(MON_COLS, TILE)
+	const list = [session('a', 'alpha', 'working'), session('b', 'alpha', 'working')]
+	const { cv, office } = room(list)
+	const placed = office.draw(cv, list)
+	office.overlay(cv, placed)
+	const boxes = office.monitors.map((m) => ({ x0: m.x, x1: m.x + MON_COLS, r0: m.y >> 1, r1: (m.y >> 1) + MON_ROWS - 1 }))
+	let hits = 0
+	cv.render().forEach((line, row) => {
+		const bare = line.replace(/\x1b\[[0-9;]*m/g, '')
+		for (let c = 0; c < bare.length; c++) {
+			if (bare[c] === ' ' || bare[c] === '▀') continue
+			if (boxes.some((b) => row >= b.r0 && row <= b.r1 && c >= b.x0 && c < b.x1)) hits++
+		}
+	})
+	assert.equal(hits, 0, `${hits} text cells hidden behind a monitor`)
 })

@@ -29,6 +29,9 @@ export const CHAR_W = TILE
 export const CHAR_H = TILE * 2
 /** The typing frames have no legs — 6 of 32 source rows are empty padding — so
  *  seated characters shift down by that fraction to put the body on the seat. */
+/** Monitor image box, in cells. Whatever blocks text must match what is drawn. */
+export const MON_COLS = TILE
+export const MON_ROWS = TILE / 2 + 1
 export const SIT_SINK = Math.round((CHAR_H * 6) / 32)
 
 const WALK_TILES_PER_SEC = 3
@@ -1013,7 +1016,7 @@ export class Office {
 		for (const pod of this.pods)
 			for (let c = pod.c0; c <= pod.c1; c++) {
 				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
-				block(c * TILE, pod.monitorRow * TILE, TILE, TILE / 2)
+				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 			}
 		for (const pr of this.props) {
 			const size = PROP_SIZE[pr.kind]
