@@ -170,7 +170,9 @@ export class Office {
 	hiddenCount = 0
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
-	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind']; level: number }[] = []
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
+	/** level badges, in the gap column beside each occupied desk */
+	badges: { x: number; y: number; level: number }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
@@ -1028,6 +1030,7 @@ export class Office {
 			}
 		}
 		this.monitors = []
+		this.badges = []
 		const lit = new Map<string, Session['toolKind']>()
 		const levels = new Map<string, number>()
 		for (const sp of this.spots.values()) {
@@ -1046,9 +1049,14 @@ export class Office {
 					lit: lit.has(`${c},${pod.seatRow}`),
 					seed: c + pod.monitorRow,
 					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
-					level: levels.get(`${c},${pod.seatRow}`) ?? 0,
 				})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
+				// beside the desk, in the gap column, where nobody sits
+				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
+				if (lvl) {
+					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl })
+					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
+				}
 			}
 		for (const pr of this.props) {
 			const size = PROP_SIZE[pr.kind]
