@@ -107,8 +107,8 @@ export function transmit(id: number, png: Buffer) {
  * C=1 leaves the cursor where it was, so placements never disturb text layout.
  * z=1 keeps sprites above the drawn background, which is opaque text cells.
  */
-export function place(id: number, cols: number, rows: number, placement: number) {
-	return `${ESC}_Ga=p,i=${id},p=${placement},c=${cols},r=${rows},z=1,C=1,q=2${ESC}\\`
+export function place(id: number, cols: number, rows: number, placement: number, z = 1) {
+	return `${ESC}_Ga=p,i=${id},p=${placement},c=${cols},r=${rows},z=${z},C=1,q=2${ESC}\\`
 }
 
 /** Drop every visible placement but keep the transmitted images cached. */

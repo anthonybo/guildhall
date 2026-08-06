@@ -431,7 +431,7 @@ test('every occupied desk shows its occupant level', () => {
 	for (const sp of desks) {
 		const r = (((sp.row - 1) * TILE) >> 1) + 1
 		const c = sp.col * TILE + TILE
-		if (/[a-z][1-9★]/.test((rows[r] ?? '').slice(c, c + 2))) shown++
+		if (/L[1-9★]/.test((rows[r] ?? '').slice(c, c + 2))) shown++
 	}
 	assert.equal(shown, desks.length, `${desks.length - shown} desks missing their level tag`)
 })
