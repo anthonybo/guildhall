@@ -27,6 +27,7 @@ import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, loadSheets, shrink } from './characters.ts'
 import { monitor } from './screens.ts'
+import { tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 
@@ -41,10 +42,10 @@ const IMAGES = supportsImages() && !ONCE && !BENCH
 const imageIds = new Map<string, number>()
 let nextId = 1000
 function ensureTransmitted(p: Placed, pre: string[]) {
-	const key = `${p.s.palette}:${p.s.hueShift}:${p.facing}:${p.pose}:${p.step}`
+	const key = `${p.s.palette}:${p.s.hueShift}:${p.facing}:${p.pose}:${p.step}:${p.s.level}`
 	const known = imageIds.get(key)
 	if (known) return known
-	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step)
+	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 	// nearest-neighbour 4x so the terminal has real pixels to scale from
 	// 2x, not 4x: a 4x source made the terminal DOWNSCALE into the placement box,
 	// which is a fractional resample and the reason sprites looked mushy
@@ -144,7 +145,7 @@ function draw() {
 		const placed = office.draw(cv, list)
 		if (!IMAGES)
 			for (const p of placed) {
-				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step)
+				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
 		office.overlay(cv, placed, selectedId ?? undefined, labels)
