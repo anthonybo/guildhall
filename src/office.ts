@@ -178,6 +178,8 @@ export class Office {
 	/** tile -> the character heading there or resting on it */
 	private dest = new Map<string, string>()
 	private signature = ''
+	/** last row belonging to a desk band; downtime happens below this */
+	private workBottom = 0
 
 	constructor(private rng: () => number = Math.random) {}
 
@@ -316,7 +318,8 @@ export class Office {
 		// The talk area must be BELOW every desk band. Anything inside the work zone
 		// puts idle people on top of a workstation, which destroys the one signal
 		// that matters: whoever is at a desk is working.
-		const workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 2 : 2
+		this.workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 1 : 1
+		const workBottom = this.workBottom + 1
 		let talkRow = -1
 		for (let r = Math.max(workBottom, corridor); r < rows - 1 && talkRow < 0; r++)
 			if ([2, 3].every((c) => this.grid[r][c] === 'floor' && !this.seatTiles.has(`${c},${r}`))) talkRow = r
@@ -883,10 +886,13 @@ export class Office {
 
 	/** Free floor that nobody else is heading to or standing on. */
 	private freeTiles() {
-		return this.walkable.filter((t) => {
+		const open = this.walkable.filter((t) => {
 			const k = `${t.col},${t.row}`
 			return !this.dest.get(k) && !this.seatTiles.has(k)
 		})
+		// keep downtime out of the work zone; walking THROUGH it is still fine
+		const social = open.filter((t) => t.row > this.workBottom)
+		return social.length ? social : open
 	}
 
 	private walkTo(ch: Character, col: number, row: number, own?: string) {

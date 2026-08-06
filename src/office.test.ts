@@ -303,3 +303,21 @@ test('every rendered row is exactly the canvas width', () => {
 test('the tile size stays even so image placements land on cell boundaries', () => {
 	assert.equal(TILE % 2, 0)
 })
+
+test('an idle character never comes to rest inside the work zone', () => {
+	const list = Array.from({ length: 8 }, (_, i) => session(`s${i}`, i < 4 ? 'alpha' : 'beta', 'parked'))
+	const { office } = room(list)
+	const deskRows = new Set<number>()
+	for (const p of office.pods) for (const r of [p.monitorRow, p.deskRow, p.seatRow, p.seatRow + 1]) deskRows.add(r)
+	let bad = 0
+	for (let i = 0; i < 4000; i++) {
+		office.update(0.1, list)
+		for (const ch of office.chars.values()) {
+			if (ch.state === 'walk' || ch.state === 'type') continue
+			// standing under a pod hides its nameplate and muddies who is working
+			if (deskRows.has(ch.row) && !office.spots.get(ch.seatId ?? '')) bad++
+			if (deskRows.has(ch.row) && ch.row !== office.spots.get(ch.seatId!)?.row) bad++
+		}
+	}
+	assert.equal(bad, 0, `${bad} character-frames idling inside the work zone`)
+})

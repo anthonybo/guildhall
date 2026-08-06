@@ -232,7 +232,7 @@ function drawMonitors() {
 	let out = ''
 	let pid = 500
 	for (const m of office.monitors) {
-		const key = `mon:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}`
+		const key = `mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}`
 		let id = imageIds.get(key)
 		if (!id) {
 			id = nextId++
