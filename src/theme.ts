@@ -27,7 +27,20 @@ export const C = {
 	fillWarn: [215, 175, 95] as RGB, // 8.02:1
 	fillHot: [255, 95, 95] as RGB, // 5.55:1
 
-	// town
+	// office interior
+	floor: [72, 68, 88] as RGB,
+	floorAlt: [66, 62, 82] as RGB,
+	floorDark: [40, 38, 52] as RGB,
+	wallStone: [96, 92, 118] as RGB,
+	wallLip: [128, 122, 152] as RGB,
+	deskTop: [138, 96, 62] as RGB,
+	deskEdge: [104, 70, 44] as RGB,
+	deskPaper: [232, 228, 214] as RGB,
+	monitorCase: [40, 42, 54] as RGB,
+	screenOn: [120, 226, 200] as RGB,
+	screenOff: [58, 62, 78] as RGB,
+
+	// town (kept for the older renderer)
 	grass: [104, 176, 96] as RGB,
 	grassDk: [80, 152, 80] as RGB,
 	grassLt: [128, 196, 112] as RGB,
