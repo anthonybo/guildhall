@@ -165,6 +165,8 @@ export class Office {
 	pods: Pod[] = []
 	hiddenCount = 0
 	dropped: string[] = []
+	/** where to place a monitor image this frame, and whether it is lit */
+	monitors: { x: number; y: number; lit: boolean; seed: number }[] = []
 	private grid: Kind[][] = []
 	private zoneOf: (string | null)[][] = []
 	private walkable: { col: number; row: number }[] = []
@@ -893,10 +895,15 @@ export class Office {
 			const s = byId.get(sp.taken)
 			if (s && this.atDesk(s)) lit.add(`${sp.col},${sp.row + 1}`)
 		}
+		this.monitors = []
 		for (let r = 0; r < this.rows; r++)
 			for (let c = 0; c < this.cols; c++) {
 				const k = this.grid[r][c]
-				if (k === 'desk') drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r}`))
+				if (k === 'desk') {
+					drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r}`))
+					// the monitor is an image so it has real pixels to show code on
+					this.monitors.push({ x: c * TILE, y: r * TILE - TILE, lit: lit.has(`${c},${r}`), seed: c + r })
+				}
 				else if (k === 'counter') drawSlab(cv, c * TILE, r * TILE, C.counter, C.counterEdge)
 				else if (k === 'table') drawSlab(cv, c * TILE, r * TILE, C.tableTop, C.tableEdge)
 				else if (k === 'couch') drawSlab(cv, c * TILE, r * TILE, C.couch, C.couchEdge)
@@ -979,8 +986,9 @@ const hash = (s: string) => {
 function drawDesk(cv: Canvas, x: number, y: number, lit: boolean) {
 	cv.rect(x, y, TILE, TILE, C.deskTop)
 	cv.rect(x, y, TILE, 1, C.deskEdge)
-	cv.rect(x + 1, y + 1, TILE - 2, TILE - 2, C.monitorCase)
-	cv.rect(x + 1, y + 1, TILE - 2, TILE - 3, lit ? C.screenOn : C.screenOff)
+	cv.rect(x, y + TILE - 1, TILE, 1, C.deskEdge)
+	// a warm pool of light on the worktop when the machine is in use
+	if (lit) cv.tint(x, y, TILE, TILE, C.screenOn, 0.28)
 }
 
 function drawSlab(cv: Canvas, x: number, y: number, top: RGB, edge: RGB) {

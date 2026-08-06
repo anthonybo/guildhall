@@ -26,6 +26,7 @@ import { collect, needsAttention, order, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, Office, type Placed } from './office.ts'
 import { frameOf, loadSheets, shrink } from './characters.ts'
+import { monitor } from './screens.ts'
 import * as T from './table.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -94,6 +95,8 @@ const office = new Office()
 let cv = new Canvas(80, 40)
 let geom = { cols: 0, rows: 0, townRows: 0, tableRows: 0 }
 let lastTick = 0
+let screenFrame = 0
+let screenClock = 0
 /** A stalled event loop must not teleport anyone across the room. */
 const MAX_DT = 0.25
 
@@ -145,7 +148,10 @@ function draw() {
 			}
 		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
-		if (IMAGES) images = drawImages(placed)
+		if (IMAGES) images = drawMonitors() + drawImages(placed)
+		else
+			for (const m of office.monitors)
+				cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed), CHAR_W, CHAR_W))
 	}
 
 	const body: string[] = [...townLines]
@@ -168,6 +174,11 @@ function animate() {
 	const dt = lastTick ? Math.min((now - lastTick) / 1000, MAX_DT) : 0
 	lastTick = now
 	office.update(dt, visible())
+	screenClock += dt
+	if (screenClock > 0.45) {
+		screenClock = 0
+		screenFrame++
+	}
 	draw()
 }
 
@@ -185,6 +196,25 @@ function drawImages(placements: Placed[]) {
 	for (const p of placements) {
 		const id = ensureTransmitted(p, pre)
 		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, cols, rows, pid++)
+	}
+	return pre.join('') + out
+}
+
+/** Monitors sit on the desk row, which no character overlaps, so no z conflict. */
+function drawMonitors() {
+	const pre: string[] = []
+	let out = ''
+	let pid = 500
+	for (const m of office.monitors) {
+		const key = `mon:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}`
+		let id = imageIds.get(key)
+		if (!id) {
+			id = nextId++
+			imageIds.set(key, id)
+			const up = upscale(monitor(m.lit, screenFrame, m.seed).grid, 3)
+			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
+		}
+		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, CHAR_W, CHAR_W / 2 + 1, pid++)
 	}
 	return pre.join('') + out
 }

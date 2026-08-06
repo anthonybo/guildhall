@@ -14,8 +14,14 @@ const SESS_DIR = path.join(HOME, '.claude', 'sessions')
 const PROJ_DIR = path.join(HOME, '.claude', 'projects')
 const CMUX_STATE = path.join(HOME, 'Library/Application Support/cmux/session-com.cmuxterm.app.json')
 
-/** How long a session can sit unchanged before it stops counting as live work. */
-const PARK_WINDOW = 10 * 60_000
+/**
+ * A session in a long turn — subagents, a slow build — legitimately shows a
+ * `busy` stamp that is many minutes old, because the registry only writes on a
+ * state CHANGE, never as a heartbeat. So `busy` is trusted unless the status
+ * stamp AND the transcript have both gone quiet, which is what a session killed
+ * mid-turn looks like.
+ */
+const ZOMBIE_WINDOW = 45 * 60_000
 /** Finished inside this window means the next move is still yours. */
 const DONE_WINDOW = 30 * 60_000
 
@@ -166,6 +172,12 @@ function digest(file: string) {
 		} catch {
 			continue
 		}
+		// records carry real timestamps; file mtime does not (sidecar records bump it
+		// without any conversation activity, and subagent writes never touch it)
+		if (typeof e.timestamp === 'string') {
+			const t = Date.parse(e.timestamp)
+			if (!Number.isNaN(t) && (!d.lastTs || t > d.lastTs)) d.lastTs = t
+		}
 		if (e.type === 'ai-title' && e.aiTitle) d.title = e.aiTitle
 		else if (e.type === 'assistant') {
 			const m = e.message ?? {}
@@ -182,7 +194,7 @@ function digest(file: string) {
 	return d
 }
 
-type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string }
+type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
@@ -285,12 +297,14 @@ export function collect(): Session[] {
 		// status is written on change, never as a heartbeat, so a session that
 		// died mid-turn stays "busy" forever. Recency has to gate it.
 		const raw = s.status ?? 'idle'
+		// quiet = neither the registry nor the transcript has moved in a long time
+		const quiet = Math.min(stale, d.lastTs ? now - d.lastTs : Infinity) > ZOMBIE_WINDOW
 		const state: State =
 			raw === 'waiting'
 				? 'needs'
-				: raw === 'busy' && stale < PARK_WINDOW
+				: raw === 'busy' && !quiet
 					? 'working'
-					: raw === 'shell' && stale < PARK_WINDOW
+					: raw === 'shell' && !quiet
 						? 'shell'
 						: stale < DONE_WINDOW
 							? 'done'
