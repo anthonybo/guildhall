@@ -7,6 +7,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
+import { assignLooks } from './characters.ts'
 
 const HOME = os.homedir()
 const SESS_DIR = path.join(HOME, '.claude', 'sessions')
@@ -38,7 +39,9 @@ export type Session = {
 	ctxLimit: number
 	tab?: number
 	unread: boolean
-	creature: string
+	/** which character sheet, and how far its hue is rotated, for identity */
+	palette: number
+	hueShift: number
 }
 
 const isAlive = (pid: number) => {
@@ -267,11 +270,15 @@ const hash = (s: string) => {
 	return Math.abs(h)
 }
 
-export function collect(creatures: string[]): Session[] {
+export function collect(): Session[] {
 	const idx = transcriptIndex()
 	const cm = cmuxMap()
 	const now = Date.now()
-	return liveSessions().map((s) => {
+	const registry = liveSessions()
+	// Looks are handed out by index over a stable ordering, so a session keeps the
+	// same character for its whole life and no two collide until the sheets run out.
+	const looks = assignLooks([...registry].sort((a, b) => a.sessionId.localeCompare(b.sessionId)).map((s) => s.sessionId))
+	return registry.map((s) => {
 		const file = idx.get(s.sessionId)
 		const d = file ? digest(file) : ({} as Digest)
 		const stale = now - (s.statusUpdatedAt || s.updatedAt || 0)
@@ -310,7 +317,8 @@ export function collect(creatures: string[]): Session[] {
 			ctxLimit: used > 190_000 ? 1_000_000 : 200_000,
 			tab: tab?.tab,
 			unread: !!tab?.unread,
-			creature: creatures.length ? creatures[hash(s.sessionId) % creatures.length] : '',
+			palette: looks.get(s.sessionId)?.palette ?? 0,
+			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
 	})
 }
