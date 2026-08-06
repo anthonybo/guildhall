@@ -170,7 +170,7 @@ export class Office {
 	hiddenCount = 0
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
-	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind']; level: number }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
@@ -1029,9 +1029,11 @@ export class Office {
 		}
 		this.monitors = []
 		const lit = new Map<string, Session['toolKind']>()
+		const levels = new Map<string, number>()
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
 			const s = byId.get(sp.taken)
+			if (s) levels.set(`${sp.col},${sp.row}`, s.level)
 			if (s && this.atDesk(s)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
@@ -1044,6 +1046,7 @@ export class Office {
 					lit: lit.has(`${c},${pod.seatRow}`),
 					seed: c + pod.monitorRow,
 					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
+					level: levels.get(`${c},${pod.seatRow}`) ?? 0,
 				})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 			}
@@ -1130,28 +1133,6 @@ export class Office {
 			}
 		}
 		const taken = new Map<number, [number, number][]>()
-		// Level on the workstation. The worktop is canvas rather than an image, so a
-		// whole cell fits here — which is the only place in the room a digit is
-		// legible. Reads like a tag on the machine, and it is unambiguously that
-		// desk's occupant.
-		for (const sp of this.spots.values()) {
-			if (sp.kind !== 'desk' || !sp.taken) continue
-			const s = byId.get(sp.taken)
-			if (!s) continue
-			// the desk's own columns are taken by its monitor and its occupant, so the
-			// tag goes in the gap column beside it — desks sit on alternate columns
-			const row = (((sp.row - 1) * TILE) >> 1) + 1
-			const col = sp.col * TILE + TILE
-			// a bare digit beside a desk reads as a desk number, so the tier initial
-			// goes with it: v8 is a rank, 8 is furniture
-			const tier = tierOf(s.level)
-			const chip = `L${levelGlyph(s.level)}`
-			if (row < 0 || row >= cv.rows || this.blocked(row, col, chip.length, taken)) continue
-			cv.text(col, row, chip, C.night, tier.color)
-			const arr = taken.get(row) ?? []
-			arr.push([col, col + chip.length])
-			taken.set(row, arr)
-		}
 
 		const claim = (want: number, col: number, len: number) => {
 			// search outward from the wanted row so a label stays beside its owner;

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE } from './office.ts'
+import { monitor } from './screens.ts'
 import type { Session, State } from './data.ts'
 
 /** Seeded LCG so every behavioural test is reproducible. */
@@ -421,17 +422,23 @@ test('no two projects share a workstation colour', () => {
 	assert.equal(new Set(colours).size, new Set(office.pods.map((p) => p.proj)).size, 'two projects share a colour')
 })
 
-test('every occupied desk shows its occupant level', () => {
-	const list = Array.from({ length: 6 }, (_, i) => session(`s${i}`, `p${i}`, 'parked'))
+test('every occupied desk carries its occupant level on its badge', () => {
+	const list = Array.from({ length: 6 }, (_, i) => session('s' + i, 'p' + i, 'parked'))
 	const { cv, office } = room(list)
-	office.overlay(cv, office.draw(cv, list), undefined, true, list)
-	const rows = cv.render().map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
-	const desks = [...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken)
-	let shown = 0
-	for (const sp of desks) {
-		const r = (((sp.row - 1) * TILE) >> 1) + 1
-		const c = sp.col * TILE + TILE
-		if (/L[1-9★]/.test((rows[r] ?? '').slice(c, c + 2))) shown++
-	}
-	assert.equal(shown, desks.length, `${desks.length - shown} desks missing their level tag`)
+	office.draw(cv, list)
+	const occupied = office.monitors.filter((m) => m.level > 0)
+	assert.equal(occupied.length, list.length, 'a desk lost its occupant level')
+})
+
+test('the badge is drawn into the workstation art, not written beside it', () => {
+	const bare = monitor(false, 0, 0, 'think', 0)
+	const badged = monitor(false, 0, 0, 'think', 9, [255, 200, 90])
+	let diff = 0
+	for (let y = 0; y < bare.h; y++)
+		for (let x = 0; x < bare.w; x++)
+			if (JSON.stringify(bare.grid[y][x]) !== JSON.stringify(badged.grid[y][x])) diff++
+	assert.ok(diff > 20, 'the badge only changed ' + diff + ' pixels')
+	// and two levels must not render identically
+	const other = monitor(false, 0, 0, 'think', 3, [120, 200, 130])
+	assert.notEqual(JSON.stringify(badged.grid), JSON.stringify(other.grid))
 })
