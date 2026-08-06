@@ -25,8 +25,8 @@ const ZOMBIE_WINDOW = 45 * 60_000
 /** Finished inside this window means the next move is still yours. */
 const DONE_WINDOW = 30 * 60_000
 
-export type State = 'needs' | 'working' | 'shell' | 'done' | 'parked'
-export const RANK: Record<State, number> = { needs: 0, working: 1, shell: 2, done: 3, parked: 4 }
+export type State = 'error' | 'needs' | 'working' | 'shell' | 'review' | 'done' | 'parked'
+export const RANK: Record<State, number> = { error: 0, needs: 1, working: 2, shell: 3, review: 4, done: 5, parked: 6 }
 
 export type Session = {
 	id: string
@@ -52,6 +52,10 @@ export type Session = {
 	hueShift: number
 	/** broad class of the current tool, for tinting the screen */
 	toolKind: 'edit' | 'read' | 'run' | 'search' | 'agent' | 'think'
+	/** turns this session has completed — the work it has actually done */
+	turns: number
+	/** derived rank, 1..99, from turns completed */
+	level: number
 }
 
 const isAlive = (pid: number) => {
@@ -193,6 +197,11 @@ function digest(file: string) {
 			if (!Number.isNaN(t) && (!d.lastTs || t > d.lastTs)) d.lastTs = t
 		}
 		note(e.cwd)
+		// turn_duration carries the running message count; an API error or a failed
+		// stop is the only failure signal the transcript exposes
+		if (e.type === 'system' && e.subtype === 'turn_duration' && typeof e.messageCount === 'number') d.turns = e.messageCount
+		if (e.isApiErrorMessage === true || (e.type === 'system' && /fail|error/i.test(String(e.subtype ?? '')))) d.failed = true
+		else if (e.type === 'assistant' || e.type === 'user') d.failed = false
 		if (e.type === 'ai-title' && e.aiTitle) d.title = e.aiTitle
 		else if (e.type === 'assistant') {
 			const m = e.message ?? {}
@@ -212,7 +221,7 @@ function digest(file: string) {
 	return d
 }
 
-type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string }
+type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
@@ -370,22 +379,29 @@ export function collect(): Session[] {
 	return registry.map((s) => {
 		const file = idx.get(s.sessionId)
 		const d = file ? digest(file) : ({} as Digest)
+		const tabInfo = cm.get(s.sessionId)
 		const stale = now - (s.statusUpdatedAt || s.updatedAt || 0)
 		// status is written on change, never as a heartbeat, so a session that
 		// died mid-turn stays "busy" forever. Recency has to gate it.
 		const raw = s.status ?? 'idle'
 		// quiet = neither the registry nor the transcript has moved in a long time
 		const quiet = Math.min(stale, d.lastTs ? now - d.lastTs : Infinity) > ZOMBIE_WINDOW
-		const state: State =
-			raw === 'waiting'
+		const unread = !!tabInfo?.unread
+		const state: State = d.failed
+			? 'error'
+			: raw === 'waiting'
 				? 'needs'
 				: raw === 'busy' && !quiet
 					? 'working'
 					: raw === 'shell' && !quiet
 						? 'shell'
-						: stale < DONE_WINDOW
-							? 'done'
-							: 'parked'
+						: // cmux knows whether you have looked at the tab, which beats guessing
+							// "finished recently" from a clock
+							unread && stale < DONE_WINDOW * 4
+							? 'review'
+							: stale < DONE_WINDOW
+								? 'done'
+								: 'parked'
 		const u = d.usage
 		const used = u ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) : 0
 		// A session started from a container like ~/projects reports "projects" as
@@ -394,7 +410,7 @@ export function collect(): Session[] {
 		const base = path.basename(s.cwd)
 		const container = /^(projects|repos|src|code|dev|work|git)$/.test(base)
 		const proj = container && d.subProj ? d.subProj : base
-		const tab = cm.get(s.sessionId)
+		const tab = tabInfo
 		return {
 			id: s.sessionId,
 			pid: s.pid,
@@ -415,6 +431,11 @@ export function collect(): Session[] {
 			tab: tab?.tab,
 			unread: !!tab?.unread,
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
+			turns: d.turns ?? 0,
+			// Doubling curve: every level costs twice the turns of the last, so a
+			// week-old session with 3000 turns sits a couple of ranks above a fresh one
+			// rather than a hundred. Keeps the whole scale inside a single digit.
+			level: Math.max(1, Math.min(9, Math.floor(Math.log2((d.turns ?? 0) / 8 + 1)) + 1)),
 			palette: looks.get(s.sessionId)?.palette ?? 0,
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}

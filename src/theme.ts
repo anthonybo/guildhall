@@ -80,7 +80,23 @@ export const C = {
  * Glyphs are all East-Asian-Neutral or geometric; nothing here has an emoji
  * presentation or a variation selector, both of which shift column widths.
  */
+/** Level tiers, coloured like ranks. The chip on a character is one cell, so the
+ *  colour does the work and the digit only refines it. */
+export const TIERS: { min: number; color: RGB; name: string }[] = [
+	{ min: 1, color: [150, 158, 185], name: 'new' },
+	{ min: 3, color: [120, 200, 130], name: 'steady' },
+	{ min: 5, color: [110, 180, 250], name: 'seasoned' },
+	{ min: 7, color: [190, 150, 250], name: 'veteran' },
+	{ min: 9, color: [255, 200, 90], name: 'elder' },
+]
+export const tierOf = (level: number) => TIERS.filter((t) => level >= t.min).pop() ?? TIERS[0]
+/** 1-9 show the digit; beyond that the colour carries it and the glyph caps out. */
+export const levelGlyph = (level: number) => (level < 10 ? String(level) : '★')
+export const tierName = (level: number) => tierOf(level).name
+
 export const LOOK: Record<State, { glyph: string; label: string; color: RGB }> = {
+	error: { glyph: '✗', label: 'error', color: [255, 95, 95] },
+	review: { glyph: '◆', label: 'unread', color: [140, 210, 255] },
 	needs: { glyph: '▲', label: 'needs you', color: [255, 176, 60] },
 	// amber is reserved for "your turn" everywhere else in the Claude tooling, so
 	// working takes the cool colour its own lit screen already uses

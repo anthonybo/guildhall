@@ -15,7 +15,7 @@
  *    table or a conversation. The reference has no such system; its idle agents
  *    just wander to random floor tiles and come back.
  */
-import { C, LOOK, ROOFS, type RGB } from './theme.ts'
+import { C, LOOK, levelGlyph, ROOFS, tierOf, type RGB } from './theme.ts'
 import { cut, RANK, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
 import type { Facing, Pose } from './characters.ts'
@@ -1154,11 +1154,23 @@ export class Office {
 		// Words are detail-on-demand: the selection, and anything blocked on you.
 		// They extend from the badge along the same row and are never rehomed. If the
 		// words will not fit, the words go — the badge stays.
+		// Level chip: one cell under the feet, colour by tier. Persistent because it
+		// is identity rather than status — it says who this worker is, not what it
+		// is doing this second, so it never competes with the actionable marks.
+		for (const p of placed) {
+			const row = (p.y >> 1) + CHAR_H / 2
+			const col = p.x + CHAR_W / 2 - 1
+			if (row >= cv.rows || this.blocked(row, col, 1, taken)) continue
+			cv.text(col, row, levelGlyph(p.s.level), C.night, tierOf(p.s.level).color)
+			const arr = taken.get(row) ?? []
+			arr.push([col, col + 1])
+			taken.set(row, arr)
+		}
 		for (const p of [...placed].sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.x - b.x)) {
 			const s = p.s
 			const look = LOOK[s.state]
 			const sel = s.id === selected
-			const urgent = s.state === 'needs'
+			const urgent = s.state === 'needs' || s.state === 'error'
 			// Only draw a mark when it is ACTIONABLE. RimWorld shows a colonist's mood
 			// solely when a breakdown is imminent; Stardew never puts a persistent
 			// marker over a villager at all. A session that is merely working already
