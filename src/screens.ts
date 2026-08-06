@@ -60,8 +60,8 @@ const TINT: Record<Kind, RGB> = {
 	think: [150, 160, 190],
 }
 
-export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', level = 0, tier?: RGB): Grid {
-	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${level}:${tier?.join('') ?? ''}`
+export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think'): Grid {
+	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}`
 	const hit = cache.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: H }, () => new Array<RGB | null>(W).fill(null))
@@ -87,17 +87,8 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	// mug
 	box(13, 18, 3, 3, [226, 118, 96])
 	put(12, 19, [226, 118, 96])
-	// ID badge propped on the desk: a tier-coloured header over a card with the
-	// level punched out in a 3x5 face. Pixel art, like everything else here.
-	if (level && tier) {
-		const CARD: RGB = [238, 236, 228]
-		const EDGE: RGB = [120, 118, 110]
-		box(0, 16, 8, 8, EDGE)
-		box(0, 16, 8, 2, tier)
-		box(1, 18, 6, 5, CARD)
-		const face = DIGITS[level < 10 ? String(level) : '★'] ?? DIGITS['0']
-		face.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(2 + x, 18 + y, [40, 42, 54])))
-	}
+	// a small stack of paper where the badge used to sit
+	box(0, 19, 3, 2, [236, 234, 226])
 	// bezel
 	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
 	box(2, 2, 12, 9, DARK)
@@ -120,5 +111,37 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	}
 	const g: Grid = { w: W, h: H, grid }
 	cache.set(key, g)
+	return g
+}
+
+const STAR = '\u2605'
+const badges = new Map<string, Grid>()
+
+/**
+ * The level badge, as its own one-tile image. It lives beside the desk rather
+ * than on it: a seated occupant covers the desk surface, and a badge you cannot
+ * see while someone is working is the wrong way round.
+ */
+export function badge(level: number, tier: RGB): Grid {
+	const key = level + ':' + tier.join('')
+	const hit = badges.get(key)
+	if (hit) return hit
+	const grid: (RGB | null)[][] = Array.from({ length: 16 }, () => new Array<RGB | null>(16).fill(null))
+	const put = (x: number, y: number, c: RGB) => {
+		if (x >= 0 && y >= 0 && x < 16 && y < 16) grid[y][x] = c
+	}
+	const box = (x: number, y: number, w: number, h: number, c: RGB) => {
+		for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c)
+	}
+	const CARD: RGB = [238, 236, 228]
+	const EDGE: RGB = [90, 92, 102]
+	box(7, 0, 2, 2, EDGE)
+	box(2, 2, 12, 13, EDGE)
+	box(3, 3, 10, 3, tier)
+	box(3, 6, 10, 8, CARD)
+	const face = DIGITS[level < 10 ? String(level) : STAR] ?? DIGITS['0']
+	face.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(6 + x, 8 + y, [40, 42, 54])))
+	const g: Grid = { w: 16, h: 16, grid }
+	badges.set(key, g)
 	return g
 }
