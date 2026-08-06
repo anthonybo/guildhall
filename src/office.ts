@@ -671,6 +671,16 @@ export class Office {
 				}
 				case 'idle': {
 					ch.frame = 0
+					// Two people standing shoulder to shoulder both facing the camera
+					// reads as nobody doing anything. If somebody idle is directly
+					// beside you, turn and face them — it costs no state and it is
+					// what the room is telling you anyway.
+					// check right then left, so a pair always resolves to facing each
+					// other rather than whichever neighbour happened to come first
+					const beside = (dc: number) =>
+						[...this.chars.values()].some((o) => o !== ch && o.state !== 'walk' && o.row === ch.row && o.col === ch.col + dc)
+					if (beside(1)) ch.dir = 'right'
+					else if (beside(-1)) ch.dir = 'left'
 					if (ch.seatTimer < 0) ch.seatTimer = 0
 					if (working) {
 						this.release(ch)
@@ -1143,11 +1153,13 @@ export class Office {
 			const look = LOOK[s.state]
 			const sel = s.id === selected
 			const urgent = s.state === 'needs'
-			// A badge on every character means nine identical dots when everything is
-			// parked, which is no information at all. Absence carries the common case:
-			// a badge appears only when a session is NOT idle, so seeing one means
-			// something. Same reasoning as the table's gutter column.
-			if (s.state === 'parked' && !sel) continue
+			// Only draw a mark when it is ACTIONABLE. RimWorld shows a colonist's mood
+			// solely when a breakdown is imminent; Stardew never puts a persistent
+			// marker over a villager at all. A session that is merely working already
+			// says so through position and a lit monitor — colour and shape carry
+			// status, and text carries identity, which is the one rule every
+			// precedent surveyed agrees on.
+			if (!urgent && !sel) continue
 			const row = p.y >> 1
 			// nearest free cell to the head: right, left, then a row up or down. An
 			// image would hide it, so a blocked cell is no use even though it is close.
