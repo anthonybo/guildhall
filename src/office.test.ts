@@ -57,11 +57,14 @@ test('a session starts seated at its desk, not at a doorway', () => {
 	assert.equal(ch.dir, seat.facing)
 })
 
-test('the desk is below its seat so the occupant cannot hide it', () => {
+test('the occupant faces up into its desk, with the screen above its head', () => {
 	const { office } = room([session('a', 'alpha', 'working')])
 	const seat = seatOf(office, 'a')
-	assert.equal(seat.facing, 'down', 'a seat facing up would put the desk behind the character')
-	assert.ok(seat.row >= 2, 'row 1 is the head/label gutter and must stay clear')
+	assert.equal(seat.facing, 'up', 'facing away from the desk would show their back to the screen')
+	const pod = office.pods.find((p) => p.seatRow === seat.row && seat.col >= p.c0 && seat.col <= p.c1)!
+	assert.ok(pod, 'the seat belongs to no pod')
+	assert.equal(pod.deskRow, seat.row - 1, 'the worktop must be directly above the seat')
+	assert.equal(pod.monitorRow, seat.row - 2, 'the monitor must clear the occupant head')
 })
 
 test('everybody gets their own desk and no two share one', () => {

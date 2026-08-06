@@ -84,7 +84,7 @@ export type Character = {
 
 export type Placed = { s: Session; ch: Character; facing: Dir; pose: Pose; step: number; x: number; y: number }
 
-type Pod = { proj: string; c0: number; c1: number; seatRow: number; deskRow: number }
+type Pod = { proj: string; c0: number; c1: number; seatRow: number; deskRow: number; monitorRow: number }
 
 const DWELL: Record<SpotKind, [number, number]> = {
 	desk: [0, 0],
@@ -168,6 +168,9 @@ export class Office {
 	monitors: { x: number; y: number; lit: boolean; seed: number }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
+	/** cell rows covered by an image; kitty draws images over text, so labels
+	 *  must not be placed on these or they end up hidden behind furniture */
+	private imageRows = new Set<number>()
 	private grid: Kind[][] = []
 	private zoneOf: (string | null)[][] = []
 	private walkable: { col: number; row: number }[] = []
@@ -213,8 +216,12 @@ export class Office {
 
 		// Row 1 is a gutter: it carries each front-row occupant's head and status
 		// label, so nothing may ever be placed there.
+		// A band is [monitor, worktop, seat, aisle]. The occupant faces UP into the
+		// desk: a character is two tiles tall, so it covers the worktop and its own
+		// seat, leaving the monitor row clear above its head — which is the only
+		// arrangement where you see both the worker's back and their screen.
 		const bandRows: number[] = []
-		for (let r = 2; r + 1 < rows - 1; r += 3) bandRows.push(r)
+		for (let r = 1; r + 3 < rows - 1; r += 4) bandRows.push(r)
 
 		// desk pods, at most two per band (left-anchored then right-anchored)
 		const wishlist: { proj: string; seats: number }[] = []
@@ -230,8 +237,9 @@ export class Office {
 		let n = 0
 		for (let i = 0; i < wishlist.length; ) {
 			if (band >= bandRows.length) break
-			const seatRow = bandRows[band]
-			const deskRow = seatRow + 1
+			const monitorRow = bandRows[band]
+			const deskRow = monitorRow + 1
+			const seatRow = monitorRow + 2
 			let lo = 2
 			let hi = cols - 3
 			for (let side = 0; side < 2 && i < wishlist.length; side++) {
@@ -248,15 +256,15 @@ export class Office {
 						group: want.proj,
 						col: c,
 						row: seatRow,
-						facing: 'down',
+						facing: 'up',
 						posture: 'sit',
 						zone: want.proj,
 						taken: null,
 					})
 					this.seatTiles.add(`${c},${seatRow}`)
-					for (const r of [seatRow, deskRow]) this.zoneOf[r][c] ??= want.proj
+					for (const r of [monitorRow, deskRow, seatRow]) this.zoneOf[r][c] ??= want.proj
 				}
-				this.pods.push({ proj: want.proj, c0, c1, seatRow, deskRow })
+				this.pods.push({ proj: want.proj, c0, c1, seatRow, deskRow, monitorRow })
 				if (side === 0) lo = c1 + 3
 				else hi = c0 - 1
 				i++
@@ -273,8 +281,8 @@ export class Office {
 		this.dropped = []
 
 		// social bands, anchored to the bottom so the gap becomes a corridor
-		const socialBands = bandRows.slice(band).slice(-3)
-		let wish = ['kitchen', 'pingpong', 'couch', 'talk']
+		const socialBands = bandRows.slice(band).slice(-2)
+		let wish = ['kitchen', 'pingpong', 'couch']
 		while (socialBands.length * 2 < wish.length - 1 && DROP_ORDER.some((d) => wish.includes(d))) {
 			const drop = DROP_ORDER.find((d) => wish.includes(d))!
 			wish = wish.filter((w) => w !== drop)
@@ -301,8 +309,39 @@ export class Office {
 			}
 			sb++
 		}
-		// a window on the wall is a free loiter spot and costs no band
+		// A conversation costs no furniture, so it always gets somewhere to happen —
+		// beside the water cooler, which is what makes it read as a gathering spot
+		// rather than two people stopped in the middle of an empty floor.
 		const corridor = socialBands.length ? socialBands[0] - 2 : rows - 3
+		// The talk area must be BELOW every desk band. Anything inside the work zone
+		// puts idle people on top of a workstation, which destroys the one signal
+		// that matters: whoever is at a desk is working.
+		const workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 2 : 2
+		let talkRow = -1
+		for (let r = Math.max(workBottom, corridor); r < rows - 1 && talkRow < 0; r++)
+			if ([2, 3].every((c) => this.grid[r][c] === 'floor' && !this.seatTiles.has(`${c},${r}`))) talkRow = r
+
+		if (talkRow >= 0 && cols > 8) {
+			;[
+				[2, 'right'],
+				[3, 'left'],
+			].forEach(([c, facing], k) => {
+				const id = `talk@${talkRow}:${k}`
+				this.spots.set(id, {
+					id,
+					kind: 'talk',
+					group: `talk@${talkRow}`,
+					col: c as number,
+					row: talkRow,
+					facing: facing as Dir,
+					posture: 'stand',
+					zone: null,
+					taken: null,
+				})
+				this.seatTiles.add(`${c},${talkRow}`)
+			})
+		}
+		// a window on the wall is a free loiter spot and costs no band
 		if (corridor > 1 && corridor < rows - 1) {
 			const id = `w0`
 			this.spots.set(id, {
@@ -768,9 +807,22 @@ export class Office {
 				const b = waiting[j]
 				if (b.activity) continue
 				if (Math.abs(a.col - b.col) + Math.abs(a.row - b.row) > CHAT_RADIUS) continue
+				const dur = this.rand(...DWELL.talk)
+				// prefer the room's talk area so a conversation happens somewhere,
+				// rather than two people standing in the middle of an empty floor
+				const area = [...this.spots.values()].filter((s) => s.kind === 'talk' && !s.taken)
+				if (area.length >= 2) {
+					const [s0, s1] = area
+					s0.taken = a.id
+					s1.taken = b.id
+					a.activity = { kind: 'talk', spotId: s0.id, partner: b.id, timer: dur }
+					b.activity = { kind: 'talk', spotId: s1.id, partner: a.id, timer: dur }
+					if (this.walkTo(a, s0.col, s0.row, `${s0.col},${s0.row}`) && this.walkTo(b, s1.col, s1.row, `${s1.col},${s1.row}`)) break
+					this.release(a)
+					this.release(b)
+				}
 				const pair = this.findTalkPair(a, b)
 				if (!pair) continue
-				const dur = this.rand(...DWELL.talk)
 				a.activity = { kind: 'talk', spotId: null, partner: b.id, timer: dur }
 				b.activity = { kind: 'talk', spotId: null, partner: a.id, timer: dur }
 				this.walkTo(a, pair[0].col, pair[0].row)
@@ -832,8 +884,8 @@ export class Office {
 	/** Free floor that nobody else is heading to or standing on. */
 	private freeTiles() {
 		return this.walkable.filter((t) => {
-			const holder = this.dest.get(`${t.col},${t.row}`)
-			return !holder
+			const k = `${t.col},${t.row}`
+			return !this.dest.get(k) && !this.seatTiles.has(k)
 		})
 	}
 
@@ -913,9 +965,20 @@ export class Office {
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
 			const s = byId.get(sp.taken)
-			if (s && this.atDesk(s)) lit.add(`${sp.col},${sp.row + 1}`)
+			if (s && this.atDesk(s)) lit.add(`${sp.col},${sp.row}`)
 		}
+		// a monitor stands on the row above its worktop, clear of its occupant
+		for (const pod of this.pods)
+			for (let c = pod.c0; c <= pod.c1; c++) {
+				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
+				for (let i = 0; i < TILE / 2; i++) this.imageRows.add(((pod.monitorRow * TILE) >> 1) + i)
+			}
 		this.monitors = []
+		this.imageRows.clear()
+		for (const pr of this.props) {
+			const size = PROP_SIZE[pr.kind]
+			for (let i = 0; i < (size.h * TILE) / 2; i++) this.imageRows.add((pr.y >> 1) + i)
+		}
 		for (let r = 0; r < this.rows; r++)
 			for (let c = 0; c < this.cols; c++) {
 				const k = this.grid[r][c]
@@ -925,6 +988,7 @@ export class Office {
 					// on the desk row, NOT the row above — that is the seat, and the
 					// occupant would be drawn sitting on their own monitor
 					this.monitors.push({ x: c * TILE, y: r * TILE, lit: lit.has(`${c},${r}`), seed: c + r })
+					for (let i = 0; i < TILE / 2; i++) this.imageRows.add(((r * TILE) >> 1) + i)
 				}
 				else if (k === 'solid') cv.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark)
 			}
@@ -961,21 +1025,34 @@ export class Office {
 			const limit = sameBand.length ? sameBand[0].c0 : this.cols - 1
 			const span = (limit - pod.c0) * TILE - 1
 			const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `
-			cv.text(pod.c0 * TILE, Math.floor((pod.deskRow * TILE + 2) / 2), text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
+			// the desk row carries monitor images, which draw over text, so the plate
+			// goes on the aisle row below the pod
+			const plateRow = Math.min(cv.rows - 1, Math.floor(((pod.seatRow + 1) * TILE) / 2))
+			cv.text(pod.c0 * TILE, plateRow, text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
 		}
 		const taken = new Map<number, [number, number][]>()
-		const claim = (row: number, col: number, len: number) => {
-			const used = taken.get(row) ?? []
-			let c = Math.max(0, Math.min(cv.w - len, col))
-			for (let g = 0; g < 40; g++) {
-				const hit = used.find((r) => c < r[1] && c + len > r[0])
-				if (!hit) break
-				c = hit[1] + 1
-				if (c + len > cv.w) return null
+		const claim = (want: number, col: number, len: number) => {
+			// walk upward past any row an image covers, then find a free run on it
+			for (let row = want; row >= Math.max(0, want - 4); row--) {
+				if (this.imageRows.has(row)) continue
+				const used = taken.get(row) ?? []
+				let c = Math.max(0, Math.min(cv.w - len, col))
+				let ok = true
+				for (let g = 0; g < 40; g++) {
+					const hit = used.find((r) => c < r[1] && c + len > r[0])
+					if (!hit) break
+					c = hit[1] + 1
+					if (c + len > cv.w) {
+						ok = false
+						break
+					}
+				}
+				if (!ok) continue
+				used.push([c, c + len])
+				taken.set(row, used)
+				return { row, col: c }
 			}
-			used.push([c, c + len])
-			taken.set(row, used)
-			return c
+			return null
 		}
 		for (const p of [...placed].sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.x - b.x)) {
 			const s = p.s
@@ -984,12 +1061,11 @@ export class Office {
 			const urgent = s.state === 'needs'
 			if (!showAll && !urgent && !sel) continue
 			if (s.state === 'parked' && !sel && !urgent) continue
-			const row = Math.floor(p.y / 2) - 1
 			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.doing || s.title, sel ? 32 : 18)} `
-			const col = claim(row, p.x - 2, text.length)
-			if (col === null) continue
+			const at = claim(Math.floor(p.y / 2) - 1, p.x - 2, text.length)
+			if (!at) continue
 			const bgc = urgent ? look.color : sel ? C.gold : C.paper
-			cv.text(col, row, text, C.ink, bgc)
+			cv.text(at.col, at.row, text, C.ink, bgc)
 		}
 	}
 }
