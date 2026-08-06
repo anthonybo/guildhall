@@ -253,10 +253,11 @@ export class Office {
 			const hi = cols - 3
 			while (i < wishlist.length) {
 				const want = wishlist[i]
-				if (lo + want.seats - 1 > hi) break
+				const span = want.seats * 2 - 1 // one gap between each pair of desks
+				if (lo + span - 1 > hi) break
 				const c0 = lo
-				const c1 = c0 + want.seats - 1
-				for (let c = c0; c <= c1; c++) {
+				const c1 = c0 + span - 1
+				for (let c = c0; c <= c1; c += 2) {
 					this.grid[deskRow][c] = 'desk'
 					const id = `d${n++}`
 					this.spots.set(id, {
@@ -1015,7 +1016,8 @@ export class Office {
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
-			for (let c = pod.c0; c <= pod.c1; c++) {
+			// step 2: desks sit on alternate columns, so only those get a monitor
+			for (let c = pod.c0; c <= pod.c1; c += 2) {
 				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 			}
@@ -1141,6 +1143,11 @@ export class Office {
 			const look = LOOK[s.state]
 			const sel = s.id === selected
 			const urgent = s.state === 'needs'
+			// A badge on every character means nine identical dots when everything is
+			// parked, which is no information at all. Absence carries the common case:
+			// a badge appears only when a session is NOT idle, so seeing one means
+			// something. Same reasoning as the table's gutter column.
+			if (s.state === 'parked' && !sel) continue
 			const row = p.y >> 1
 			// nearest free cell to the head: right, left, then a row up or down. An
 			// image would hide it, so a blocked cell is no use even though it is close.
@@ -1155,7 +1162,7 @@ export class Office {
 			const at = spots.find(([r, c]) => r >= 0 && r < cv.rows && c >= 0 && c < cv.w && !this.blocked(r, c, 1, taken))
 			if (!at) continue
 			const [badgeRow, badgeCol] = at
-			cv.text(badgeCol, badgeRow, look.glyph, look.color, C.night)
+			cv.text(badgeCol, badgeRow, look.glyph, C.night, look.color)
 			const mine = taken.get(badgeRow) ?? []
 			mine.push([badgeCol, badgeCol + 1])
 			taken.set(badgeRow, mine)
