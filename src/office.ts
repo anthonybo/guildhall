@@ -389,7 +389,8 @@ export class Office {
 
 	private place(f: (typeof FACILITIES)[string], c0: number, r0: number, group: string) {
 		for (const pr of f.props) {
-			this.props.push({ kind: pr.kind, x: (c0 + pr.dc) * TILE, y: (r0 + pr.dr) * TILE })
+			const lift = pr.dr > 0 && !pr.under ? TILE / 2 : 0
+			this.props.push({ kind: pr.kind, x: (c0 + pr.dc) * TILE, y: (r0 + pr.dr) * TILE - lift })
 			if (pr.under) continue // you can stand on a couch; you cannot stand on a counter
 			const size = PROP_SIZE[pr.kind]
 			for (let dr = 0; dr < size.h; dr++)
