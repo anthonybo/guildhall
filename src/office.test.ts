@@ -411,3 +411,26 @@ test('what an image blocks matches what gets drawn', () => {
 	})
 	assert.equal(hits, 0, `${hits} text cells hidden behind a monitor`)
 })
+
+test('no two projects share a workstation colour', () => {
+	const names = ['alpha', 'beta', 'gamma', 'delta', 'epsilon', 'zeta', 'eta', 'theta', 'iota', 'kappa']
+	const list = names.map((n, i) => session(`s${i}`, n, 'parked'))
+	const { office } = room(list)
+	const colours = office.pods.map((p) => office.colourOf(p.proj).join(','))
+	assert.equal(new Set(colours).size, new Set(office.pods.map((p) => p.proj)).size, 'two projects share a colour')
+})
+
+test('every occupied desk shows its occupant level', () => {
+	const list = Array.from({ length: 6 }, (_, i) => session(`s${i}`, `p${i}`, 'parked'))
+	const { cv, office } = room(list)
+	office.overlay(cv, office.draw(cv, list), undefined, true, list)
+	const rows = cv.render().map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
+	const desks = [...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken)
+	let shown = 0
+	for (const sp of desks) {
+		const r = (((sp.row - 1) * TILE) >> 1) + 1
+		const c = sp.col * TILE + TILE
+		if (/[1-9★]/.test(rows[r]?.[c] ?? '')) shown++
+	}
+	assert.equal(shown, desks.length, `${desks.length - shown} desks missing their level tag`)
+})
