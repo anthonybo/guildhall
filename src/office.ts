@@ -180,6 +180,8 @@ export class Office {
 	private signature = ''
 	/** last row belonging to a desk band; downtime happens below this */
 	private workBottom = 0
+	/** rally phase, advanced by update() so the ball moves with real time */
+	private ballT = 0
 
 	constructor(private rng: () => number = Math.random) {}
 
@@ -589,6 +591,7 @@ export class Office {
 	private atDesk = (s: Session) => s.state === 'working' || s.state === 'shell' || s.state === 'needs'
 
 	update(dt: number, sessions: Session[]) {
+		this.ballT += dt * 1.6
 		const byId = new Map(sessions.map((s) => [s.id, s]))
 		let wantChat = 0
 		for (const ch of this.chars.values()) {
@@ -992,6 +995,18 @@ export class Office {
 				if (k === 'desk') drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r + 1}`))
 				else if (k === 'solid') cv.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark)
 			}
+
+		// ping-pong ball: one pixel arcing between the two players
+		for (const g of new Set([...this.spots.values()].filter((x) => x.kind === 'pingpong').map((x) => x.group))) {
+			const pair = [...this.spots.values()].filter((x) => x.group === g)
+			if (pair.length !== 2 || !pair.every((x) => x.taken)) continue
+			const t = (this.ballT % 1 + 1) % 1
+			const swing = t < 0.5 ? t * 2 : (1 - t) * 2
+			const x = pair[0].col * TILE + (pair[1].col - pair[0].col) * TILE * swing + TILE / 2
+			const y = pair[0].row * TILE + TILE / 2 - Math.round(Math.sin(swing * Math.PI) * 3)
+			cv.set(Math.round(x), Math.round(y), [252, 252, 240])
+			cv.set(Math.round(x), Math.round(y) - 1, [220, 220, 200])
+		}
 
 		const out: Placed[] = []
 		for (const ch of [...this.chars.values()].sort((a, b) => a.y - b.y)) {
