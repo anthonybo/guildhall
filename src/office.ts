@@ -967,6 +967,7 @@ export class Office {
 				if (this.zoneOf[r][c + 1] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + TILE - 1, r * TILE + i, col)
 			}
 		}
+		this.monitors = []
 		const lit = new Set<string>()
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
@@ -979,7 +980,6 @@ export class Office {
 				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
 				for (let i = 0; i < TILE / 2; i++) this.imageRows.add(((pod.monitorRow * TILE) >> 1) + i)
 			}
-		this.monitors = []
 		this.imageRows.clear()
 		for (const pr of this.props) {
 			const size = PROP_SIZE[pr.kind]
@@ -988,14 +988,8 @@ export class Office {
 		for (let r = 0; r < this.rows; r++)
 			for (let c = 0; c < this.cols; c++) {
 				const k = this.grid[r][c]
-				if (k === 'desk') {
-					drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r}`))
-					// the monitor is an image so it has real pixels to show code on
-					// on the desk row, NOT the row above — that is the seat, and the
-					// occupant would be drawn sitting on their own monitor
-					this.monitors.push({ x: c * TILE, y: r * TILE, lit: lit.has(`${c},${r}`), seed: c + r })
-					for (let i = 0; i < TILE / 2; i++) this.imageRows.add(((r * TILE) >> 1) + i)
-				}
+				// the worktop; `lit` is keyed on the SEAT row, one below this one
+				if (k === 'desk') drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r + 1}`))
 				else if (k === 'solid') cv.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark)
 			}
 
