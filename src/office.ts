@@ -19,6 +19,7 @@ import { C, LOOK, ROOFS, type RGB } from './theme.ts'
 import { cut, RANK, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
 import type { Facing, Pose } from './characters.ts'
+import { PROP_SIZE, type PropKind } from './props.ts'
 
 /** 4px tiles: a tile is TILE/2 terminal rows, so TILE must stay even or image
  *  placements drift half a tile against the drawn grid. At 4 a worker renders
@@ -41,7 +42,7 @@ const DONE_BUBBLE_SEC = 8
 const CHAT_RADIUS = 10
 const MAX_RUN = 6 // widest desk pod before a project spills into a second one
 
-type Kind = 'void' | 'floor' | 'wall' | 'desk' | 'counter' | 'table' | 'couch' | 'plant' | 'bin'
+type Kind = 'void' | 'floor' | 'wall' | 'desk' | 'solid'
 export type Dir = Facing
 type SpotKind = 'desk' | 'kitchen' | 'pingpong' | 'couch' | 'talk' | 'window'
 type Posture = 'sit' | 'stand'
@@ -95,63 +96,61 @@ const DWELL: Record<SpotKind, [number, number]> = {
 }
 
 /** Facilities as data: spots are walkable, blocked tiles are the furniture. */
-const FACILITIES: Record<string, { w: number; h: number; kind: SpotKind; fill: Kind; spots: [number, number, Dir, Posture][]; blocked: [number, number][] }> = {
+const FACILITIES: Record<
+	string,
+	{
+		w: number
+		h: number
+		kind: SpotKind
+		spots: [number, number, Dir, Posture][]
+		/** furniture drawn as an image; `under` means the occupant sits on it */
+		props: { kind: PropKind; dc: number; dr: number; under?: boolean }[]
+	}
+> = {
 	kitchen: {
 		w: 3,
 		h: 2,
 		kind: 'kitchen',
-		fill: 'counter',
 		spots: [
 			[0, 0, 'down', 'stand'],
 			[1, 0, 'down', 'stand'],
 			[2, 0, 'down', 'stand'],
 		],
-		blocked: [
-			[0, 1],
-			[1, 1],
-			[2, 1],
-		],
+		props: [{ kind: 'kitchen', dc: 0, dr: 1 }],
 	},
 	pingpong: {
 		w: 4,
-		h: 2,
+		h: 1,
 		kind: 'pingpong',
-		fill: 'table',
 		spots: [
 			[0, 0, 'right', 'stand'],
 			[3, 0, 'left', 'stand'],
 		],
-		blocked: [
-			[1, 0],
-			[2, 0],
-			[1, 1],
-			[2, 1],
-		],
+		props: [{ kind: 'pingpong', dc: 1, dr: 0 }],
 	},
 	couch: {
 		w: 2,
 		h: 2,
 		kind: 'couch',
-		fill: 'couch',
 		spots: [
 			[0, 0, 'down', 'sit'],
 			[1, 0, 'down', 'sit'],
 		],
-		blocked: [
-			[0, 1],
-			[1, 1],
+		// the couch is UNDER its occupants; a low table sits in front of it
+		props: [
+			{ kind: 'couch', dc: 0, dr: 0, under: true },
+			{ kind: 'lowtable', dc: 0, dr: 1 },
 		],
 	},
 	talk: {
 		w: 2,
 		h: 1,
 		kind: 'talk',
-		fill: 'floor',
 		spots: [
 			[0, 0, 'right', 'stand'],
 			[1, 0, 'left', 'stand'],
 		],
-		blocked: [],
+		props: [],
 	},
 }
 /** First to go when the room runs out of bands. */
@@ -167,6 +166,8 @@ export class Office {
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
 	monitors: { x: number; y: number; lit: boolean; seed: number }[] = []
+	/** static furniture image placements, in canvas pixels */
+	props: { kind: PropKind; x: number; y: number }[] = []
 	private grid: Kind[][] = []
 	private zoneOf: (string | null)[][] = []
 	private walkable: { col: number; row: number }[] = []
@@ -206,6 +207,7 @@ export class Office {
 		this.spots.clear()
 		this.seatTiles.clear()
 		this.pods = []
+		this.props = []
 		this.hiddenCount = 0
 		this.dropped = []
 
@@ -315,11 +317,19 @@ export class Office {
 				taken: null,
 			})
 		}
-		// decor, only where it cannot block anything
-		if (cols > 12) {
-			this.grid[1][1] = 'plant'
-			this.grid[1][cols - 2] = 'plant'
-			this.grid[rows - 2][2] = 'bin'
+		// decor, so the room reads as an office rather than a grid of desks
+		if (cols > 14) {
+			this.props.push({ kind: 'plant', x: 1 * TILE, y: 1 * TILE })
+			this.props.push({ kind: 'plant', x: (cols - 2) * TILE, y: 1 * TILE })
+			this.grid[1][1] = 'solid'
+			this.grid[1][cols - 2] = 'solid'
+			this.props.push({ kind: 'whiteboard', x: 3 * TILE, y: 0 })
+			this.props.push({ kind: 'shelf', x: (cols - 4) * TILE, y: 0 })
+			const cr = socialBands.length ? socialBands[0] - 2 : rows - 3
+			if (cr > 1 && cr < rows - 2) {
+				this.props.push({ kind: 'cooler', x: 1 * TILE, y: cr * TILE })
+				this.grid[cr][1] = 'solid'
+			}
 		}
 
 		this.walkable = []
@@ -328,7 +338,17 @@ export class Office {
 	}
 
 	private place(f: (typeof FACILITIES)[string], c0: number, r0: number, group: string) {
-		for (const [dc, dr] of f.blocked) this.grid[r0 + dr][c0 + dc] = f.fill
+		for (const pr of f.props) {
+			this.props.push({ kind: pr.kind, x: (c0 + pr.dc) * TILE, y: (r0 + pr.dr) * TILE })
+			if (pr.under) continue // you can stand on a couch; you cannot stand on a counter
+			const size = PROP_SIZE[pr.kind]
+			for (let dr = 0; dr < size.h; dr++)
+				for (let dc = 0; dc < size.w; dc++) {
+					const c = c0 + pr.dc + dc
+					const r = r0 + pr.dr + dr
+					if (r > 0 && r < this.rows - 1 && c > 0 && c < this.cols - 1) this.grid[r][c] = 'solid'
+				}
+		}
 		f.spots.forEach(([dc, dr, facing, posture], k) => {
 			const id = `${group}:${k}`
 			this.spots.set(id, {
@@ -902,13 +922,11 @@ export class Office {
 				if (k === 'desk') {
 					drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r}`))
 					// the monitor is an image so it has real pixels to show code on
-					this.monitors.push({ x: c * TILE, y: r * TILE - TILE, lit: lit.has(`${c},${r}`), seed: c + r })
+					// on the desk row, NOT the row above — that is the seat, and the
+					// occupant would be drawn sitting on their own monitor
+					this.monitors.push({ x: c * TILE, y: r * TILE, lit: lit.has(`${c},${r}`), seed: c + r })
 				}
-				else if (k === 'counter') drawSlab(cv, c * TILE, r * TILE, C.counter, C.counterEdge)
-				else if (k === 'table') drawSlab(cv, c * TILE, r * TILE, C.tableTop, C.tableEdge)
-				else if (k === 'couch') drawSlab(cv, c * TILE, r * TILE, C.couch, C.couchEdge)
-				else if (k === 'plant') drawPlant(cv, c * TILE, r * TILE)
-				else if (k === 'bin') drawSlab(cv, c * TILE, r * TILE, C.faint, C.rule)
+				else if (k === 'solid') cv.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark)
 			}
 
 		const out: Placed[] = []
@@ -991,12 +1009,4 @@ function drawDesk(cv: Canvas, x: number, y: number, lit: boolean) {
 	if (lit) cv.tint(x, y, TILE, TILE, C.screenOn, 0.28)
 }
 
-function drawSlab(cv: Canvas, x: number, y: number, top: RGB, edge: RGB) {
-	cv.rect(x, y, TILE, TILE, top)
-	cv.rect(x, y, TILE, 1, edge)
-}
 
-function drawPlant(cv: Canvas, x: number, y: number) {
-	cv.rect(x + 1, y, TILE - 2, TILE - 1, C.tree)
-	cv.rect(x + 1, y + TILE - 1, TILE - 2, 1, C.trunk)
-}
