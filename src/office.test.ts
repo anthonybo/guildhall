@@ -439,3 +439,29 @@ test('the badge is pixel art, and each level renders differently', () => {
 	assert.ok(painted > 60, 'the badge only painted ' + painted + ' pixels')
 	assert.notEqual(JSON.stringify(a.grid), JSON.stringify(b.grid))
 })
+
+test('the rally only starts once both players have arrived', () => {
+	const list = Array.from({ length: 8 }, (_, i) => session('s' + i, 'alpha', 'parked'))
+	const { cv, office } = room(list)
+	let walkingWithBall = 0
+	for (let i = 0; i < 4000; i++) {
+		office.update(0.1, list)
+		const table = [...office.spots.values()].filter((s) => s.kind === 'pingpong')
+		if (table.length !== 2 || !table.every((s) => s.taken)) continue
+		const both = table.every((s) => {
+			const ch = office.chars.get(s.taken!)!
+			return ch.state === 'act' && ch.col === s.col && ch.row === s.row
+		})
+		if (both) continue
+		// claimed but not arrived: the ball must not be on the table yet
+		const before = cv.render().join('')
+		office.draw(cv, list)
+		const after = cv.render().join('')
+		if (before !== after) walkingWithBall += 0 // drawing is expected; the check is below
+		const mid = table[0]
+		const ballRow = ((mid.row * TILE + TILE / 2) >> 1) - 2
+		const line = cv.render()[ballRow]?.replace(/\x1b\[[0-9;]*m/g, '') ?? ''
+		if (/[▀]/.test(line) === false && line.includes('◦')) walkingWithBall++
+	}
+	assert.equal(walkingWithBall, 0, 'the ball was drawn before both players arrived')
+})

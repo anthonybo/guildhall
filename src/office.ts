@@ -1073,7 +1073,15 @@ export class Office {
 		// ping-pong ball: one pixel arcing between the two players
 		for (const g of new Set([...this.spots.values()].filter((x) => x.kind === 'pingpong').map((x) => x.group))) {
 			const pair = [...this.spots.values()].filter((x) => x.group === g)
-			if (pair.length !== 2 || !pair.every((x) => x.taken)) continue
+			// a claimed spot only means somebody is on their way to it — the rally
+			// starts when both players have actually arrived and are playing
+			if (pair.length !== 2) continue
+			const playing = pair.every((sp) => {
+				if (!sp.taken) return false
+				const ch = this.chars.get(sp.taken)
+				return !!ch && ch.state === 'act' && ch.col === sp.col && ch.row === sp.row
+			})
+			if (!playing) continue
 			const t = (this.ballT % 1 + 1) % 1
 			const swing = t < 0.5 ? t * 2 : (1 - t) * 2
 			const x = pair[0].col * TILE + (pair[1].col - pair[0].col) * TILE * swing + TILE / 2
