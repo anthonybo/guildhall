@@ -1020,15 +1020,22 @@ export class Office {
 			if (named.has(pod.proj)) continue
 			named.add(pod.proj)
 			// A nameplate is text, not furniture, so it may run past its pod into the
-			// empty floor beside it — a one-desk project would otherwise read "dr…".
-			const sameBand = this.pods.filter((p) => p.deskRow === pod.deskRow && p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0)
-			const limit = sameBand.length ? sameBand[0].c0 : this.cols - 1
-			const span = (limit - pod.c0) * TILE - 1
+			// floor beside it. Right-anchored pods have no room to their right, so
+			// measure both directions and grow into whichever side is emptier —
+			// otherwise every pod on the right edge reads "draf…".
+			const band = this.pods.filter((p) => p.deskRow === pod.deskRow)
+			const rightOf = band.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0)
+			const leftOf = band.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1)
+			const roomRight = ((rightOf.length ? rightOf[0].c0 : this.cols - 1) - pod.c0) * TILE - 1
+			const roomLeft = (pod.c1 + 1 - (leftOf.length ? leftOf[0].c1 + 1 : 1)) * TILE - 1
+			const span = Math.max(roomRight, roomLeft)
 			const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `
+			// when growing leftward, end the plate on the pod's right edge
+			const startCol = roomLeft > roomRight ? (pod.c1 + 1) * TILE - text.length : pod.c0 * TILE
 			// the desk row carries monitor images, which draw over text, so the plate
 			// goes on the aisle row below the pod
 			const plateRow = Math.min(cv.rows - 1, Math.floor(((pod.seatRow + 1) * TILE) / 2))
-			cv.text(pod.c0 * TILE, plateRow, text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
+			cv.text(Math.max(0, startCol), plateRow, text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
 		}
 		const taken = new Map<number, [number, number][]>()
 		const claim = (want: number, col: number, len: number) => {
