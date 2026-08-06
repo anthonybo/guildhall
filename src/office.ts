@@ -1,47 +1,68 @@
 /**
- * The office: one shared room, on a tile grid, where every live session sits at
- * a desk and works.
+ * The office: one shared room where working sessions sit at desks and everyone
+ * else does something social.
  *
- * The model follows pixel-agents (MIT, pixel-agents-hq/pixel-agents), which
- * solves the problem our first attempt had. Movement is not a drift toward an x
- * coordinate — desks define seats, a session is assigned one, and it walks there
- * tile by tile along a BFS path. Idling is a bounded excursion (a few moves with
- * long pauses, then back to the desk for a rest) rather than continuous
- * wandering, which is what makes a room full of characters read as purposeful.
+ * The simulation model comes from pixel-agents (MIT), but three things here are
+ * deliberately different, each for a measured reason:
+ *
+ *  - Desks sit BELOW their seat and the occupant faces down. A character is one
+ *    tile wide and two tall, so a desk placed above a seat is completely hidden
+ *    by whoever sits in it.
+ *  - Seats are claimed once and held. Re-deriving them each poll made ~48% of
+ *    seated frames land on someone else's chair, and let two characters share a
+ *    tile.
+ *  - Not-working sessions leave their desk for a kitchen, a couch, a ping-pong
+ *    table or a conversation. The reference has no such system; its idle agents
+ *    just wander to random floor tiles and come back.
  */
 import { C, LOOK, ROOFS, type RGB } from './theme.ts'
 import { cut, RANK, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
 import type { Facing, Pose } from './characters.ts'
 
-/**
- * 6px tiles. The whole room has to fit in roughly 60-90 canvas pixels of height,
- * so the tile has to be small enough for three or four desk rows to exist —
- * otherwise there are fewer seats than sessions and people end up standing.
- */
-export const TILE = 6
+/** 4px tiles: a tile is TILE/2 terminal rows, so TILE must stay even or image
+ *  placements drift half a tile against the drawn grid. At 4 a worker renders
+ *  ~32x68 real pixels, matching the reference's 32x64. */
+export const TILE = 4
+export const CHAR_W = TILE
+export const CHAR_H = TILE * 2
+/** The typing frames have no legs — 6 of 32 source rows are empty padding — so
+ *  seated characters shift down by that fraction to put the body on the seat. */
+export const SIT_SINK = Math.round((CHAR_H * 6) / 32)
 
-/* ── timing, in seconds; the loop feeds real dt so these are wall-clock ── */
-const WALK_TILES_PER_SEC = 2.6
+const WALK_TILES_PER_SEC = 3
 const TYPE_FRAME_SEC = 0.3
 const WALK_FRAME_SEC = 0.15
-const WANDER_PAUSE_MIN = 2
-const WANDER_PAUSE_MAX = 20
-const WANDER_MOVES_MIN = 3
-const WANDER_MOVES_MAX = 6
-const SEAT_REST_MIN = 45
-const SEAT_REST_MAX = 150
-const DONE_BUBBLE_SEC = 6
+const IDLE_PAUSE_MIN = 2
+const IDLE_PAUSE_MAX = 12
+const SEAT_REST_MIN = 20
+const SEAT_REST_MAX = 60
+const DONE_BUBBLE_SEC = 8
+const CHAT_RADIUS = 10
+const MAX_RUN = 6 // widest desk pod before a project spills into a second one
 
-type Kind = 'void' | 'floor' | 'wall' | 'desk'
-export type Dir = 'up' | 'down' | 'left' | 'right'
+type Kind = 'void' | 'floor' | 'wall' | 'desk' | 'counter' | 'table' | 'couch' | 'plant' | 'bin'
+export type Dir = Facing
+type SpotKind = 'desk' | 'kitchen' | 'pingpong' | 'couch' | 'talk' | 'window'
+type Posture = 'sit' | 'stand'
 
-type Seat = { id: string; col: number; row: number; facing: Dir; zone: string; taken: string | null }
-type Zone = { proj: string; color: RGB; cols: [number, number]; rows: [number, number] }
+type Spot = {
+	id: string
+	kind: SpotKind
+	group: string
+	col: number
+	row: number
+	facing: Dir
+	posture: Posture
+	zone: string | null
+	taken: string | null
+}
+
+type Activity = { kind: SpotKind; spotId: string | null; partner: string | null; timer: number }
 
 export type Character = {
 	id: string
-	state: 'idle' | 'walk' | 'type'
+	state: 'idle' | 'walk' | 'type' | 'act'
 	dir: Dir
 	x: number
 	y: number
@@ -51,111 +72,298 @@ export type Character = {
 	progress: number
 	frame: number
 	frameTimer: number
-	wanderTimer: number
-	wanderCount: number
-	wanderLimit: number
+	idleTimer: number
 	seatTimer: number
 	seatId: string | null
-	bubble: 'permission' | 'done' | null
+	activity: Activity | null
+	wasWorking: boolean
+	bubble: 'permission' | 'done' | 'chat' | null
 	bubbleTimer: number
-	hueShift: number
 }
 
-export type Placed = {
-	s: Session
-	ch: Character
-	facing: Facing
-	pose: Pose
-	step: number
-	x: number
-	y: number
+export type Placed = { s: Session; ch: Character; facing: Dir; pose: Pose; step: number; x: number; y: number }
+
+type Pod = { proj: string; c0: number; c1: number; seatRow: number; deskRow: number }
+
+const DWELL: Record<SpotKind, [number, number]> = {
+	desk: [0, 0],
+	kitchen: [8, 20],
+	pingpong: [30, 90],
+	couch: [40, 120],
+	talk: [15, 45],
+	window: [10, 30],
 }
 
-/** A worker is one tile wide and two tall, matching the source frames. */
-export const CHAR_W = TILE
-export const CHAR_H = TILE * 2
-
-/** Tools where the worker is looking at something rather than typing. */
-const READING = new Set(['reading', 'grep', 'finding', 'searching'])
-const toolOf = (s: Session) => (s.doing ?? '').split(' ')[0].toLowerCase()
-
-const rand = (a: number, b: number) => a + Math.random() * (b - a)
-const randInt = (a: number, b: number) => Math.floor(rand(a, b + 1))
-const hash = (s: string) => {
-	let h = 0
-	for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0
-	return Math.abs(h)
+/** Facilities as data: spots are walkable, blocked tiles are the furniture. */
+const FACILITIES: Record<string, { w: number; h: number; kind: SpotKind; fill: Kind; spots: [number, number, Dir, Posture][]; blocked: [number, number][] }> = {
+	kitchen: {
+		w: 3,
+		h: 2,
+		kind: 'kitchen',
+		fill: 'counter',
+		spots: [
+			[0, 0, 'down', 'stand'],
+			[1, 0, 'down', 'stand'],
+			[2, 0, 'down', 'stand'],
+		],
+		blocked: [
+			[0, 1],
+			[1, 1],
+			[2, 1],
+		],
+	},
+	pingpong: {
+		w: 4,
+		h: 2,
+		kind: 'pingpong',
+		fill: 'table',
+		spots: [
+			[0, 0, 'right', 'stand'],
+			[3, 0, 'left', 'stand'],
+		],
+		blocked: [
+			[1, 0],
+			[2, 0],
+			[1, 1],
+			[2, 1],
+		],
+	},
+	couch: {
+		w: 2,
+		h: 2,
+		kind: 'couch',
+		fill: 'couch',
+		spots: [
+			[0, 0, 'down', 'sit'],
+			[1, 0, 'down', 'sit'],
+		],
+		blocked: [
+			[0, 1],
+			[1, 1],
+		],
+	},
+	talk: {
+		w: 2,
+		h: 1,
+		kind: 'talk',
+		fill: 'floor',
+		spots: [
+			[0, 0, 'right', 'stand'],
+			[1, 0, 'left', 'stand'],
+		],
+		blocked: [],
+	},
 }
+/** First to go when the room runs out of bands. */
+const DROP_ORDER = ['couch', 'pingpong', 'kitchen'] as const
 
 export class Office {
 	cols = 0
 	rows = 0
-	w = 0
-	h = 0
-	seats = new Map<string, Seat>()
-	zones: Zone[] = []
+	spots = new Map<string, Spot>()
 	chars = new Map<string, Character>()
+	pods: Pod[] = []
 	hiddenCount = 0
+	dropped: string[] = []
 	private grid: Kind[][] = []
+	private zoneOf: (string | null)[][] = []
 	private walkable: { col: number; row: number }[] = []
-	private geom = ''
+	private seatTiles = new Set<string>()
+	/** tile -> the character heading there or resting on it */
+	private dest = new Map<string, string>()
+	private signature = ''
 
-	/** Rebuild the room only when the canvas size changes; characters persist. */
-	fit(wPx: number, hPx: number) {
-		const cols = Math.max(12, Math.floor(wPx / TILE))
-		const rows = Math.max(8, Math.floor(hPx / TILE))
-		const key = `${cols}x${rows}`
-		if (key === this.geom) return
-		this.geom = key
-		this.cols = cols
-		this.rows = rows
-		this.w = wPx
-		this.h = hPx
-		this.build()
+	constructor(private rng: () => number = Math.random) {}
+
+	private rand(a: number, b: number) {
+		return a + this.rng() * (b - a)
 	}
+	private randInt(a: number, b: number) {
+		return Math.floor(this.rand(a, b + 1))
+	}
+
+	/* ───────────────────── floor plan ───────────────────── */
 
 	/**
-	 * A floor plan of desk rows with aisles between them. Each desk row is a band
-	 * of desk tiles with the seats on the row below, facing up into the desk.
+	 * The plan is a function of the population, not just the viewport — otherwise
+	 * it can only tile the room uniformly and every project looks the same.
 	 */
-	private build() {
-		this.grid = Array.from({ length: this.rows }, () => new Array<Kind>(this.cols).fill('floor'))
-		for (let c = 0; c < this.cols; c++) {
+	private plan(cols: number, rows: number, projects: { name: string; seats: number }[]) {
+		this.cols = cols
+		this.rows = rows
+		this.grid = Array.from({ length: rows }, () => new Array<Kind>(cols).fill('floor'))
+		this.zoneOf = Array.from({ length: rows }, () => new Array<string | null>(cols).fill(null))
+		for (let c = 0; c < cols; c++) {
 			this.grid[0][c] = 'wall'
-			this.grid[this.rows - 1][c] = 'wall'
+			this.grid[rows - 1][c] = 'wall'
 		}
-		for (let r = 0; r < this.rows; r++) {
+		for (let r = 0; r < rows; r++) {
 			this.grid[r][0] = 'wall'
-			this.grid[r][this.cols - 1] = 'wall'
+			this.grid[r][cols - 1] = 'wall'
 		}
-		this.seats.clear()
-		// Bands of (desk row, seat row) with a walking aisle after each pair. One
-		// desk per tile with a gap between, so a band seats as many as it can.
-		let n = 0
-		for (let r = 2; r < this.rows - 2; r += 3) {
-			const seatRow = r + 1
-			if (seatRow >= this.rows - 1) break
-			for (let c = 2; c < this.cols - 2; c += 2) {
-				this.grid[r][c] = 'desk'
-				const id = `s${n++}`
-				this.seats.set(id, { id, col: c, row: seatRow, facing: 'up', zone: '', taken: null })
+		this.spots.clear()
+		this.seatTiles.clear()
+		this.pods = []
+		this.hiddenCount = 0
+		this.dropped = []
+
+		// Row 1 is a gutter: it carries each front-row occupant's head and status
+		// label, so nothing may ever be placed there.
+		const bandRows: number[] = []
+		for (let r = 2; r + 1 < rows - 1; r += 3) bandRows.push(r)
+
+		// desk pods, at most two per band (left-anchored then right-anchored)
+		const wishlist: { proj: string; seats: number }[] = []
+		for (const p of projects) {
+			let left = p.seats
+			while (left > 0) {
+				const take = Math.min(MAX_RUN, left)
+				wishlist.push({ proj: p.name, seats: take })
+				left -= take
 			}
 		}
+		let band = 0
+		let n = 0
+		for (let i = 0; i < wishlist.length; ) {
+			if (band >= bandRows.length) break
+			const seatRow = bandRows[band]
+			const deskRow = seatRow + 1
+			let lo = 2
+			let hi = cols - 3
+			for (let side = 0; side < 2 && i < wishlist.length; side++) {
+				const want = wishlist[i]
+				if (hi - lo + 1 < want.seats + (side === 0 ? 2 : 0)) break
+				const c0 = side === 0 ? lo : hi - want.seats + 1
+				const c1 = c0 + want.seats - 1
+				for (let c = c0; c <= c1; c++) {
+					this.grid[deskRow][c] = 'desk'
+					const id = `d${n++}`
+					this.spots.set(id, {
+						id,
+						kind: 'desk',
+						group: want.proj,
+						col: c,
+						row: seatRow,
+						facing: 'down',
+						posture: 'sit',
+						zone: want.proj,
+						taken: null,
+					})
+					this.seatTiles.add(`${c},${seatRow}`)
+					for (const r of [seatRow, deskRow]) this.zoneOf[r][c] ??= want.proj
+				}
+				this.pods.push({ proj: want.proj, c0, c1, seatRow, deskRow })
+				if (side === 0) lo = c1 + 3
+				else hi = c0 - 1
+				i++
+			}
+			band++
+		}
+		// any project that could not be seated is reported, never silently dropped
+		for (let i = 0; i < wishlist.length; i++) {
+			const seated = this.pods.filter((p) => p.proj === wishlist[i].proj).reduce((a, p) => a + (p.c1 - p.c0 + 1), 0)
+			const wanted = wishlist.filter((w) => w.proj === wishlist[i].proj).reduce((a, w) => a + w.seats, 0)
+			if (seated < wanted && !this.dropped.includes(wishlist[i].proj)) this.hiddenCount += wanted - seated
+			if (seated < wanted) this.dropped.push(wishlist[i].proj)
+		}
+		this.dropped = []
+
+		// social bands, anchored to the bottom so the gap becomes a corridor
+		const socialBands = bandRows.slice(band).slice(-3)
+		let wish = ['kitchen', 'pingpong', 'couch', 'talk']
+		while (socialBands.length * 2 < wish.length - 1 && DROP_ORDER.some((d) => wish.includes(d))) {
+			const drop = DROP_ORDER.find((d) => wish.includes(d))!
+			wish = wish.filter((w) => w !== drop)
+			this.dropped.push(drop)
+		}
+		let sb = 0
+		for (let i = 0; i < wish.length && sb < socialBands.length; ) {
+			const row = socialBands[sb]
+			let lo = 2
+			let hi = cols - 3
+			for (let side = 0; side < 2 && i < wish.length; side++) {
+				const f = FACILITIES[wish[i]]
+				if (!f || hi - lo + 1 < f.w + (side === 0 ? 2 : 0) || row + f.h > rows - 1) {
+					i++
+					side--
+					if (i >= wish.length) break
+					continue
+				}
+				const c0 = side === 0 ? lo : hi - f.w + 1
+				this.place(f, c0, row, `${wish[i]}@${row}`)
+				if (side === 0) lo = c0 + f.w + 2
+				else hi = c0 - 1
+				i++
+			}
+			sb++
+		}
+		// a window on the wall is a free loiter spot and costs no band
+		const corridor = socialBands.length ? socialBands[0] - 2 : rows - 3
+		if (corridor > 1 && corridor < rows - 1) {
+			const id = `w0`
+			this.spots.set(id, {
+				id,
+				kind: 'window',
+				group: 'window',
+				col: cols - 2,
+				row: corridor,
+				facing: 'right',
+				posture: 'stand',
+				zone: null,
+				taken: null,
+			})
+		}
+		// decor, only where it cannot block anything
+		if (cols > 12) {
+			this.grid[1][1] = 'plant'
+			this.grid[1][cols - 2] = 'plant'
+			this.grid[rows - 2][2] = 'bin'
+		}
+
 		this.walkable = []
-		for (let r = 0; r < this.rows; r++)
-			for (let c = 0; c < this.cols; c++) if (this.grid[r][c] === 'floor') this.walkable.push({ col: c, row: r })
+		for (let r = 0; r < rows; r++)
+			for (let c = 0; c < cols; c++) if (this.grid[r][c] === 'floor') this.walkable.push({ col: c, row: r })
 	}
 
-	private isWalkable(col: number, row: number) {
+	private place(f: (typeof FACILITIES)[string], c0: number, r0: number, group: string) {
+		for (const [dc, dr] of f.blocked) this.grid[r0 + dr][c0 + dc] = f.fill
+		f.spots.forEach(([dc, dr, facing, posture], k) => {
+			const id = `${group}:${k}`
+			this.spots.set(id, {
+				id,
+				kind: f.kind,
+				group,
+				col: c0 + dc,
+				row: r0 + dr,
+				facing,
+				posture,
+				zone: null,
+				taken: null,
+			})
+			this.seatTiles.add(`${c0 + dc},${r0 + dr}`)
+		})
+	}
+
+	/* ───────────────────── walkability & paths ───────────────────── */
+
+	/** A spot tile is walkable only by whoever holds it, so nobody stands in
+	 *  someone else's chair — the reference's withOwnSeatUnblocked, inlined. */
+	/** Is this tile open floor, ignoring who owns it? Used by reachability tests. */
+	isOpen(col: number, row: number) {
 		if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false
-		const t = this.grid[row][col]
-		return t === 'floor'
+		return this.grid[row][col] === 'floor'
 	}
 
-	/** BFS on a 4-connected grid. Excludes the start tile, includes the end. */
-	private findPath(sc: number, sr: number, ec: number, er: number) {
+	private isWalkable(col: number, row: number, own?: string) {
+		if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false
+		if (this.grid[row][col] !== 'floor') return false
+		const k = `${col},${row}`
+		return !this.seatTiles.has(k) || k === own
+	}
+
+	private findPath(sc: number, sr: number, ec: number, er: number, own?: string) {
 		if (sc === ec && sr === er) return []
-		if (!this.isWalkable(ec, er)) return []
+		if (!this.isWalkable(ec, er, own)) return []
 		const key = (c: number, r: number) => `${c},${r}`
 		const prev = new Map<string, string>()
 		const seen = new Set([key(sc, sr)])
@@ -172,11 +380,10 @@ export class Office {
 					const c = cur.col + dc
 					const r = cur.row + dr
 					const k = key(c, r)
-					if (seen.has(k) || !this.isWalkable(c, r)) continue
+					if (seen.has(k) || !this.isWalkable(c, r, own)) continue
 					seen.add(k)
 					prev.set(k, key(cur.col, cur.row))
 					if (c === ec && r === er) {
-						// walk the chain back to the start
 						const out: { col: number; row: number }[] = []
 						let at = k
 						while (at !== key(sc, sr)) {
@@ -194,94 +401,144 @@ export class Office {
 		return []
 	}
 
-	/** Assign seats, grouped so a project's sessions sit together. */
-	assign(sessions: Session[]) {
-		const byProj = new Map<string, Session[]>()
-		for (const s of sessions) {
-			const arr = byProj.get(s.proj) ?? []
-			arr.push(s)
-			byProj.set(s.proj, arr)
-		}
-		const projects = [...byProj.entries()]
-			.map(([proj, members]) => {
-				members.sort((a, b) => RANK[a.state] - RANK[b.state] || a.stale - b.stale)
-				return { proj, members }
-			})
-			.sort((a, b) => RANK[a.members[0].state] - RANK[b.members[0].state] || b.members.length - a.members.length)
+	/* ───────────────────── population ───────────────────── */
 
-		// seats in reading order, handed out in contiguous runs per project
-		const ordered = [...this.seats.values()].sort((a, b) => a.row - b.row || a.col - b.col)
-		for (const seat of ordered) {
-			seat.taken = null
-			seat.zone = ''
-		}
-		this.zones = []
-		const live = new Set<string>()
-		let cursor = 0
-		this.hiddenCount = 0
-		for (const { proj, members } of projects) {
-			const take = ordered.slice(cursor, cursor + members.length)
-			if (!take.length) {
-				this.hiddenCount += members.length
-				continue
-			}
-			this.hiddenCount += members.length - take.length
-			const color = ROOFS[hash(proj) % ROOFS.length]
-			this.zones.push({
-				proj,
-				color,
-				cols: [Math.min(...take.map((s) => s.col)), Math.max(...take.map((s) => s.col)) + 1],
-				rows: [Math.min(...take.map((s) => s.row)) - 1, Math.max(...take.map((s) => s.row))],
-			})
-			members.slice(0, take.length).forEach((m, i) => {
-				const seat = take[i]
-				seat.taken = m.id
-				seat.zone = proj
-				live.add(m.id)
-				let ch = this.chars.get(m.id)
-				if (!ch) {
-					// new arrivals walk in from the doorway rather than popping into a chair
-					const door = { col: 1, row: this.rows - 2 }
-					ch = {
-						id: m.id,
-						state: 'idle',
-						dir: 'up',
-						x: door.col * TILE + TILE / 2,
-						y: door.row * TILE + TILE / 2,
-						col: door.col,
-						row: door.row,
-						path: [],
-						progress: 0,
-						frame: 0,
-						frameTimer: 0,
-						wanderTimer: rand(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX),
-						wanderCount: 0,
-						wanderLimit: randInt(WANDER_MOVES_MIN, WANDER_MOVES_MAX),
-						seatTimer: 0,
-						seatId: seat.id,
-						bubble: null,
-						bubbleTimer: 0,
-						// repeated palettes get a hue shift so two sessions on the same
-						// creature are still told apart
-						hueShift: 0,
-					}
-					this.chars.set(m.id, ch)
-				}
-				ch.seatId = seat.id
-			})
-			cursor += take.length
-		}
-		for (const id of [...this.chars.keys()]) if (!live.has(id)) this.chars.delete(id)
+	/** Re-plan only when the viewport or the project mix actually changes. */
+	fit(wPx: number, hPx: number, sessions: Session[]) {
+		const cols = Math.max(12, Math.min(Math.floor(wPx / TILE), Math.floor(wPx / TILE)))
+		const rows = Math.max(8, Math.floor(hPx / TILE))
+		const byProj = new Map<string, number>()
+		for (const s of sessions) byProj.set(s.proj, (byProj.get(s.proj) ?? 0) + 1)
+		const projects = [...byProj.entries()]
+			.map(([name, seats]) => ({ name, seats }))
+			.sort((a, b) => b.seats - a.seats || a.name.localeCompare(b.name))
+		const sig = `${cols}x${rows}|${projects.map((p) => `${p.name}:${p.seats}`).join(',')}`
+		if (sig === this.signature) return
+		this.signature = sig
+		this.plan(cols, rows, projects)
+		this.relocate()
 	}
 
-	/** Advance the simulation by dt seconds. Nothing here draws. */
+	/** After a re-plan, put everybody somewhere legal or they are stranded forever. */
+	private relocate() {
+		for (const ch of this.chars.values()) {
+			const seat = ch.seatId ? this.spots.get(ch.seatId) : undefined
+			if (seat) {
+				ch.col = seat.col
+				ch.row = seat.row
+			} else if (!this.isWalkable(ch.col, ch.row)) {
+				const t = this.walkable[Math.floor(this.rng() * this.walkable.length)]
+				if (t) {
+					ch.col = t.col
+					ch.row = t.row
+				}
+			}
+			ch.x = ch.col * TILE + TILE / 2
+			ch.y = ch.row * TILE + TILE / 2
+			ch.path = []
+			ch.progress = 0
+			this.release(ch)
+			this.unreserve(ch)
+			this.reserve(ch, ch.col, ch.row)
+			if (ch.state === 'walk') ch.state = 'idle'
+		}
+	}
+
+	/** Claim and release. Existing claims are never disturbed — that stickiness
+	 *  is what stops characters being re-targeted onto occupied chairs. */
+	assign(sessions: Session[]) {
+		const byId = new Map(sessions.map((s) => [s.id, s]))
+		for (const [id, ch] of [...this.chars]) {
+			if (byId.has(id)) continue
+			const st = ch.seatId ? this.spots.get(ch.seatId) : undefined
+			if (st?.taken === id) st.taken = null
+			this.release(ch)
+			this.unreserve(ch)
+			this.chars.delete(id)
+		}
+		for (const spot of this.spots.values()) if (spot.taken && !this.chars.has(spot.taken)) spot.taken = null
+		for (const ch of this.chars.values()) if (ch.seatId && !this.spots.has(ch.seatId)) ch.seatId = null
+
+		const desks = [...this.spots.values()].filter((s) => s.kind === 'desk').sort((a, b) => a.row - b.row || a.col - b.col)
+		const newcomers = sessions
+			.filter((s) => !this.chars.has(s.id) || !this.chars.get(s.id)!.seatId)
+			.sort((a, b) => RANK[a.state] - RANK[b.state] || a.id.localeCompare(b.id))
+		for (const s of newcomers) {
+			const seat = this.claimDesk(s, desks)
+			if (!seat) continue
+			seat.taken = s.id
+			const existing = this.chars.get(s.id)
+			if (existing) existing.seatId = seat.id
+			else this.chars.set(s.id, this.spawn(s, seat))
+		}
+		this.hiddenCount = sessions.filter((s) => !this.chars.get(s.id)?.seatId).length
+	}
+
+	/** Nearest free desk to the project's existing cluster, never evicting anyone. */
+	private claimDesk(s: Session, desks: Spot[]) {
+		const free = desks.filter((d) => !d.taken)
+		if (!free.length) return null
+		const mine = free.filter((d) => d.zone === s.proj)
+		if (mine.length) return mine[0]
+		const cluster = desks.filter((d) => d.taken && d.zone === s.proj)
+		if (!cluster.length) return free[0]
+		let best = free[0]
+		let bestD = Infinity
+		for (const f of free) {
+			const d = Math.min(...cluster.map((m) => Math.abs(m.col - f.col) + Math.abs(m.row - f.row)))
+			if (d < bestD) {
+				best = f
+				bestD = d
+			}
+		}
+		return best
+	}
+
+	/** Born in the chair, working — the reference does the same, and starting at
+	 *  a doorway meant nobody was at a desk for the first minute. */
+	private spawn(s: Session, seat: Spot): Character {
+		return {
+			id: s.id,
+			state: 'type',
+			dir: seat.facing,
+			x: seat.col * TILE + TILE / 2,
+			y: seat.row * TILE + TILE / 2,
+			col: seat.col,
+			row: seat.row,
+			path: [],
+			progress: 0,
+			frame: 0,
+			frameTimer: 0,
+			idleTimer: 0,
+			seatTimer: 0,
+			seatId: seat.id,
+			activity: null,
+			wasWorking: true,
+			bubble: null,
+			bubbleTimer: 0,
+		}
+	}
+
+	/* ───────────────────── simulation ───────────────────── */
+
+	/** Blocked on your approval is still mid-turn, so it stays at the desk. */
+	private atDesk = (s: Session) => s.state === 'working' || s.state === 'shell' || s.state === 'needs'
+
 	update(dt: number, sessions: Session[]) {
 		const byId = new Map(sessions.map((s) => [s.id, s]))
+		let wantChat = 0
 		for (const ch of this.chars.values()) {
 			const s = byId.get(ch.id)
 			if (!s) continue
-			const active = s.state === 'working' || s.state === 'shell'
-			this.updateBubble(ch, s, dt)
+			const working = this.atDesk(s)
+			this.bubbleFor(ch, s, dt)
+			// the turn ending is an edge, and it has to clear the current plan
+			if (ch.wasWorking && !working) {
+				ch.seatTimer = -1
+				ch.path = []
+				ch.progress = 0
+			}
+			ch.wasWorking = working
 			ch.frameTimer += dt
 
 			switch (ch.state) {
@@ -290,43 +547,76 @@ export class Office {
 						ch.frameTimer -= TYPE_FRAME_SEC
 						ch.frame ^= 1
 					}
-					if (!active) {
-						if (ch.seatTimer > 0) {
-							ch.seatTimer -= dt
+					if (working) break
+					if (ch.seatTimer > 0) {
+						ch.seatTimer -= dt
+						break
+					}
+					ch.seatTimer = 0
+					ch.state = 'idle'
+					ch.frame = 0
+					ch.idleTimer = this.rand(IDLE_PAUSE_MIN, IDLE_PAUSE_MAX)
+					break
+				}
+				case 'act': {
+					if (ch.frameTimer >= TYPE_FRAME_SEC) {
+						ch.frameTimer -= TYPE_FRAME_SEC
+						ch.frame ^= 1
+					}
+					// returning to work always wins, checked before any timer
+					if (working) {
+						this.release(ch)
+						if (!this.walkToSeat(ch)) ch.state = 'type'
+						break
+					}
+					const act = ch.activity
+					if (!act) {
+						ch.state = 'idle'
+						break
+					}
+					if (act.partner) {
+						const p = this.chars.get(act.partner)
+						const ps = p ? byId.get(p.id) : undefined
+						if (!p || !ps || this.atDesk(ps)) {
+							this.release(ch)
+							ch.state = 'idle'
+							ch.idleTimer = this.rand(IDLE_PAUSE_MIN, IDLE_PAUSE_MAX)
 							break
 						}
+						// only count down once both of them have arrived
+						if (p.state !== 'act') break
+					}
+					act.timer -= dt
+					if (act.timer <= 0) {
+						this.release(ch)
 						ch.state = 'idle'
-						ch.frame = 0
-						ch.wanderTimer = rand(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
-						ch.wanderCount = 0
-						ch.wanderLimit = randInt(WANDER_MOVES_MIN, WANDER_MOVES_MAX)
+						ch.idleTimer = this.rand(IDLE_PAUSE_MIN, IDLE_PAUSE_MAX)
 					}
 					break
 				}
 				case 'idle': {
 					ch.frame = 0
-					if (active) {
+					if (ch.seatTimer < 0) ch.seatTimer = 0
+					if (working) {
+						this.release(ch)
 						if (!this.walkToSeat(ch)) {
 							ch.state = 'type'
 							ch.frameTimer = 0
 						}
 						break
 					}
-					ch.wanderTimer -= dt
-					if (ch.wanderTimer > 0) break
-					ch.wanderTimer = rand(WANDER_PAUSE_MIN, WANDER_PAUSE_MAX)
-					// budget spent: go back and sit down for a while
-					if (ch.wanderCount >= ch.wanderLimit && this.walkToSeat(ch)) break
-					const target = this.walkable[Math.floor(Math.random() * this.walkable.length)]
-					if (!target) break
-					const path = this.findPath(ch.col, ch.row, target.col, target.row)
-					if (path.length) {
-						ch.path = path
-						ch.progress = 0
-						ch.state = 'walk'
-						ch.frame = 0
-						ch.wanderCount++
+					ch.idleTimer -= dt
+					if (ch.idleTimer > 0) break
+					ch.idleTimer = this.rand(IDLE_PAUSE_MIN, IDLE_PAUSE_MAX)
+					if (this.rng() < 0.3) {
+						wantChat++
+						break // the broker pairs us up after this loop
 					}
+					if (this.goToSpot(ch)) break
+					// nothing free: drift to a tile nobody else has claimed
+					const open = this.freeTiles()
+					const t = open[Math.floor(this.rng() * open.length)]
+					if (t) this.walkTo(ch, t.col, t.row)
 					break
 				}
 				case 'walk': {
@@ -334,47 +624,65 @@ export class Office {
 						ch.frameTimer -= WALK_FRAME_SEC
 						ch.frame = (ch.frame + 1) % 4
 					}
-					this.step(ch, dt)
-					if (ch.path.length === 0) {
-						ch.x = ch.col * TILE + TILE / 2
-						ch.y = ch.row * TILE + TILE / 2
-						const seat = ch.seatId ? this.seats.get(ch.seatId) : undefined
-						const atSeat = seat && seat.col === ch.col && seat.row === ch.row
-						if (atSeat) {
-							ch.state = 'type'
-							ch.dir = seat!.facing
-							ch.frame = 0
-							ch.frameTimer = 0
-							if (!active) {
-								ch.seatTimer = rand(SEAT_REST_MIN, SEAT_REST_MAX)
-								ch.wanderCount = 0
-								ch.wanderLimit = randInt(WANDER_MOVES_MIN, WANDER_MOVES_MAX)
-							}
-						} else if (active) {
-							if (!this.walkToSeat(ch)) ch.state = 'type'
-						} else {
-							ch.state = 'idle'
+					// a session that starts a turn mid-walk turns around at once
+					if (working) {
+						const seat = ch.seatId ? this.spots.get(ch.seatId) : undefined
+						const last = ch.path[ch.path.length - 1]
+						if (seat && (!last || last.col !== seat.col || last.row !== seat.row)) {
+							this.release(ch)
+							this.walkToSeat(ch)
 						}
 					}
+					this.step(ch, dt)
+					if (ch.path.length) break
+					ch.x = ch.col * TILE + TILE / 2
+					ch.y = ch.row * TILE + TILE / 2
+					const seat = ch.seatId ? this.spots.get(ch.seatId) : undefined
+					if (seat && seat.col === ch.col && seat.row === ch.row) {
+						ch.state = 'type'
+						ch.dir = seat.facing
+						ch.frame = 0
+						ch.frameTimer = 0
+						// a turn that just ended must not earn a long nap
+						ch.seatTimer = ch.seatTimer < 0 ? 0 : this.rand(SEAT_REST_MIN, SEAT_REST_MAX)
+						break
+					}
+					const act = ch.activity
+					const spot = act?.spotId ? this.spots.get(act.spotId) : undefined
+					if (act && spot && spot.col === ch.col && spot.row === ch.row) {
+						ch.state = 'act'
+						ch.dir = spot.facing
+						ch.frame = 0
+						break
+					}
+					if (act?.partner) {
+						const p = this.chars.get(act.partner)
+						if (p) ch.dir = Math.abs(p.col - ch.col) >= Math.abs(p.row - ch.row) ? (p.col > ch.col ? 'right' : 'left') : p.row > ch.row ? 'down' : 'up'
+						ch.state = 'act'
+						break
+					}
+					ch.state = 'idle'
 					break
 				}
 			}
 		}
+		if (wantChat >= 2) this.brokerChats(byId)
 	}
 
-	/** A session that needs you keeps its bubble; one that just finished gets a beat. */
-	private updateBubble(ch: Character, s: Session, dt: number) {
+	private bubbleFor(ch: Character, s: Session, dt: number) {
 		if (s.state === 'needs') {
 			ch.bubble = 'permission'
-			ch.bubbleTimer = 0
 			return
 		}
 		if (ch.bubble === 'permission') ch.bubble = null
-		if (s.state === 'done' && s.stale < DONE_BUBBLE_SEC * 1000) {
-			if (ch.bubble !== 'done') {
-				ch.bubble = 'done'
-				ch.bubbleTimer = DONE_BUBBLE_SEC
-			}
+		if (ch.activity?.partner) {
+			ch.bubble = 'chat'
+			return
+		}
+		if (ch.bubble === 'chat') ch.bubble = null
+		if (s.state === 'done' && s.stale < DONE_BUBBLE_SEC * 1000 && ch.bubble !== 'done') {
+			ch.bubble = 'done'
+			ch.bubbleTimer = DONE_BUBBLE_SEC
 		}
 		if (ch.bubble === 'done') {
 			ch.bubbleTimer -= dt
@@ -382,17 +690,138 @@ export class Office {
 		}
 	}
 
+	/** One teardown for every exit, so no claim or pairing can leak. */
+	private release(ch: Character) {
+		const act = ch.activity
+		if (!act) return
+		if (act.spotId) {
+			const sp = this.spots.get(act.spotId)
+			if (sp?.taken === ch.id) sp.taken = null
+		}
+		if (act.partner) {
+			const p = this.chars.get(act.partner)
+			if (p?.activity?.partner === ch.id) {
+				if (p.activity.spotId) {
+					const sp = this.spots.get(p.activity.spotId)
+					if (sp?.taken === p.id) sp.taken = null
+				}
+				p.activity = null
+				if (p.state === 'act') p.state = 'idle'
+			}
+		}
+		ch.activity = null
+	}
+
+	/** Prefer a facility someone is already at, which is what makes a group read
+	 *  as a group without any explicit socialising logic. */
+	private goToSpot(ch: Character) {
+		const free = [...this.spots.values()].filter((s) => s.kind !== 'desk' && !s.taken)
+		if (!free.length) return false
+		const busyGroups = new Set([...this.spots.values()].filter((s) => s.taken && s.kind !== 'desk').map((s) => s.group))
+		const scored = free
+			.map((s) => ({
+				s,
+				score: (busyGroups.has(s.group) ? -1000 : 0) + Math.abs(s.col - ch.col) + Math.abs(s.row - ch.row),
+			}))
+			.sort((a, b) => a.score - b.score)
+		for (const { s } of scored) {
+			s.taken = ch.id
+			ch.activity = { kind: s.kind, spotId: s.id, partner: null, timer: this.rand(...DWELL[s.kind]) }
+			if (this.walkTo(ch, s.col, s.row, `${s.col},${s.row}`)) return true
+			s.taken = null
+			ch.activity = null
+		}
+		return false
+	}
+
+	/** Deterministic id-ordered pairing: two idle characters stand and talk. */
+	private brokerChats(byId: Map<string, Session>) {
+		const waiting = [...this.chars.values()]
+			.filter((c) => c.state === 'idle' && !c.activity && !this.atDesk(byId.get(c.id)!))
+			.sort((a, b) => a.id.localeCompare(b.id))
+		for (let i = 0; i < waiting.length; i++) {
+			const a = waiting[i]
+			if (a.activity) continue
+			for (let j = i + 1; j < waiting.length; j++) {
+				const b = waiting[j]
+				if (b.activity) continue
+				if (Math.abs(a.col - b.col) + Math.abs(a.row - b.row) > CHAT_RADIUS) continue
+				const pair = this.findTalkPair(a, b)
+				if (!pair) continue
+				const dur = this.rand(...DWELL.talk)
+				a.activity = { kind: 'talk', spotId: null, partner: b.id, timer: dur }
+				b.activity = { kind: 'talk', spotId: null, partner: a.id, timer: dur }
+				this.walkTo(a, pair[0].col, pair[0].row)
+				this.walkTo(b, pair[1].col, pair[1].row)
+				break
+			}
+		}
+	}
+
+	/** Two side-by-side free floor tiles near the midpoint of the pair. */
+	private findTalkPair(a: Character, b: Character) {
+		const mc = Math.round((a.col + b.col) / 2)
+		const mr = Math.round((a.row + b.row) / 2)
+		let best: [{ col: number; row: number }, { col: number; row: number }] | null = null
+		let bestD = Infinity
+		for (const t of this.freeTiles()) {
+			const d = Math.abs(t.col - mc) + Math.abs(t.row - mr)
+			if (d >= bestD) continue
+			const right = { col: t.col + 1, row: t.row }
+			if (!this.isWalkable(right.col, right.row)) continue
+			if (this.dest.has(`${right.col},${right.row}`)) continue
+			best = [t, right]
+			bestD = d
+		}
+		return best
+	}
+
 	private walkToSeat(ch: Character) {
-		const seat = ch.seatId ? this.seats.get(ch.seatId) : undefined
+		const seat = ch.seatId ? this.spots.get(ch.seatId) : undefined
 		if (!seat) return false
 		if (seat.col === ch.col && seat.row === ch.row) {
 			ch.state = 'type'
 			ch.dir = seat.facing
 			ch.frameTimer = 0
+			ch.seatTimer = 0
 			return true
 		}
-		const path = this.findPath(ch.col, ch.row, seat.col, seat.row)
-		if (!path.length) return false
+		return this.walkTo(ch, seat.col, seat.row, `${seat.col},${seat.row}`)
+	}
+
+	/**
+	 * Reserve a destination tile. Two characters may pass through each other while
+	 * walking — the reference allows that too — but they must never come to rest
+	 * on the same tile, so the target is claimed before the path is taken.
+	 */
+	private reserve(ch: Character, col: number, row: number) {
+		const k = `${col},${row}`
+		const holder = this.dest.get(k)
+		if (holder && holder !== ch.id) return false
+		this.unreserve(ch)
+		this.dest.set(k, ch.id)
+		return true
+	}
+
+	private unreserve(ch: Character) {
+		for (const [k, id] of this.dest) if (id === ch.id) this.dest.delete(k)
+	}
+
+	/** Free floor that nobody else is heading to or standing on. */
+	private freeTiles() {
+		return this.walkable.filter((t) => {
+			const holder = this.dest.get(`${t.col},${t.row}`)
+			return !holder
+		})
+	}
+
+	private walkTo(ch: Character, col: number, row: number, own?: string) {
+		if (!this.reserve(ch, col, row)) return false
+		const path = this.findPath(ch.col, ch.row, col, row, own)
+		if (!path.length) {
+			this.unreserve(ch)
+			return false
+		}
 		ch.path = path
 		ch.progress = 0
 		ch.state = 'walk'
@@ -400,7 +829,6 @@ export class Office {
 		return true
 	}
 
-	/** Slide toward the next tile in the path, then commit to it. */
 	private step(ch: Character, dt: number) {
 		const next = ch.path[0]
 		if (!next) return
@@ -412,82 +840,103 @@ export class Office {
 			ch.col = t.col
 			ch.row = t.row
 		}
+		if (!ch.path.length) ch.progress = 0
 		const from = { x: ch.col * TILE + TILE / 2, y: ch.row * TILE + TILE / 2 }
 		const ahead = ch.path[0]
 		if (ahead) {
-			const to = { x: ahead.col * TILE + TILE / 2, y: ahead.row * TILE + TILE / 2 }
-			ch.x = from.x + (to.x - from.x) * ch.progress
-			ch.y = from.y + (to.y - from.y) * ch.progress
+			ch.x = from.x + (ahead.col * TILE + TILE / 2 - from.x) * ch.progress
+			ch.y = from.y + (ahead.row * TILE + TILE / 2 - from.y) * ch.progress
 		} else {
 			ch.x = from.x
 			ch.y = from.y
 		}
 	}
 
-	/** Draw the room; return where each worker goes so its frame can be placed. */
+	/* ───────────────────── drawing ───────────────────── */
+
 	draw(cv: Canvas, sessions: Session[]): Placed[] {
 		const byId = new Map(sessions.map((s) => [s.id, s]))
 		cv.clear(C.floorDark)
-		// floor, then the project zones as tinted carpet
 		for (let r = 0; r < this.rows; r++) {
 			for (let c = 0; c < this.cols; c++) {
-				const k = this.grid[r][c]
 				const x = c * TILE
 				const y = r * TILE
-				if (k === 'wall') {
-					cv.rect(x, y, TILE, TILE, C.wallStone)
-					cv.rect(x, y, TILE, 1, C.wallLip)
-				} else {
-					cv.rect(x, y, TILE, TILE, (r + c) % 2 ? C.floor : C.floorAlt)
+				switch (this.grid[r][c]) {
+					case 'wall':
+						cv.rect(x, y, TILE, TILE, C.wallStone)
+						cv.rect(x, y, TILE, 1, C.wallLip)
+						break
+					case 'desk':
+						break // drawn below, after the carpets
+					default:
+						cv.rect(x, y, TILE, TILE, (r + c) % 2 ? C.floor : C.floorAlt)
 				}
 			}
 		}
-		for (const z of this.zones) {
-			const x = z.cols[0] * TILE - 2
-			const y = z.rows[0] * TILE - 2
-			const w = (z.cols[1] - z.cols[0]) * TILE + 4
-			const h = (z.rows[1] - z.rows[0] + 1) * TILE + 4
-			cv.tint(x, y, w, h, z.color, 0.22)
-			cv.outline(x, y, w, h, z.color)
-		}
-		// desks last so they sit on top of the carpet
-		const lit = new Set<string>()
-		for (const seat of this.seats.values()) {
-			if (!seat.taken) continue
-			const s = byId.get(seat.taken)
-			// a monitor is only on when its occupant is actually working
-			if (s && (s.state === 'working' || s.state === 'shell')) lit.add(`${seat.col},${seat.row - 1}`)
-		}
+		// project carpet: one scalar per tile, so two projects can never overlap
 		for (let r = 0; r < this.rows; r++) {
 			for (let c = 0; c < this.cols; c++) {
-				if (this.grid[r][c] !== 'desk') continue
-				const isLeft = this.grid[r][c - 1] !== 'desk'
-				drawDesk(cv, c * TILE, r * TILE, isLeft, lit.has(`${c},${r}`) || lit.has(`${c - 1},${r}`))
+				const z = this.zoneOf[r][c]
+				if (!z) continue
+				const col = ROOFS[hash(z) % ROOFS.length]
+				cv.tint(c * TILE, r * TILE, TILE, TILE, col, 0.2)
+				// edge only where the neighbour differs, which gives a pod-shaped rug
+				if (this.zoneOf[r - 1]?.[c] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + i, r * TILE, col)
+				if (this.zoneOf[r + 1]?.[c] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + i, r * TILE + TILE - 1, col)
+				if (this.zoneOf[r][c - 1] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE, r * TILE + i, col)
+				if (this.zoneOf[r][c + 1] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + TILE - 1, r * TILE + i, col)
 			}
 		}
+		const lit = new Set<string>()
+		for (const sp of this.spots.values()) {
+			if (sp.kind !== 'desk' || !sp.taken) continue
+			const s = byId.get(sp.taken)
+			if (s && this.atDesk(s)) lit.add(`${sp.col},${sp.row + 1}`)
+		}
+		for (let r = 0; r < this.rows; r++)
+			for (let c = 0; c < this.cols; c++) {
+				const k = this.grid[r][c]
+				if (k === 'desk') drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r}`))
+				else if (k === 'counter') drawSlab(cv, c * TILE, r * TILE, C.counter, C.counterEdge)
+				else if (k === 'table') drawSlab(cv, c * TILE, r * TILE, C.tableTop, C.tableEdge)
+				else if (k === 'couch') drawSlab(cv, c * TILE, r * TILE, C.couch, C.couchEdge)
+				else if (k === 'plant') drawPlant(cv, c * TILE, r * TILE)
+				else if (k === 'bin') drawSlab(cv, c * TILE, r * TILE, C.faint, C.rule)
+			}
 
 		const out: Placed[] = []
-		// back to front, so someone lower on the floor overlaps the row behind
 		for (const ch of [...this.chars.values()].sort((a, b) => a.y - b.y)) {
 			const s = byId.get(ch.id)
 			if (!s) continue
-			// reading tools get the reading pose; anything else at a desk is typing
-			const pose: Pose = ch.state === 'walk' ? 'walk' : READING.has(toolOf(s)) ? 'reading' : 'typing'
-			const step = ch.state === 'idle' ? 0 : ch.frame
-			// feet sit on the tile the character occupies; sitting sinks a little
-			const sink = ch.state === 'type' ? 2 : 0
-			const x = Math.round(ch.x - CHAR_W / 2)
-			const y = Math.round(ch.y + TILE / 2 - CHAR_H + sink)
-			out.push({ s, ch, facing: ch.dir, pose, step, x, y: y & ~1 })
+			const seated = ch.state === 'type' || (ch.state === 'act' && this.postureOf(ch) === 'sit')
+			const pose: Pose = ch.state === 'walk' ? 'walk' : ch.state === 'act' && !seated ? 'reading' : 'typing'
+			const step = ch.state === 'idle' ? 1 : ch.frame
+			// feet at the tile CENTRE, matching the reference — anchoring at the
+			// tile bottom put the body a half tile low and it read as standing
+			const y = Math.round(ch.y - CHAR_H + (seated ? SIT_SINK : 0))
+			out.push({ s, ch, facing: ch.dir, pose, step, x: Math.round(ch.x - CHAR_W / 2), y: y - (y & 1) })
 		}
 		return out
 	}
 
-	/** Labels and bubbles, packed so two neighbours never overprint. */
+	private postureOf(ch: Character) {
+		const id = ch.activity?.spotId
+		return id ? (this.spots.get(id)?.posture ?? 'stand') : 'stand'
+	}
+
+	/** Project nameplates and per-character status labels. */
 	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
-		for (const z of this.zones) {
-			const row = Math.floor((z.rows[0] * TILE - 4) / 2)
-			cv.text(z.cols[0] * TILE - 1, Math.max(0, row), ` ${cut(z.proj, 16)} `, z.color, C.night)
+		const named = new Set<string>()
+		for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
+			if (named.has(pod.proj)) continue
+			named.add(pod.proj)
+			// A nameplate is text, not furniture, so it may run past its pod into the
+			// empty floor beside it — a one-desk project would otherwise read "dr…".
+			const sameBand = this.pods.filter((p) => p.deskRow === pod.deskRow && p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0)
+			const limit = sameBand.length ? sameBand[0].c0 : this.cols - 1
+			const span = (limit - pod.c0) * TILE - 1
+			const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `
+			cv.text(pod.c0 * TILE, Math.floor((pod.deskRow * TILE + 2) / 2), text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
 		}
 		const taken = new Map<number, [number, number][]>()
 		const claim = (row: number, col: number, len: number) => {
@@ -503,34 +952,43 @@ export class Office {
 			taken.set(row, used)
 			return c
 		}
-		// urgent first, so if space runs out it is the quiet ones that lose a label
-		const priority = [...placed].sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.x - b.x)
-		for (const p of priority) {
+		for (const p of [...placed].sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.x - b.x)) {
 			const s = p.s
 			const look = LOOK[s.state]
 			const sel = s.id === selected
 			const urgent = s.state === 'needs'
-			// a parked session has nothing to say, and saying nothing frees the room
-			// for the ones that do
-			if (s.state === 'parked' && !sel) continue
 			if (!showAll && !urgent && !sel) continue
+			if (s.state === 'parked' && !sel && !urgent) continue
 			const row = Math.floor(p.y / 2) - 1
-			// short here on purpose; the table below carries the full sentence
-			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.doing || s.title, sel ? 34 : 20)} `
-			const col = claim(row, p.x - 4, text.length)
+			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.doing || s.title, sel ? 32 : 18)} `
+			const col = claim(row, p.x - 2, text.length)
 			if (col === null) continue
 			const bgc = urgent ? look.color : sel ? C.gold : C.paper
 			cv.text(col, row, text, C.ink, bgc)
-			cv.text(Math.max(0, p.x + 6), row + 1, '▾', bgc, null)
 		}
 	}
 }
 
-/** A desk seen from above: worktop with a monitor that lights up when in use. */
-function drawDesk(cv: Canvas, x: number, y: number, _left: boolean, lit: boolean) {
+const hash = (s: string) => {
+	let h = 0
+	for (let i = 0; i < s.length; i++) h = (Math.imul(h, 31) + s.charCodeAt(i)) | 0
+	return Math.abs(h)
+}
+
+/** A worktop with a monitor whose screen lights up while its owner works. */
+function drawDesk(cv: Canvas, x: number, y: number, lit: boolean) {
 	cv.rect(x, y, TILE, TILE, C.deskTop)
 	cv.rect(x, y, TILE, 1, C.deskEdge)
-	cv.rect(x, y + TILE - 1, TILE, 1, C.deskEdge)
-	cv.rect(x + 1, y + 1, TILE - 2, TILE - 3, C.monitorCase)
-	cv.rect(x + 2, y + 2, TILE - 4, TILE - 5, lit ? C.screenOn : C.screenOff)
+	cv.rect(x + 1, y + 1, TILE - 2, TILE - 2, C.monitorCase)
+	cv.rect(x + 1, y + 1, TILE - 2, TILE - 3, lit ? C.screenOn : C.screenOff)
+}
+
+function drawSlab(cv: Canvas, x: number, y: number, top: RGB, edge: RGB) {
+	cv.rect(x, y, TILE, TILE, top)
+	cv.rect(x, y, TILE, 1, edge)
+}
+
+function drawPlant(cv: Canvas, x: number, y: number) {
+	cv.rect(x + 1, y, TILE - 2, TILE - 1, C.tree)
+	cv.rect(x + 1, y + TILE - 1, TILE - 2, 1, C.trunk)
 }

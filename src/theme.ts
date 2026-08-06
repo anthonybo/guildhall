@@ -39,6 +39,12 @@ export const C = {
 	monitorCase: [40, 42, 54] as RGB,
 	screenOn: [120, 226, 200] as RGB,
 	screenOff: [58, 62, 78] as RGB,
+	counter: [188, 176, 152] as RGB,
+	counterEdge: [140, 128, 108] as RGB,
+	tableTop: [96, 132, 108] as RGB,
+	tableEdge: [64, 96, 76] as RGB,
+	couch: [122, 108, 156] as RGB,
+	couchEdge: [88, 76, 116] as RGB,
 
 	// town (kept for the older renderer)
 	grass: [104, 176, 96] as RGB,
