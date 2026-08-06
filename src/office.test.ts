@@ -21,6 +21,7 @@ function session(id: string, proj: string, state: State): Session {
 		stale: 60_000,
 		title: `work on ${proj}`,
 		doing: 'editing a file',
+		short: 'Editing a file',
 		last: 'said a thing',
 		ctxUsed: 50_000,
 		ctxLimit: 200_000,

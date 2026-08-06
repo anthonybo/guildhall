@@ -1088,9 +1088,12 @@ export class Office {
 		}
 		const taken = new Map<number, [number, number][]>()
 		const claim = (want: number, col: number, len: number) => {
-			// try the wanted row first, then walk upward, looking for a horizontal run
-			// clear of both other labels and any image
-			for (let row = want; row >= Math.max(0, want - 4); row--) {
+			// search outward from the wanted row so a label stays beside its owner;
+			// walking only upward parked them at the top of the screen
+			const order = [want]
+			for (let d = 1; d <= 4; d++) order.push(want - d, want + d)
+			for (const row of order) {
+				if (row < 0 || row >= cv.rows) continue
 				const used = [...(taken.get(row) ?? []), ...(this.imageSpans.get(row) ?? [])]
 				let c = Math.max(0, Math.min(cv.w - len, col))
 				let ok = true
@@ -1118,7 +1121,7 @@ export class Office {
 			const urgent = s.state === 'needs'
 			if (!showAll && !urgent && !sel) continue
 			if (s.state === 'parked' && !sel && !urgent) continue
-			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.doing || s.title, sel ? 32 : 18)} `
+			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.short || s.doing || s.title, sel ? 30 : 22)} `
 			const at = claim(Math.floor(p.y / 2) - 1, p.x - 2, text.length)
 			if (!at) continue
 			const bgc = urgent ? look.color : sel ? C.gold : C.paper
