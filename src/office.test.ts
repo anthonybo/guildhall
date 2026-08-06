@@ -214,7 +214,8 @@ test('ping pong has exactly zero or two players', () => {
 			if (s.kind !== 'pingpong' || !s.taken) continue
 			groups.set(s.group, (groups.get(s.group) ?? 0) + 1)
 		}
-		for (const n of groups.values()) assert.ok(n <= 2, `${n} players at one table`)
+		// zero or two: a solo player at a ping-pong table looks broken
+		for (const n of groups.values()) assert.ok(n === 2, `${n} player(s) at one table`)
 	}
 })
 
