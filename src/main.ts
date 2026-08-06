@@ -24,9 +24,10 @@ import {
 } from './kitty.ts'
 import { collect, needsAttention, order, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
-import { CHAR_H, CHAR_W, Office, type Placed } from './office.ts'
+import { CHAR_H, CHAR_W, Office, TILE, type Placed } from './office.ts'
 import { frameOf, loadSheets, shrink } from './characters.ts'
 import { monitor } from './screens.ts'
+import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -148,10 +149,15 @@ function draw() {
 			}
 		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
-		if (IMAGES) images = drawMonitors() + drawImages(placed)
-		else
-			for (const m of office.monitors)
-				cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed), CHAR_W, CHAR_W))
+		// furniture first, then monitors, then people on top of both
+		if (IMAGES) images = drawProps() + drawMonitors() + drawImages(placed)
+		else {
+			for (const pr of office.props) {
+				const size = PROP_SIZE[pr.kind]
+				cv.blit(pr.x, pr.y, shrink(prop(pr.kind), size.w * TILE, size.h * TILE))
+			}
+			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed), CHAR_W, CHAR_W))
+		}
 	}
 
 	const body: string[] = [...townLines]
@@ -196,6 +202,26 @@ function drawImages(placements: Placed[]) {
 	for (const p of placements) {
 		const id = ensureTransmitted(p, pre)
 		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, cols, rows, pid++)
+	}
+	return pre.join('') + out
+}
+
+/** Static furniture. Sent once per kind and then only re-placed each frame. */
+function drawProps() {
+	const pre: string[] = []
+	let out = ''
+	let pid = 200
+	for (const pr of office.props) {
+		const key = `prop:${pr.kind}`
+		let id = imageIds.get(key)
+		if (!id) {
+			id = nextId++
+			imageIds.set(key, id)
+			const up = upscale(prop(pr.kind).grid, 2)
+			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
+		}
+		const size = PROP_SIZE[pr.kind]
+		out += cursorTo((pr.y >> 1) + 2, pr.x + 1) + place(id, size.w * TILE, (size.h * TILE) / 2, pid++)
 	}
 	return pre.join('') + out
 }
