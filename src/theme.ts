@@ -107,15 +107,21 @@ export const LOOK: Record<State, { glyph: string; label: string; color: RGB }> =
 	parked: { glyph: '·', label: 'parked', color: [138, 138, 138] },
 }
 
+/** Twelve hues spaced around the wheel, so a dozen projects can each have their
+ *  own without two reading as the same colour. */
 export const ROOFS: RGB[] = [
-	[224, 96, 84],
-	[236, 152, 60],
-	[104, 168, 220],
-	[128, 196, 116],
-	[196, 128, 208],
-	[240, 196, 84],
-	[110, 200, 196],
-	[228, 128, 156],
+	[228, 96, 92],
+	[240, 148, 64],
+	[236, 200, 84],
+	[176, 208, 88],
+	[112, 200, 112],
+	[96, 206, 176],
+	[96, 190, 228],
+	[110, 150, 238],
+	[152, 130, 236],
+	[200, 124, 224],
+	[236, 120, 176],
+	[196, 152, 116],
 ]
 
 /* ── ansi ── */

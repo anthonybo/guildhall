@@ -185,6 +185,9 @@ export class Office {
 	private signature = ''
 	/** last row belonging to a desk band; downtime happens below this */
 	private workBottom = 0
+	/** project -> colour, assigned by index. A hash collides long before it runs
+	 *  out of colours, which is why several projects were sharing one. */
+	private zoneColor = new Map<string, RGB>()
 	/** rally phase, advanced by update() so the ball moves with real time */
 	private ballT = 0
 
@@ -216,6 +219,8 @@ export class Office {
 			this.grid[r][0] = 'wall'
 			this.grid[r][cols - 1] = 'wall'
 		}
+		this.zoneColor.clear()
+		;[...new Set(projects.map((p) => p.name))].sort().forEach((name, i) => this.zoneColor.set(name, ROOFS[i % ROOFS.length]))
 		this.spots.clear()
 		this.seatTiles.clear()
 		this.pods = []
@@ -423,6 +428,11 @@ export class Office {
 	/** A spot tile is walkable only by whoever holds it, so nobody stands in
 	 *  someone else's chair — the reference's withOwnSeatUnblocked, inlined. */
 	/** Is this tile open floor, ignoring who owns it? Used by reachability tests. */
+	/** A project colour, for tests and callers that need it. */
+	colourOf(proj: string) {
+		return this.zoneColor.get(proj) ?? ROOFS[0]
+	}
+
 	isOpen(col: number, row: number) {
 		if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false
 		return this.grid[row][col] === 'floor'
@@ -999,7 +1009,7 @@ export class Office {
 			for (let c = 0; c < this.cols; c++) {
 				const z = this.zoneOf[r][c]
 				if (!z) continue
-				const col = ROOFS[hash(z) % ROOFS.length]
+				const col = this.zoneColor.get(z) ?? ROOFS[0]
 				cv.tint(c * TILE, r * TILE, TILE, TILE, col, 0.2)
 				// edge only where the neighbour differs, which gives a pod-shaped rug
 				if (this.zoneOf[r - 1]?.[c] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + i, r * TILE, col)
@@ -1085,7 +1095,8 @@ export class Office {
 	}
 
 	/** Project nameplates and per-character status labels. */
-	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
+	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true, sessions: Session[] = []) {
+		const byId = new Map(sessions.map((s) => [s.id, s]))
 		const named = new Set<string>()
 		for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
 			if (named.has(pod.proj)) continue
@@ -1106,7 +1117,7 @@ export class Office {
 			// the desk row carries monitor images, which draw over text, so the plate
 			// goes on the aisle row below the pod
 			const plateRow = Math.min(cv.rows - 1, Math.floor(((pod.seatRow + 1) * TILE) / 2))
-			cv.text(Math.max(0, startCol), plateRow, text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
+			cv.text(Math.max(0, startCol), plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0])
 		}
 		// Characters are images as well, so their extents have to block text just
 		// like furniture does, or a head gets drawn over a label.
@@ -1119,6 +1130,25 @@ export class Office {
 			}
 		}
 		const taken = new Map<number, [number, number][]>()
+		// Level on the workstation. The worktop is canvas rather than an image, so a
+		// whole cell fits here — which is the only place in the room a digit is
+		// legible. Reads like a tag on the machine, and it is unambiguously that
+		// desk's occupant.
+		for (const sp of this.spots.values()) {
+			if (sp.kind !== 'desk' || !sp.taken) continue
+			const s = byId.get(sp.taken)
+			if (!s) continue
+			// the desk's own columns are taken by its monitor and its occupant, so the
+			// tag goes in the gap column beside it — desks sit on alternate columns
+			const row = (((sp.row - 1) * TILE) >> 1) + 1
+			const col = sp.col * TILE + TILE
+			if (row < 0 || row >= cv.rows || this.blocked(row, col, 1, taken)) continue
+			cv.text(col, row, levelGlyph(s.level), C.night, tierOf(s.level).color)
+			const arr = taken.get(row) ?? []
+			arr.push([col, col + 1])
+			taken.set(row, arr)
+		}
+
 		const claim = (want: number, col: number, len: number) => {
 			// search outward from the wanted row so a label stays beside its owner;
 			// walking only upward parked them at the top of the screen
