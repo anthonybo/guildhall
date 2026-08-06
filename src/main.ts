@@ -44,7 +44,9 @@ function ensureTransmitted(p: Placed, pre: string[]) {
 	if (known) return known
 	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step)
 	// nearest-neighbour 4x so the terminal has real pixels to scale from
-	const up = upscale(g.grid, 4)
+	// 2x, not 4x: a 4x source made the terminal DOWNSCALE into the placement box,
+	// which is a fractional resample and the reason sprites looked mushy
+	const up = upscale(g.grid, 2)
 	const id = nextId++
 	imageIds.set(key, id)
 	pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
@@ -122,7 +124,7 @@ function layout() {
 
 	if (cols !== geom.cols || townRows !== geom.townRows) {
 		cv = new Canvas(cols, Math.max(2, townRows) * 2)
-		office.fit(cv.w, cv.h)
+		office.fit(cv.w, cv.h, list)
 	}
 	geom = { cols, rows, townRows, tableRows }
 	office.assign(list)
