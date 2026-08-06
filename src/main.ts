@@ -9,7 +9,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { spawn } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
 	clearPlacements,
@@ -75,9 +75,28 @@ function paint(lines: string[], images: string) {
 	OUT.write(buf)
 }
 
-function jump(tab: number) {
+/**
+ * Jump to a tab by its POSITION, the number the user sees.
+ *
+ * `select-workspace --workspace N` resolves a bare number as a ref, and cmux's
+ * refs do not follow its display order — ref 1 was the fourth tab here — so
+ * passing the position directly lands on the wrong session. Ask cmux for its own
+ * ordering and translate.
+ */
+function jump(position: number) {
 	try {
-		spawn(CMUX, ['select-workspace', '--workspace', String(tab)], { stdio: 'ignore', detached: true }).unref()
+		const out = execFileSync(CMUX, ['workspace', 'list'], {
+			encoding: 'utf8',
+			env: { ...process.env, CMUX_QUIET: '1' },
+			stdio: ['ignore', 'pipe', 'ignore'],
+		})
+		const refs = out
+			.split('\n')
+			.map((l) => /workspace:(\d+)/.exec(l)?.[1])
+			.filter((r): r is string => !!r)
+		const ref = refs[position - 1]
+		if (!ref) return
+		spawn(CMUX, ['select-workspace', '--workspace', `workspace:${ref}`], { stdio: 'ignore', detached: true }).unref()
 	} catch {}
 }
 
