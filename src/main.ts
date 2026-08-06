@@ -221,7 +221,7 @@ function drawImages(placements: Placed[]) {
 	const rows = CHAR_H / 2
 	for (const p of placements) {
 		const id = ensureTransmitted(p, pre)
-		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, cols, rows, pid++)
+		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, cols, rows, pid++, 3)
 	}
 	return pre.join('') + out
 }
@@ -241,7 +241,8 @@ function drawProps() {
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		const size = PROP_SIZE[pr.kind]
-		out += cursorTo((pr.y >> 1) + 2, pr.x + 1) + place(id, size.w * TILE, (size.h * TILE) / 2, pid++)
+		// furniture behind, workstations above it, people above everything
+		out += cursorTo((pr.y >> 1) + 2, pr.x + 1) + place(id, size.w * TILE, (size.h * TILE) / 2, pid++, 1)
 	}
 	return pre.join('') + out
 }
@@ -260,7 +261,7 @@ function drawMonitors() {
 			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
-		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++)
+		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2)
 	}
 	return pre.join('') + out
 }

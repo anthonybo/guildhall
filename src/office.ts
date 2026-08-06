@@ -1145,7 +1145,7 @@ export class Office {
 			// a bare digit beside a desk reads as a desk number, so the tier initial
 			// goes with it: v8 is a rank, 8 is furniture
 			const tier = tierOf(s.level)
-			const chip = `${tier.name[0]}${levelGlyph(s.level)}`
+			const chip = `L${levelGlyph(s.level)}`
 			if (row < 0 || row >= cv.rows || this.blocked(row, col, chip.length, taken)) continue
 			cv.text(col, row, chip, C.night, tier.color)
 			const arr = taken.get(row) ?? []
