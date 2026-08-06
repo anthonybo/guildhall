@@ -27,6 +27,7 @@ function session(id: string, proj: string, state: State): Session {
 		ctxLimit: 200_000,
 		tab: 1,
 		unread: false,
+		toolKind: 'edit' as const,
 		palette: 0,
 		hueShift: 0,
 	}

@@ -32,8 +32,20 @@ const cache = new Map<string, Grid>()
  * that is working has a screen that visibly changes. `off` screens are dark and
  * static, which is what makes an unoccupied desk read as unoccupied.
  */
-export function monitor(lit: boolean, frame: number, seed = 0): Grid {
-	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}`
+export type Kind = 'edit' | 'read' | 'run' | 'search' | 'agent' | 'think'
+
+/** Screen tint by tool class, so the whole room is readable at a glance. */
+const TINT: Record<Kind, RGB> = {
+	edit: [120, 170, 255],
+	read: [110, 220, 235],
+	run: [250, 180, 90],
+	search: [200, 160, 250],
+	agent: [160, 235, 150],
+	think: [150, 160, 190],
+}
+
+export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think'): Grid {
+	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}`
 	const hit = cache.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: H }, () => new Array<RGB | null>(W).fill(null))
@@ -59,7 +71,7 @@ export function monitor(lit: boolean, frame: number, seed = 0): Grid {
 			const wob = ((frame + i * 3 + seed) % 5) - 2
 			const len = Math.max(2, Math.min(11, lens[i] + wob))
 			const indent = i === 1 || i === 3 ? 3 : 2
-			for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, CODE[(i + seed) % CODE.length])
+			for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length])
 		}
 		// caret, blinking on alternate frames
 		if (frame % 2 === 0) put(3, 9, [250, 250, 250])

@@ -170,7 +170,7 @@ export class Office {
 	hiddenCount = 0
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
-	monitors: { x: number; y: number; lit: boolean; seed: number }[] = []
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
@@ -1018,17 +1018,23 @@ export class Office {
 			}
 		}
 		this.monitors = []
-		const lit = new Set<string>()
+		const lit = new Map<string, Session['toolKind']>()
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
 			const s = byId.get(sp.taken)
-			if (s && this.atDesk(s)) lit.add(`${sp.col},${sp.row}`)
+			if (s && this.atDesk(s)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
 			// step 2: desks sit on alternate columns, so only those get a monitor
 			for (let c = pod.c0; c <= pod.c1; c += 2) {
-				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
+				this.monitors.push({
+					x: c * TILE,
+					y: pod.monitorRow * TILE,
+					lit: lit.has(`${c},${pod.seatRow}`),
+					seed: c + pod.monitorRow,
+					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
+				})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 			}
 		for (const pr of this.props) {

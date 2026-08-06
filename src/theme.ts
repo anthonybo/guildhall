@@ -38,6 +38,12 @@ export const C = {
 	deskPaper: [232, 228, 214] as RGB,
 	monitorCase: [40, 42, 54] as RGB,
 	screenOn: [120, 226, 200] as RGB,
+	// screen tint by what the session is doing, readable across the whole room
+	screenEdit: [120, 170, 255] as RGB,
+	screenRead: [110, 220, 235] as RGB,
+	screenRun: [250, 180, 90] as RGB,
+	screenSearch: [200, 160, 250] as RGB,
+	screenAgent: [160, 235, 150] as RGB,
 	screenOff: [58, 62, 78] as RGB,
 	counter: [188, 176, 152] as RGB,
 	counterEdge: [140, 128, 108] as RGB,
@@ -75,8 +81,10 @@ export const C = {
  * presentation or a variation selector, both of which shift column widths.
  */
 export const LOOK: Record<State, { glyph: string; label: string; color: RGB }> = {
-	needs: { glyph: '▲', label: 'needs you', color: [255, 95, 95] },
-	working: { glyph: '●', label: 'working', color: [255, 175, 95] },
+	needs: { glyph: '▲', label: 'needs you', color: [255, 176, 60] },
+	// amber is reserved for "your turn" everywhere else in the Claude tooling, so
+	// working takes the cool colour its own lit screen already uses
+	working: { glyph: '●', label: 'working', color: [120, 226, 200] },
 	shell: { glyph: '◍', label: 'shell', color: [95, 175, 215] },
 	// healthy and finished: deliberately cool and quiet, not green
 	done: { glyph: '○', label: 'your turn', color: [135, 206, 250] },
