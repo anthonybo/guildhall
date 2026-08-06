@@ -40,6 +40,8 @@ export type Session = {
 	stale: number
 	title: string
 	doing: string
+	/** a few words for the in-world label; the table shows the full detail */
+	short: string
 	last: string
 	ctxUsed: number
 	ctxLimit: number
@@ -243,6 +245,44 @@ function cleanCmd(c: unknown) {
 	return s
 }
 
+/**
+ * Short phrases for the label over a character's head, matching the vocabulary
+ * pixel-agents uses in its overlay: Reading / Editing / Writing / Running /
+ * Searching. A truncated shell command floating over someone's head tells you
+ * nothing; the table below has room for the real thing.
+ */
+const SHORT: Record<string, (i: any) => string> = {
+	Edit: (i) => `Editing ${bn(i.file_path)}`,
+	Write: (i) => `Writing ${bn(i.file_path)}`,
+	Read: (i) => `Reading ${bn(i.file_path)}`,
+	NotebookEdit: (i) => `Editing ${bn(i.notebook_path)}`,
+	Bash: (i) => {
+		const c = cleanCmd(i.command) ?? ''
+		// just the program and its first argument — "Running npm test"
+		const words = c.split(' ').filter(Boolean).slice(0, 2).join(' ')
+		return words ? `Running ${cut(words, 18)}` : 'Running a command'
+	},
+	Grep: () => 'Searching',
+	Glob: () => 'Looking for files',
+	Task: () => 'Running an agent',
+	Agent: () => 'Running an agent',
+	Workflow: () => 'Running a workflow',
+	WebSearch: () => 'Searching the web',
+	WebFetch: () => 'Fetching a page',
+	TodoWrite: () => 'Planning',
+	TaskCreate: () => 'Planning',
+	ExitPlanMode: () => 'Presenting a plan',
+	AskUserQuestion: () => 'Asking you something',
+}
+
+function shortText(d: Digest, state: State, waitingFor?: string) {
+	if (state === 'needs') return waitingFor === 'permission prompt' ? 'Needs approval' : 'Waiting for input'
+	if (state !== 'working' && state !== 'shell') return ''
+	if (!d.tool) return 'Thinking'
+	if (d.tool.startsWith('mcp__')) return cut(d.tool.split('__').slice(-1)[0], 20)
+	return SHORT[d.tool]?.(d.toolInput ?? {}) ?? cut(d.tool, 20)
+}
+
 const SAY: Record<string, (i: any) => string | null> = {
 	Edit: (i) => `editing ${bn(i.file_path)}`,
 	Write: (i) => `writing ${bn(i.file_path)}`,
@@ -326,6 +366,7 @@ export function collect(): Session[] {
 			stale,
 			title: d.title || (s.nameSource === 'derived' ? '' : (s.name ?? '')) || proj,
 			doing: doingText(d, state, s.waitingFor),
+			short: shortText(d, state, s.waitingFor),
 			last: firstSentence(d.text),
 			ctxUsed: used,
 			ctxLimit: used > 190_000 ? 1_000_000 : 200_000,

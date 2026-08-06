@@ -323,7 +323,22 @@ function main() {
 	}
 	process.on('SIGINT', cleanup)
 	process.on('SIGTERM', cleanup)
-	OUT.on('resize', start)
+	// A resize makes the terminal drop the images it is holding, so every id we
+	// cached is stale and re-placing them renders nothing. Tear the whole image
+	// layer down, forget the ids, and rebuild. Debounced because a drag fires
+	// this dozens of times.
+	let resizeTimer: NodeJS.Timeout | null = null
+	OUT.on('resize', () => {
+		if (resizeTimer) clearTimeout(resizeTimer)
+		resizeTimer = setTimeout(() => {
+			resizeTimer = null
+			OUT.write(clearAll())
+			imageIds.clear()
+			prev = []
+			OUT.write('\x1b[2J')
+			start()
+		}, 80)
+	})
 	start()
 }
 
