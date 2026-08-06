@@ -10,7 +10,7 @@ import type { RGB } from './png.ts'
 import type { Grid } from './characters.ts'
 
 const W = 16
-const H = 16
+const H = 24 // screen on top, desk surface with keyboard and mug below
 
 const CASE: RGB = [46, 48, 62]
 const CASE_LIT: RGB = [72, 76, 96]
@@ -56,9 +56,22 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 		for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c)
 	}
 
-	// stand and base, so it reads as a monitor and not a floating rectangle
-	box(7, 12, 2, 2, BASE)
-	box(5, 14, 6, 1, CASE)
+	// desk surface under the screen, with the things a desk actually has on it
+	const WOOD: RGB = [138, 96, 62]
+	const WOOD_DK: RGB = [104, 70, 44]
+	box(0, 16, W, 8, WOOD)
+	box(0, 16, W, 1, [168, 122, 82])
+	box(0, 23, W, 1, WOOD_DK)
+	// stand and base
+	box(7, 12, 2, 3, BASE)
+	box(5, 15, 6, 1, CASE)
+	// keyboard
+	box(3, 18, 9, 3, [58, 62, 78])
+	box(4, 19, 7, 1, [92, 98, 118])
+	// mug, and a small stack of paper
+	box(13, 18, 3, 3, [226, 118, 96])
+	put(12, 19, [226, 118, 96])
+	box(0, 19, 2, 2, [236, 234, 226])
 	// bezel
 	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
 	box(2, 2, 12, 9, DARK)

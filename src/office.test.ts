@@ -394,7 +394,8 @@ test('a label never lands inside a character sprite', () => {
 test('what an image blocks matches what gets drawn', () => {
 	// a monitor placed three cell rows tall but blocking two let labels land in the
 	// third row and be covered by it
-	assert.equal(MON_ROWS, TILE / 2 + 1)
+	// the workstation image is the screen plus the desk surface under it
+	assert.equal(MON_ROWS, TILE / 2 + 2)
 	assert.equal(MON_COLS, TILE)
 	const list = [session('a', 'alpha', 'working'), session('b', 'alpha', 'working')]
 	const { cv, office } = room(list)
@@ -430,7 +431,7 @@ test('every occupied desk shows its occupant level', () => {
 	for (const sp of desks) {
 		const r = (((sp.row - 1) * TILE) >> 1) + 1
 		const c = sp.col * TILE + TILE
-		if (/[1-9★]/.test(rows[r]?.[c] ?? '')) shown++
+		if (/[a-z][1-9★]/.test((rows[r] ?? '').slice(c, c + 2))) shown++
 	}
 	assert.equal(shown, desks.length, `${desks.length - shown} desks missing their level tag`)
 })

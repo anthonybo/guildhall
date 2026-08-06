@@ -31,7 +31,7 @@ export const CHAR_H = TILE * 2
  *  seated characters shift down by that fraction to put the body on the seat. */
 /** Monitor image box, in cells. Whatever blocks text must match what is drawn. */
 export const MON_COLS = TILE
-export const MON_ROWS = TILE / 2 + 1
+export const MON_ROWS = TILE / 2 + 2 // screen plus the desk surface beneath it
 export const SIT_SINK = Math.round((CHAR_H * 6) / 32)
 
 const WALK_TILES_PER_SEC = 3
@@ -1142,10 +1142,14 @@ export class Office {
 			// tag goes in the gap column beside it — desks sit on alternate columns
 			const row = (((sp.row - 1) * TILE) >> 1) + 1
 			const col = sp.col * TILE + TILE
-			if (row < 0 || row >= cv.rows || this.blocked(row, col, 1, taken)) continue
-			cv.text(col, row, levelGlyph(s.level), C.night, tierOf(s.level).color)
+			// a bare digit beside a desk reads as a desk number, so the tier initial
+			// goes with it: v8 is a rank, 8 is furniture
+			const tier = tierOf(s.level)
+			const chip = `${tier.name[0]}${levelGlyph(s.level)}`
+			if (row < 0 || row >= cv.rows || this.blocked(row, col, chip.length, taken)) continue
+			cv.text(col, row, chip, C.night, tier.color)
 			const arr = taken.get(row) ?? []
-			arr.push([col, col + 1])
+			arr.push([col, col + chip.length])
 			taken.set(row, arr)
 		}
 
