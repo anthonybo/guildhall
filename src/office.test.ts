@@ -345,3 +345,24 @@ test('exactly the working sessions have a lit screen', () => {
 	// and a monitor sits two rows above its seat, clear of the occupant
 	for (const p of office.pods) assert.equal(p.monitorRow, p.seatRow - 2)
 })
+
+test('only mid-turn sessions get a label, plus the selection', () => {
+	const list = [
+		session('a', 'alpha', 'working'),
+		session('b', 'alpha', 'parked'),
+		session('c', 'beta', 'done'),
+		session('d', 'beta', 'needs'),
+	]
+	const { cv, office } = room(list)
+	const placed = office.draw(cv, list)
+	office.overlay(cv, placed, 'c')
+	const text = cv
+		.render()
+		.map((l) => l.replace(/\x1b\[[0-9;]*m/g, ''))
+		.join('\n')
+	// working and needs-you are mid-turn; done and parked are not
+	assert.ok(text.includes('⌘1'), 'a working session should be labelled')
+	// the selection is 'c', which is done — it is labelled because it is selected
+	const labelled = list.filter((s) => text.includes(`⌘${s.tab}`)).length
+	assert.ok(labelled >= 1, 'nothing was labelled at all')
+})

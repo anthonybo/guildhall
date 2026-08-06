@@ -170,9 +170,9 @@ export class Office {
 	monitors: { x: number; y: number; lit: boolean; seed: number }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
-	/** cell rows covered by an image; kitty draws images over text, so labels
-	 *  must not be placed on these or they end up hidden behind furniture */
-	private imageRows = new Set<number>()
+	/** cell spans covered by an image, per cell row. Kitty draws images over text,
+	 *  so a label must not overlap one — but sharing the row is fine. */
+	private imageSpans = new Map<number, [number, number][]>()
 	private grid: Kind[][] = []
 	private zoneOf: (string | null)[][] = []
 	private walkable: { col: number; row: number }[] = []
@@ -993,6 +993,15 @@ export class Office {
 				if (this.zoneOf[r][c + 1] !== z) for (let i = 0; i < TILE; i++) cv.set(c * TILE + TILE - 1, r * TILE + i, col)
 			}
 		}
+		this.imageSpans.clear()
+		const block = (x: number, y: number, w: number, hRows: number) => {
+			for (let i = 0; i < hRows; i++) {
+				const row = (y >> 1) + i
+				const arr = this.imageSpans.get(row) ?? []
+				arr.push([x, x + w])
+				this.imageSpans.set(row, arr)
+			}
+		}
 		this.monitors = []
 		const lit = new Set<string>()
 		for (const sp of this.spots.values()) {
@@ -1004,12 +1013,11 @@ export class Office {
 		for (const pod of this.pods)
 			for (let c = pod.c0; c <= pod.c1; c++) {
 				this.monitors.push({ x: c * TILE, y: pod.monitorRow * TILE, lit: lit.has(`${c},${pod.seatRow}`), seed: c + pod.monitorRow })
-				for (let i = 0; i < TILE / 2; i++) this.imageRows.add(((pod.monitorRow * TILE) >> 1) + i)
+				block(c * TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 			}
-		this.imageRows.clear()
 		for (const pr of this.props) {
 			const size = PROP_SIZE[pr.kind]
-			for (let i = 0; i < (size.h * TILE) / 2; i++) this.imageRows.add((pr.y >> 1) + i)
+			block(pr.x, pr.y, size.w * TILE, (size.h * TILE) / 2)
 		}
 		for (let r = 0; r < this.rows; r++)
 			for (let c = 0; c < this.cols; c++) {
@@ -1080,10 +1088,10 @@ export class Office {
 		}
 		const taken = new Map<number, [number, number][]>()
 		const claim = (want: number, col: number, len: number) => {
-			// walk upward past any row an image covers, then find a free run on it
+			// try the wanted row first, then walk upward, looking for a horizontal run
+			// clear of both other labels and any image
 			for (let row = want; row >= Math.max(0, want - 4); row--) {
-				if (this.imageRows.has(row)) continue
-				const used = taken.get(row) ?? []
+				const used = [...(taken.get(row) ?? []), ...(this.imageSpans.get(row) ?? [])]
 				let c = Math.max(0, Math.min(cv.w - len, col))
 				let ok = true
 				for (let g = 0; g < 40; g++) {
@@ -1096,8 +1104,9 @@ export class Office {
 					}
 				}
 				if (!ok) continue
-				used.push([c, c + len])
-				taken.set(row, used)
+				const mine = taken.get(row) ?? []
+				mine.push([c, c + len])
+				taken.set(row, mine)
 				return { row, col: c }
 			}
 			return null
