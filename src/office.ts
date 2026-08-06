@@ -1128,25 +1128,58 @@ export class Office {
 			}
 			return null
 		}
+		// Every character carries the same one-cell badge in the same place, pinned
+		// beside its own head. A marker that is always present and never moves is a
+		// legend you learn once; a label that relocates to free space has thrown away
+		// the only thing it needed to say, which is whose it is.
+		//
+		// Words are detail-on-demand: the selection, and anything blocked on you.
+		// They extend from the badge along the same row and are never rehomed. If the
+		// words will not fit, the words go — the badge stays.
 		for (const p of [...placed].sort((a, b) => RANK[a.s.state] - RANK[b.s.state] || a.x - b.x)) {
 			const s = p.s
 			const look = LOOK[s.state]
 			const sel = s.id === selected
 			const urgent = s.state === 'needs'
-			// A label means one thing: this session is mid-turn, and this is what it
-			// is doing. Anything else only gets one when you select it.
-			const midTurn = s.state === 'working' || s.state === 'shell' || urgent
-			if (!midTurn && !sel) continue
-			if (!showAll && !urgent && !sel) continue
-			// a finished session says what it is working ON, not the first fragment
-			// of whatever it last printed
-			const body = s.short || (midTurn ? s.doing : s.title) || s.title
-			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(body, sel ? 30 : 22)} `
-			const at = claim(Math.floor(p.y / 2) - 1, p.x - 2, text.length)
+			const row = p.y >> 1
+			// nearest free cell to the head: right, left, then a row up or down. An
+			// image would hide it, so a blocked cell is no use even though it is close.
+			const spots: [number, number][] = [
+				[row, p.x + CHAR_W],
+				[row, p.x - 1],
+				[row + 1, p.x + CHAR_W],
+				[row - 1, p.x + CHAR_W],
+				[row + 1, p.x - 1],
+				[row - 1, p.x - 1],
+			]
+			const at = spots.find(([r, c]) => r >= 0 && r < cv.rows && c >= 0 && c < cv.w && !this.blocked(r, c, 1, taken))
 			if (!at) continue
-			const bgc = urgent ? look.color : sel ? C.gold : C.paper
-			cv.text(at.col, at.row, text, C.ink, bgc)
+			const [badgeRow, badgeCol] = at
+			cv.text(badgeCol, badgeRow, look.glyph, look.color, C.night)
+			const mine = taken.get(badgeRow) ?? []
+			mine.push([badgeCol, badgeCol + 1])
+			taken.set(badgeRow, mine)
+
+			if (!showAll && !urgent && !sel) continue
+			if (!urgent && !sel) continue
+			const body = s.short || (s.state === 'working' || s.state === 'shell' ? s.doing : s.title) || s.title
+			const text = `${s.tab ? `⌘${s.tab} ` : ''}${cut(body, 26)} `
+			// same row, immediately after the badge; try the left side if it overruns
+			const rightFits = badgeCol + 1 + text.length <= cv.w && !this.blocked(badgeRow, badgeCol + 1, text.length, taken)
+			const leftCol = p.x - text.length
+			const fits = rightFits ? badgeCol + 1 : leftCol >= 0 && !this.blocked(badgeRow, leftCol, text.length, taken) ? leftCol : -1
+			if (fits < 0) continue
+			cv.text(fits, badgeRow, text, C.ink, urgent ? look.color : C.paper)
+			const used = taken.get(badgeRow) ?? []
+			used.push([fits, fits + text.length])
+			taken.set(badgeRow, used)
 		}
+	}
+
+	/** Is this run free of other text and of any image? */
+	private blocked(row: number, col: number, len: number, taken: Map<number, [number, number][]>) {
+		const spans = [...(taken.get(row) ?? []), ...(this.imageSpans.get(row) ?? [])]
+		return spans.some((r) => col < r[1] && col + len > r[0])
 	}
 }
 
