@@ -141,16 +141,43 @@ const cache = new Map<string, Grid>()
 /**
  * One animation frame, at native 16x32. `step` indexes into the pose's cycle.
  */
-export function frameOf(palette: number, hueShift: number, facing: Facing, pose: Pose, step: number): Grid {
+/**
+ * Stamp a small badge onto the torso, like a name tag pinned to a shirt. It is
+ * composited into the sprite rather than drawn beside it, so it travels with the
+ * character and can never collide with anything.
+ */
+function pinBadge(g: Grid, colour: RGB): Grid {
+	const grid = g.grid.map((row) => [...row])
+	// the torso band, below the head and above the legs
+	const top = Math.round(g.h * 0.58)
+	for (let y = top; y < Math.min(g.h, top + 6); y++) {
+		const row = grid[y]
+		const first = row.findIndex((c) => c)
+		const last = row.reduce((acc, c, i) => (c ? i : acc), -1)
+		if (first < 0 || last - first < 3) continue
+		// one pixel in from the wearer's left, two by two
+		const x = first + 1
+		for (let dy = 0; dy < 2; dy++)
+			for (let dx = 0; dx < 2; dx++) {
+				const r = grid[y + dy]
+				if (r && r[x + dx]) r[x + dx] = colour
+			}
+		return { w: g.w, h: g.h, grid }
+	}
+	return { w: g.w, h: g.h, grid }
+}
+
+export function frameOf(palette: number, hueShift: number, facing: Facing, pose: Pose, step: number, badge?: RGB): Grid {
 	loadSheets()
-	const key = `${palette}:${hueShift}:${facing}:${pose}:${step}`
+	const key = `${palette}:${hueShift}:${facing}:${pose}:${step}:${badge?.join('') ?? ''}`
 	const hit = cache.get(key)
 	if (hit) return hit
 	const sheet = sheets[palette % sheets.length]
 	const cycle = POSE_FRAMES[pose]
 	const frame = cycle[step % cycle.length]
 	const rowIdx = ROWS.indexOf(facing === 'left' ? 'right' : facing)
-	const g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame, facing === 'left'), hueShift)
+	let g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame, facing === 'left'), hueShift)
+	if (badge) g = pinBadge(g, badge)
 	cache.set(key, g)
 	return g
 }
