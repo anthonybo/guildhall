@@ -28,6 +28,8 @@ function session(id: string, proj: string, state: State): Session {
 		tab: 1,
 		unread: false,
 		toolKind: 'edit' as const,
+		turns: 40,
+		level: 5,
 		palette: 0,
 		hueShift: 0,
 	}

@@ -7,7 +7,7 @@
  * transmits its ragged edge in both directions, which is what makes a terminal
  * table look "all over the place".
  */
-import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, padL, padR, tokens, width } from './theme.ts'
+import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width } from './theme.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
 export type Row = { s: Session; line: string }
@@ -18,6 +18,7 @@ const W_PROJ = 13
 const W_STATE = 2 + Math.max(...Object.values(LOOK).map((l) => l.label.length))
 const W_CTX = 12
 const W_IDLE = 4
+const W_LVL = 2
 
 export function tableWidths(total: number) {
 	// drop the project column on narrow terminals rather than starving the flex one
@@ -72,7 +73,7 @@ export function rows(list: Session[], total: number, selected?: string): Row[] {
 export function detail(s: Session | undefined, total: number) {
 	if (!s) return ['', '']
 	const ctx = s.ctxUsed ? `${tokens(s.ctxUsed)}/${tokens(s.ctxLimit)} context` : 'no context yet'
-	const meta = `${s.proj}${s.tab ? ` · ⌘${s.tab}` : ''} · ${ctx}`
+	const meta = `${s.proj}${s.tab ? ` · ⌘${s.tab}` : ''} · lv${s.level} ${tierOf(s.level).name} · ${s.turns} turns · ${ctx}`
 	return [
 		clip(`${fg(C.gold)}◆ ${fg(C.label)}${bold}${cut(s.title, Math.max(20, total - width(meta) - 6))}${R}  ${fg(C.faint)}${meta}${R}`, total),
 		clip(`${fg(C.muted)}  ${cut(s.doing || s.last || '—', total - 4)}${R}`, total),
@@ -82,7 +83,7 @@ export function detail(s: Session | undefined, total: number) {
 export function summary(list: Session[], total: number) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
-	const pills = (['needs', 'working', 'shell', 'done', 'parked'] as const)
+	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
 	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}`
