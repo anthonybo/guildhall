@@ -23,8 +23,8 @@ const W_LVL = 2
 export function tableWidths(total: number) {
 	// drop the project column on narrow terminals rather than starving the flex one
 	const showProj = total >= 84
-	const fixed = GUTTER + W_TAB + (showProj ? W_PROJ : 0) + W_STATE + W_CTX + W_IDLE
-	const gaps = showProj ? 6 : 5
+	const fixed = GUTTER + W_TAB + W_LVL + (showProj ? W_PROJ : 0) + W_STATE + W_CTX + W_IDLE
+	const gaps = showProj ? 7 : 6
 	return { showProj, flex: Math.max(12, total - fixed - gaps) }
 }
 
@@ -33,6 +33,7 @@ export function header(total: number) {
 	const cells = [
 		' '.repeat(GUTTER),
 		padL('TAB', W_TAB),
+		padL('LV', W_LVL),
 		showProj ? padR('PROJECT', W_PROJ) : '',
 		padR('STATUS', W_STATE),
 		padR('DOING NOW', flex),
@@ -58,6 +59,8 @@ export function rows(list: Session[], total: number, selected?: string): Row[] {
 		const cells = [
 			gutter,
 			`${fg(C.faint)}${padL(s.tab ? `⌘${s.tab}` : '·', W_TAB)}${R}`,
+			// level is identity, so it sits beside the tab rather than with the status
+			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
 			showProj ? `${fg(C.muted)}${padR(cut(s.proj, W_PROJ), W_PROJ)}${R}` : '',
 			`${fg(look.color)}${padR(`${look.glyph} ${look.label}`, W_STATE)}${R}`,
 			`${fg(s.state === 'parked' ? C.muted : C.label)}${padR(cut(s.doing || '—', flex), flex)}${R}`,

@@ -155,12 +155,15 @@ function pinBadge(g: Grid, colour: RGB): Grid {
 		const first = row.findIndex((c) => c)
 		const last = row.reduce((acc, c, i) => (c ? i : acc), -1)
 		if (first < 0 || last - first < 3) continue
-		// one pixel in from the wearer's left, two by two
+		// three by three with a dark edge, or at this scale it is four screen pixels
+		// of unoutlined colour and reads as nothing
 		const x = first + 1
-		for (let dy = 0; dy < 2; dy++)
-			for (let dx = 0; dx < 2; dx++) {
+		const edge: RGB = [24, 26, 34]
+		for (let dy = 0; dy < 3; dy++)
+			for (let dx = 0; dx < 3; dx++) {
 				const r = grid[y + dy]
-				if (r && r[x + dx]) r[x + dx] = colour
+				if (!r || !r[x + dx]) continue
+				r[x + dx] = dy === 0 || dx === 0 ? edge : colour
 			}
 		return { w: g.w, h: g.h, grid }
 	}
