@@ -245,11 +245,11 @@ export class Office {
 			const deskRow = monitorRow + 1
 			const seatRow = monitorRow + 2
 			let lo = 2
-			let hi = cols - 3
-			for (let side = 0; side < 2 && i < wishlist.length; side++) {
+			const hi = cols - 3
+			while (i < wishlist.length) {
 				const want = wishlist[i]
-				if (hi - lo + 1 < want.seats + (side === 0 ? 2 : 0)) break
-				const c0 = side === 0 ? lo : hi - want.seats + 1
+				if (lo + want.seats - 1 > hi) break
+				const c0 = lo
 				const c1 = c0 + want.seats - 1
 				for (let c = c0; c <= c1; c++) {
 					this.grid[deskRow][c] = 'desk'
@@ -269,8 +269,7 @@ export class Office {
 					for (const r of [monitorRow, deskRow, seatRow]) this.zoneOf[r][c] ??= want.proj
 				}
 				this.pods.push({ proj: want.proj, c0, c1, seatRow, deskRow, monitorRow })
-				if (side === 0) lo = c1 + 3
-				else hi = c0 - 1
+				lo = c1 + 3 // a two-tile gap so neighbouring pods stay legible
 				i++
 			}
 			band++
@@ -285,7 +284,11 @@ export class Office {
 		this.dropped = []
 
 		// social bands, anchored to the bottom so the gap becomes a corridor
-		const socialBands = bandRows.slice(band).slice(-2)
+		// +1 is the nameplate row; a standing character is two tiles tall, so its
+		// head reaches one row above its feet and must clear the plate as well
+		this.workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 1 : 1
+		const workBottom = this.workBottom + 2
+		const socialBands = bandRows.slice(band).filter((r) => r >= workBottom).slice(-2)
 		let wish = ['kitchen', 'pingpong', 'couch']
 		while (socialBands.length * 2 < wish.length - 1 && DROP_ORDER.some((d) => wish.includes(d))) {
 			const drop = DROP_ORDER.find((d) => wish.includes(d))!
@@ -320,8 +323,6 @@ export class Office {
 		// The talk area must be BELOW every desk band. Anything inside the work zone
 		// puts idle people on top of a workstation, which destroys the one signal
 		// that matters: whoever is at a desk is working.
-		this.workBottom = this.pods.length ? Math.max(...this.pods.map((p) => p.seatRow)) + 1 : 1
-		const workBottom = this.workBottom + 1
 		let talkRow = -1
 		for (let r = Math.max(workBottom, corridor); r < rows - 1 && talkRow < 0; r++)
 			if ([2, 3].every((c) => this.grid[r][c] === 'floor' && !this.seatTiles.has(`${c},${r}`))) talkRow = r
@@ -894,7 +895,7 @@ export class Office {
 			return !this.dest.get(k) && !this.seatTiles.has(k)
 		})
 		// keep downtime out of the work zone; walking THROUGH it is still fine
-		const social = open.filter((t) => t.row > this.workBottom)
+		const social = open.filter((t) => t.row > this.workBottom + 1)
 		return social.length ? social : open
 	}
 

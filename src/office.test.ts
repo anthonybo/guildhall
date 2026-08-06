@@ -314,9 +314,12 @@ test('an idle character never comes to rest inside the work zone', () => {
 		office.update(0.1, list)
 		for (const ch of office.chars.values()) {
 			if (ch.state === 'walk' || ch.state === 'type') continue
-			// standing under a pod hides its nameplate and muddies who is working
-			if (deskRows.has(ch.row) && !office.spots.get(ch.seatId ?? '')) bad++
-			if (deskRows.has(ch.row) && ch.row !== office.spots.get(ch.seatId!)?.row) bad++
+			const seat = office.spots.get(ch.seatId ?? '')
+			// standing at your OWN desk is fine — your head is over your own worktop
+			if (seat && ch.col === seat.col && ch.row === seat.row) continue
+			// otherwise a character is two tiles tall, so both its feet row and the
+			// row its head reaches into must clear the work zone
+			for (const r of [ch.row, ch.row - 1]) if (deskRows.has(r)) bad++
 		}
 	}
 	assert.equal(bad, 0, `${bad} character-frames idling inside the work zone`)
