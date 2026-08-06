@@ -1086,6 +1086,16 @@ export class Office {
 			const plateRow = Math.min(cv.rows - 1, Math.floor(((pod.seatRow + 1) * TILE) / 2))
 			cv.text(Math.max(0, startCol), plateRow, text, C.ink, ROOFS[hash(pod.proj) % ROOFS.length])
 		}
+		// Characters are images as well, so their extents have to block text just
+		// like furniture does, or a head gets drawn over a label.
+		for (const p of placed) {
+			for (let i = 0; i < CHAR_H / 2; i++) {
+				const row = (p.y >> 1) + i
+				const arr = this.imageSpans.get(row) ?? []
+				arr.push([p.x, p.x + CHAR_W])
+				this.imageSpans.set(row, arr)
+			}
+		}
 		const taken = new Map<number, [number, number][]>()
 		const claim = (want: number, col: number, len: number) => {
 			// search outward from the wanted row so a label stays beside its owner;
@@ -1119,9 +1129,15 @@ export class Office {
 			const look = LOOK[s.state]
 			const sel = s.id === selected
 			const urgent = s.state === 'needs'
+			// A label means one thing: this session is mid-turn, and this is what it
+			// is doing. Anything else only gets one when you select it.
+			const midTurn = s.state === 'working' || s.state === 'shell' || urgent
+			if (!midTurn && !sel) continue
 			if (!showAll && !urgent && !sel) continue
-			if (s.state === 'parked' && !sel && !urgent) continue
-			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(s.short || s.doing || s.title, sel ? 30 : 22)} `
+			// a finished session says what it is working ON, not the first fragment
+			// of whatever it last printed
+			const body = s.short || (midTurn ? s.doing : s.title) || s.title
+			const text = ` ${look.glyph}${s.tab ? `⌘${s.tab}` : ''} ${cut(body, sel ? 30 : 22)} `
 			const at = claim(Math.floor(p.y / 2) - 1, p.x - 2, text.length)
 			if (!at) continue
 			const bgc = urgent ? look.color : sel ? C.gold : C.paper
