@@ -50,6 +50,8 @@ export type Session = {
 	/** which character sheet, and how far its hue is rotated, for identity */
 	palette: number
 	hueShift: number
+	/** broad class of the current tool, for tinting the screen */
+	toolKind: 'edit' | 'read' | 'run' | 'search' | 'agent' | 'think'
 }
 
 const isAlive = (pid: number) => {
@@ -265,6 +267,21 @@ function cleanCmd(c: unknown) {
  * Searching. A truncated shell command floating over someone's head tells you
  * nothing; the table below has room for the real thing.
  */
+const KIND: Record<string, Session['toolKind']> = {
+	Edit: 'edit',
+	Write: 'edit',
+	NotebookEdit: 'edit',
+	Read: 'read',
+	Bash: 'run',
+	Grep: 'search',
+	Glob: 'search',
+	WebSearch: 'search',
+	WebFetch: 'read',
+	Task: 'agent',
+	Agent: 'agent',
+	Workflow: 'agent',
+}
+
 const SHORT: Record<string, (i: any) => string> = {
 	Edit: (i) => `Editing ${bn(i.file_path)}`,
 	Write: (i) => `Writing ${bn(i.file_path)}`,
@@ -343,7 +360,13 @@ export function collect(): Session[] {
 	const registry = liveSessions()
 	// Looks are handed out by index over a stable ordering, so a session keeps the
 	// same character for its whole life and no two collide until the sheets run out.
-	const looks = assignLooks([...registry].sort((a, b) => a.sessionId.localeCompare(b.sessionId)).map((s) => s.sessionId))
+	// seed the look by project so sessions in the same repo read as one team,
+	// matching the pod nameplate they sit under
+	const looks = assignLooks(
+		[...registry]
+			.sort((a, b) => a.cwd.localeCompare(b.cwd) || a.sessionId.localeCompare(b.sessionId))
+			.map((s) => s.sessionId),
+	)
 	return registry.map((s) => {
 		const file = idx.get(s.sessionId)
 		const d = file ? digest(file) : ({} as Digest)
@@ -391,6 +414,7 @@ export function collect(): Session[] {
 			ctxLimit: used > 190_000 ? 1_000_000 : 200_000,
 			tab: tab?.tab,
 			unread: !!tab?.unread,
+			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			palette: looks.get(s.sessionId)?.palette ?? 0,
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
@@ -418,8 +442,7 @@ export function order(list: Session[]) {
 		const at = needsAttention(a) ? 0 : 1
 		const bt = needsAttention(b) ? 0 : 1
 		if (at !== bt) return at - bt
-		const an = `${a.proj}${a.title}`
-		const bn2 = `${b.proj}${b.title}`
-		return an.localeCompare(bn2) || a.id.localeCompare(b.id)
+		if (a.stale !== b.stale) return b.stale - a.stale
+		return a.id.localeCompare(b.id)
 	})
 }
