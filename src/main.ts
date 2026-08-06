@@ -10,7 +10,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
-import { loadSprite } from './png.ts'
 import {
 	clearAll,
 	clearPlacements,
@@ -25,29 +24,29 @@ import {
 } from './kitty.ts'
 import { collect, needsAttention, order, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
-import { Office, type Placed } from './office.ts'
+import { CHAR_H, CHAR_W, Office, type Placed } from './office.ts'
+import { frameOf, loadSheets, shrink } from './characters.ts'
 import * as T from './table.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const TILES = path.join(ROOT, 'assets/tiny-creatures/Tiles')
 const CMUX = '/Applications/cmux.app/Contents/Resources/bin/cmux'
 const ONCE = process.argv.includes('--once')
 const BENCH = process.argv.includes('--bench')
 const IMAGES = supportsImages() && !ONCE && !BENCH
 
-const creatures: string[] = JSON.parse(fs.readFileSync(path.join(ROOT, 'assets/creatures.json'), 'utf8'))
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */
 const imageIds = new Map<string, number>()
 let nextId = 1000
-function ensureTransmitted(tile: string, pre: string[]) {
-	const known = imageIds.get(tile)
+function ensureTransmitted(p: Placed, pre: string[]) {
+	const key = `${p.s.palette}:${p.s.hueShift}:${p.facing}:${p.pose}:${p.step}`
+	const known = imageIds.get(key)
 	if (known) return known
-	const sp = loadSprite(path.join(TILES, tile), 0)
-	// nearest-neighbour 8x so the terminal has real pixels to draw with
-	const up = upscale(sp.grid, 8)
+	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step)
+	// nearest-neighbour 4x so the terminal has real pixels to scale from
+	const up = upscale(g.grid, 4)
 	const id = nextId++
-	imageIds.set(tile, id)
+	imageIds.set(key, id)
 	pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 	return id
 }
@@ -95,7 +94,6 @@ let geom = { cols: 0, rows: 0, townRows: 0, tableRows: 0 }
 let lastTick = 0
 /** A stalled event loop must not teleport anyone across the room. */
 const MAX_DT = 0.25
-const SPRITE_H = 14
 
 const visible = () => (faultsOnly ? sessions.filter((s) => needsAttention(s)) : sessions)
 
@@ -137,11 +135,15 @@ function draw() {
 	let townLines: string[] = []
 	let images = ''
 	if (townRows > 0) {
-		const placed = office.draw(cv, list, SPRITE_H)
-		if (!IMAGES) for (const p of placed) cv.blit(p.x, p.y, loadSprite(path.join(TILES, p.tile), SPRITE_H))
+		const placed = office.draw(cv, list)
+		if (!IMAGES)
+			for (const p of placed) {
+				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step)
+				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
+			}
 		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
-		if (IMAGES) images = drawImages(placed, SPRITE_H)
+		if (IMAGES) images = drawImages(placed)
 	}
 
 	const body: string[] = [...townLines]
@@ -167,17 +169,19 @@ function animate() {
 	draw()
 }
 
-function drawImages(placements: Placed[], spriteH: number) {
+/**
+ * Place each worker as a real image. The footprint is the world-scale one — one
+ * tile wide, two tall — but the terminal draws it at font resolution, so the
+ * sprite is far more detailed than the canvas grid it occupies.
+ */
+function drawImages(placements: Placed[]) {
 	const pre: string[] = []
 	let out = ''
 	let pid = 1
+	const cols = CHAR_W
+	const rows = CHAR_H / 2
 	for (const p of placements) {
-		const id = ensureTransmitted(p.tile, pre)
-		const sp = loadSprite(path.join(TILES, p.tile), 0)
-		// one canvas pixel is one column and half a row, so the footprint matches
-		// the half-block fallback exactly while the image is drawn at font resolution
-		const cols = Math.round((sp.w / sp.h) * spriteH)
-		const rows = Math.ceil(spriteH / 2)
+		const id = ensureTransmitted(p, pre)
 		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, cols, rows, pid++)
 	}
 	return pre.join('') + out
@@ -222,7 +226,7 @@ function start() {
 	timers.push(setInterval(animate, 110))
 	timers.push(
 		setInterval(() => {
-			sessions = collect(creatures)
+			sessions = collect()
 			layout()
 			draw()
 		}, 2000),
@@ -230,7 +234,7 @@ function start() {
 }
 
 function main() {
-	sessions = collect(creatures)
+	sessions = collect()
 	if (!sessions.length) {
 		console.log('no live claude sessions found')
 		process.exit(0)

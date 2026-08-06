@@ -72,7 +72,7 @@ export function rows(list: Session[], total: number, selected?: string): Row[] {
 export function detail(s: Session | undefined, total: number) {
 	if (!s) return ['', '']
 	const ctx = s.ctxUsed ? `${tokens(s.ctxUsed)}/${tokens(s.ctxLimit)} context` : 'no context yet'
-	const meta = `${s.proj} · ${s.creature.replace(/^tile_0*/, '#').replace('.png', '')}${s.tab ? ` · ⌘${s.tab}` : ''} · ${ctx}`
+	const meta = `${s.proj}${s.tab ? ` · ⌘${s.tab}` : ''} · ${ctx}`
 	return [
 		clip(`${fg(C.gold)}◆ ${fg(C.label)}${bold}${cut(s.title, Math.max(20, total - width(meta) - 6))}${R}  ${fg(C.faint)}${meta}${R}`, total),
 		clip(`${fg(C.muted)}  ${cut(s.doing || s.last || '—', total - 4)}${R}`, total),

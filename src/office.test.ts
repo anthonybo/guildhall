@@ -20,7 +20,8 @@ function session(id: string, proj: string, state: State): Session {
 		ctxLimit: 200_000,
 		tab: 1,
 		unread: false,
-		creature: 'tile_0001.png',
+		palette: 0,
+		hueShift: 0,
 	}
 }
 
@@ -96,7 +97,7 @@ test('drawing never moves anybody — only update() does', () => {
 	office.assign(list)
 	for (let i = 0; i < 50; i++) office.update(0.1, list)
 	const before = list.map((s) => posOf(office, s.id)).join('|')
-	for (let i = 0; i < 20; i++) office.draw(cv, list, 14)
+	for (let i = 0; i < 20; i++) office.draw(cv, list)
 	assert.equal(list.map((s) => posOf(office, s.id)).join('|'), before)
 })
 
@@ -139,7 +140,7 @@ test('every rendered row is exactly the canvas width', () => {
 	const { cv, office } = room()
 	const list = [session('a', 'alpha', 'needs'), session('b', 'beta', 'working')]
 	office.assign(list)
-	office.overlay(cv, office.draw(cv, list, 14), 'a')
+	office.overlay(cv, office.draw(cv, list), 'a')
 	for (const line of cv.render()) {
 		const bare = [...line.replace(/\x1b\[[0-9;]*m/g, '')].length
 		assert.equal(bare, cv.w, `row was ${bare} columns, expected ${cv.w}`)

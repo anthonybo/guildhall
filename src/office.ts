@@ -10,8 +10,9 @@
  * wandering, which is what makes a room full of characters read as purposeful.
  */
 import { C, LOOK, ROOFS, type RGB } from './theme.ts'
-import { cut, RANK, type Session, type State } from './data.ts'
+import { cut, RANK, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
+import type { Facing, Pose } from './characters.ts'
 
 /**
  * 6px tiles. The whole room has to fit in roughly 60-90 canvas pixels of height,
@@ -60,7 +61,23 @@ export type Character = {
 	hueShift: number
 }
 
-export type Placed = { s: Session; ch: Character; tile: string; x: number; y: number }
+export type Placed = {
+	s: Session
+	ch: Character
+	facing: Facing
+	pose: Pose
+	step: number
+	x: number
+	y: number
+}
+
+/** A worker is one tile wide and two tall, matching the source frames. */
+export const CHAR_W = TILE
+export const CHAR_H = TILE * 2
+
+/** Tools where the worker is looking at something rather than typing. */
+const READING = new Set(['reading', 'grep', 'finding', 'searching'])
+const toolOf = (s: Session) => (s.doing ?? '').split(' ')[0].toLowerCase()
 
 const rand = (a: number, b: number) => a + Math.random() * (b - a)
 const randInt = (a: number, b: number) => Math.floor(rand(a, b + 1))
@@ -407,8 +424,8 @@ export class Office {
 		}
 	}
 
-	/** Draw the room; return where each creature goes so images can be placed. */
-	draw(cv: Canvas, sessions: Session[], spriteH: number): Placed[] {
+	/** Draw the room; return where each worker goes so its frame can be placed. */
+	draw(cv: Canvas, sessions: Session[]): Placed[] {
 		const byId = new Map(sessions.map((s) => [s.id, s]))
 		cv.clear(C.floorDark)
 		// floor, then the project zones as tinted carpet
@@ -450,15 +467,18 @@ export class Office {
 		}
 
 		const out: Placed[] = []
+		// back to front, so someone lower on the floor overlaps the row behind
 		for (const ch of [...this.chars.values()].sort((a, b) => a.y - b.y)) {
 			const s = byId.get(ch.id)
 			if (!s) continue
-			// sitting sinks into the chair; walking gets a one-pixel bob
+			// reading tools get the reading pose; anything else at a desk is typing
+			const pose: Pose = ch.state === 'walk' ? 'walk' : READING.has(toolOf(s)) ? 'reading' : 'typing'
+			const step = ch.state === 'idle' ? 0 : ch.frame
+			// feet sit on the tile the character occupies; sitting sinks a little
 			const sink = ch.state === 'type' ? 2 : 0
-			const bob = ch.state === 'walk' ? (ch.frame % 2 ? -1 : 0) : ch.state === 'type' ? (ch.frame ? -1 : 0) : 0
-			const x = Math.round(ch.x - 8)
-			const y = Math.round(ch.y + TILE / 2 - spriteH + sink + bob)
-			out.push({ s, ch, tile: s.creature, x, y: y & ~1 })
+			const x = Math.round(ch.x - CHAR_W / 2)
+			const y = Math.round(ch.y + TILE / 2 - CHAR_H + sink)
+			out.push({ s, ch, facing: ch.dir, pose, step, x, y: y & ~1 })
 		}
 		return out
 	}
