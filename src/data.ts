@@ -166,6 +166,16 @@ function digest(file: string) {
 		fs.closeSync(fd)
 	}
 	const d: Digest = {}
+	const seen = new Map<string, number>()
+	const CONTAINERS = /(?:^|\/)(projects|repos|src|code|dev|work|git)\/([^/\s"'`;:]+)/g
+	const note = (v: unknown) => {
+		if (typeof v !== 'string') return
+		for (const m of v.matchAll(CONTAINERS)) {
+			const name = m[2]
+			if (!name || name.startsWith('.') || name.includes('*')) continue
+			seen.set(name, (seen.get(name) ?? 0) + 1)
+		}
+	}
 	for (const l of lines) {
 		if (!l) continue
 		let e: any
@@ -180,6 +190,7 @@ function digest(file: string) {
 			const t = Date.parse(e.timestamp)
 			if (!Number.isNaN(t) && (!d.lastTs || t > d.lastTs)) d.lastTs = t
 		}
+		note(e.cwd)
 		if (e.type === 'ai-title' && e.aiTitle) d.title = e.aiTitle
 		else if (e.type === 'assistant') {
 			const m = e.message ?? {}
@@ -189,14 +200,17 @@ function digest(file: string) {
 					if (b.type === 'tool_use') {
 						d.tool = b.name
 						d.toolInput = b.input
+						for (const v of Object.values(b.input ?? {})) note(v)
 					} else if (b.type === 'text' && b.text.trim()) d.text = b.text.trim()
 				}
 		}
 	}
+	// the directory this session actually works in, by weight of evidence
+	if (seen.size) d.subProj = [...seen.entries()].sort((a, b) => b[1] - a[1])[0][0]
 	return d
 }
 
-type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number }
+type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
@@ -351,7 +365,12 @@ export function collect(): Session[] {
 							: 'parked'
 		const u = d.usage
 		const used = u ? (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0) : 0
-		const proj = path.basename(s.cwd)
+		// A session started from a container like ~/projects reports "projects" as
+		// its name, which tells you nothing when eight of nine share it. Fall back to
+		// the directory its own tool calls keep touching.
+		const base = path.basename(s.cwd)
+		const container = /^(projects|repos|src|code|dev|work|git)$/.test(base)
+		const proj = container && d.subProj ? d.subProj : base
 		const tab = cm.get(s.sessionId)
 		return {
 			id: s.sessionId,
