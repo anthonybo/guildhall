@@ -25,6 +25,22 @@ const CODE: RGB[] = [
 	[170, 210, 140],
 ]
 
+/** A 3x5 pixel font — the smallest that stays legible once the workstation image
+ *  is drawn at font resolution. */
+const DIGITS: Record<string, string[]> = {
+	'0': ['111', '101', '101', '101', '111'],
+	'1': ['010', '110', '010', '010', '111'],
+	'2': ['111', '001', '111', '100', '111'],
+	'3': ['111', '001', '111', '001', '111'],
+	'4': ['101', '101', '111', '001', '001'],
+	'5': ['111', '100', '111', '001', '111'],
+	'6': ['111', '100', '111', '101', '111'],
+	'7': ['111', '001', '010', '010', '010'],
+	'8': ['111', '101', '111', '101', '111'],
+	'9': ['111', '101', '111', '001', '111'],
+	'★': ['101', '111', '010', '111', '101'],
+}
+
 const cache = new Map<string, Grid>()
 
 /**
@@ -44,8 +60,8 @@ const TINT: Record<Kind, RGB> = {
 	think: [150, 160, 190],
 }
 
-export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think'): Grid {
-	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}`
+export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', level = 0, tier?: RGB): Grid {
+	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${level}:${tier?.join('') ?? ''}`
 	const hit = cache.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: H }, () => new Array<RGB | null>(W).fill(null))
@@ -68,10 +84,20 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	// keyboard
 	box(3, 18, 9, 3, [58, 62, 78])
 	box(4, 19, 7, 1, [92, 98, 118])
-	// mug, and a small stack of paper
+	// mug
 	box(13, 18, 3, 3, [226, 118, 96])
 	put(12, 19, [226, 118, 96])
-	box(0, 19, 2, 2, [236, 234, 226])
+	// ID badge propped on the desk: a tier-coloured header over a card with the
+	// level punched out in a 3x5 face. Pixel art, like everything else here.
+	if (level && tier) {
+		const CARD: RGB = [238, 236, 228]
+		const EDGE: RGB = [120, 118, 110]
+		box(0, 16, 8, 8, EDGE)
+		box(0, 16, 8, 2, tier)
+		box(1, 18, 6, 5, CARD)
+		const face = DIGITS[level < 10 ? String(level) : '★'] ?? DIGITS['0']
+		face.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(2 + x, 18 + y, [40, 42, 54])))
+	}
 	// bezel
 	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
 	box(2, 2, 12, 9, DARK)

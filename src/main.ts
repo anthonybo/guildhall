@@ -176,7 +176,7 @@ function draw() {
 				const size = PROP_SIZE[pr.kind]
 				cv.blit(pr.x, pr.y, shrink(prop(pr.kind), size.w * TILE, size.h * TILE))
 			}
-			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed, m.kind), CHAR_W, CHAR_W))
+			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed, m.kind, m.level, tierOf(m.level).color), CHAR_W, CHAR_W))
 		}
 	}
 
@@ -253,12 +253,12 @@ function drawMonitors() {
 	let out = ''
 	let pid = 500
 	for (const m of office.monitors) {
-		const key = `mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}:${m.kind}`
+		const key = `mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}:${m.kind}:${m.level}`
 		let id = imageIds.get(key)
 		if (!id) {
 			id = nextId++
 			imageIds.set(key, id)
-			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind).grid, 3)
+			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind, m.level, tierOf(m.level).color).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2)
