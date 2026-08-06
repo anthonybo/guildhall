@@ -321,3 +321,23 @@ test('an idle character never comes to rest inside the work zone', () => {
 	}
 	assert.equal(bad, 0, `${bad} character-frames idling inside the work zone`)
 })
+
+test('exactly the working sessions have a lit screen', () => {
+	const list = [
+		session('a', 'alpha', 'working'),
+		session('b', 'alpha', 'parked'),
+		session('c', 'beta', 'needs'),
+		session('d', 'beta', 'done'),
+	]
+	const { cv, office } = room(list)
+	office.draw(cv, list)
+	// one monitor per desk, and only working/blocked sessions light theirs
+	assert.equal(office.monitors.length, [...office.spots.values()].filter((s) => s.kind === 'desk').length)
+	assert.equal(
+		office.monitors.filter((m) => m.lit).length,
+		2,
+		'working and needs-you are both mid-turn and should light the screen',
+	)
+	// and a monitor sits two rows above its seat, clear of the occupant
+	for (const p of office.pods) assert.equal(p.monitorRow, p.seatRow - 2)
+})
