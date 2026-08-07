@@ -1430,8 +1430,8 @@ var Office = class extends SimBase {
    * band already has, so the room reads as columns of desks rather than a wall of
    * labels.
    */
-  overlay(cv2, placed, selected, showAll = true, vertical = false) {
-    if (!vertical) this.horizontalPlates(cv2);
+  overlay(cv2, placed, selected, showAll = true) {
+    if (!this.vertical) this.horizontalPlates(cv2);
     return this.labels(cv2, placed, selected, showAll);
   }
   horizontalPlates(cv2) {
@@ -2255,15 +2255,18 @@ function drawPlates(pxW, pxH) {
   const ch = pxH / cv.rows;
   ctx2d.textBaseline = "middle";
   ctx2d.textAlign = "center";
+  const w = PLATE_COLS * cw;
+  const h = PLATE_ROWS * ch;
+  const font = (px) => `${px}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+  const fits = (chars) => Math.min(w * 0.66, h * 0.94 / (chars * 0.62));
+  const floor = fits(MIN_CHARS);
   for (const p of office.plates) {
-    const w = PLATE_COLS * cw;
     const x0 = p.x * cw;
     const y0 = p.y / 2 * ch;
-    const h = PLATE_ROWS * ch;
     ctx2d.fillStyle = rgb(p.colour);
     ctx2d.fillRect(Math.floor(x0), Math.floor(y0), Math.ceil(w), Math.ceil(h));
-    const size = Math.max(9, Math.floor(Math.min(w * 0.66, h * 0.94 / (p.proj.length * 0.62))));
-    ctx2d.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    const size = Math.max(9, Math.floor(Math.min(fits(p.proj.length), floor * (4 / 3))));
+    ctx2d.font = font(Math.max(size, Math.floor(floor)));
     let text = p.proj;
     while (text.length > 1 && ctx2d.measureText(text).width > h * 0.94) text = text.slice(0, -2) + "\u2026";
     ctx2d.save();

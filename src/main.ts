@@ -346,7 +346,7 @@ function draw() {
 				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
-		office.overlay(cv, placed, selectedId ?? undefined, labels, office.vertical)
+		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
 		// furniture first, then monitors, then people on top of both
 		if (IMAGES) images = drawProps() + drawPlates() + drawMonitors() + drawImages(placed)
