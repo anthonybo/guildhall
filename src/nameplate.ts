@@ -260,10 +260,35 @@ function band(f: Font) {
 }
 
 /**
- * The biggest font whose ink band fits across the strip and whose advance fits
- * the whole name along it — or the smallest, if nothing does, with the name cut
- * to length. Following RimWorld's rule, a plate too small to read is not drawn.
+ * How many characters are worth keeping before thickness starts winning.
+ *
+ * Measured against the real project list: at ten, eight of the ten names stay
+ * whole and only `draftingroom` and `iptv-epg-matcher` are cut. At eight, seven
+ * of the ten are cut, which is too many to tell the room apart at a glance.
+ *
+ * A preference, not a floor. A strip too short for ten gets a shorter name rather
+ * than a thinner one — see the scale rule below, which outranks this.
  */
+const MIN_CHARS = 10
+
+/**
+ * Three, not two. On a 15x33 cell the strip is 45px across and doubling a 6x13
+ * band uses 22px of it, leaving the word floating in a wide coloured bar — which
+ * is exactly the "could be bigger" the plates kept drawing. Tripling fills 33px
+ * and still holds eleven characters.
+ *
+ * The ceiling only binds the growth step below, since the floor is pinned by
+ * MIN_CHARS long before this. Four is where a stem reaches 4px against unchanged
+ * letterform detail — past that a pixel font stops reading as a typeface and
+ * starts reading as blocks, which is why 6x10 at 5x measures thicker than 6x13 at
+ * 4x and still looks worse.
+ */
+const MAX_SCALE = 4
+
+/** '.' rather than '…': the font has no ellipsis, and an absent glyph draws as a
+ *  blank, which reads as the name simply stopping rather than continuing. */
+const cut = (text: string, room: number) => (text.length > room ? text.slice(0, room - 1) + '.' : text)
+
 /**
  * Font, text, and how many times to enlarge each pixel.
  *
@@ -272,33 +297,59 @@ function band(f: Font) {
  * strip was wide and tall while the glyphs stayed 6x13 actual pixels, leaving a
  * thin hairline word floating in a big coloured bar. Scaling is by whole numbers
  * only, so a pixel font stays a pixel font instead of turning to mush.
+ *
+ * Pick by what ends up on screen, not by which font is nominally largest. In a
+ * 24px strip 6x13 fits once — an 11px band of 1px stems — while 6x10 fits twice,
+ * an 18px band of 2px stems. The doubled smaller font wins, and not marginally:
+ * kitty and Ghostty bilinear-filter these images, so a 1px stem averages to grey
+ * and a 2px one survives. That is the whole difference between a word and a
+ * smudge, which is why thickness outranks letterform quality here.
  */
 export function choose(text: string, wpx: number, hpx: number) {
-	// +3, not +2: a keyline each side and at least one pixel of margin. The
-	// smallest font's band is exactly 8px, which "fits" a one-column strip with
-	// nothing to spare — and at that size it is a grey smear rather than a word,
-	// so an exact fit has to count as no fit.
-	// Pick by what ends up on screen, not by which font is nominally largest. In a
-	// 24px strip, 6x13 fits once (an 11px band) while 5x8 fits twice (14px) — and
-	// the doubled smaller font is the more readable of the two. Ties go to the
-	// larger font, which has the better letterforms at equal height.
-	const best = (f: Font, s: string) => {
-		const across = Math.floor((wpx - 3) / band(f))
-		const along = Math.floor(hpx / (s.length * f.w))
-		return Math.min(across, along)
+	type Pick = { font: Font; scale: number; room: number; ink: number }
+	const cands: Pick[] = []
+	for (const font of LADDER) {
+		// +3, not +2: a keyline each side and at least one pixel of margin. The
+		// smallest font's band is exactly 6px, which "fits" a one-column strip with
+		// nothing to spare — and at that size it is a grey smear rather than a word,
+		// so an exact fit has to count as no fit.
+		const fits = Math.min(MAX_SCALE, Math.floor((wpx - 3) / band(font)))
+		for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor(hpx / (font.w * scale)), ink: band(font) * scale })
 	}
-	// Largest font that fits wins, and then it is scaled as far as the strip
-	// allows. Choosing purely by resulting height picked a doubled 4x6 over a
-	// native 6x13 for one extra pixel — trading real letterforms for blocky ones,
-	// which is the wrong way round at this size.
-	for (const f of LADDER) {
-		const scale = best(f, text)
-		if (scale >= 1) return { font: f, text, scale }
-	}
-	// Nothing fits whole. Take the smallest font and cut the name to what the
-	// strip holds at 1:1, rather than drawing something unreadable.
-	const f = LADDER[LADDER.length - 1]
-	if (band(f) + 3 > wpx) return null
-	const room = Math.floor(hpx / f.w)
-	return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + '.' : text, scale: 1 }
+	// On a tie the taller font, which has the better letterforms at equal height.
+	const thickest = (a: Pick, b: Pick) => b.ink - a.ink || b.font.h - a.font.h || b.room - a.room
+	const widest = (a: Pick, b: Pick) => b.room - a.room || b.ink - a.ink || b.font.h - a.font.h
+
+	// Fewer than four letters identifies nothing, so those are not options at all.
+	const usable = cands.filter((c) => c.room >= 4)
+	const thick = usable.filter((c) => c.scale >= 2)
+	// The size every plate in the room is guaranteed. Chosen without reference to
+	// this particular name, so a row of plates shares a floor rather than each one
+	// sizing itself and the row looking ragged.
+	const floor =
+		// Enough letters to read: spend what is left on thickness.
+		thick.filter((c) => c.room >= MIN_CHARS).sort(thickest)[0] ??
+		// Not enough letters at any size. Every option here is already 2px-stemmed,
+		// so thickness has stopped being the scarce thing and length starts to pay.
+		thick.sort(widest)[0] ??
+		// The strip is too narrow to double anything. 1:1 is a hairline that kitty's
+		// filter greys out, but a faint name still beats no name.
+		usable.sort(thickest)[0]
+	// Nothing legible fits. Draw no plate rather than a smear — RimWorld's rule.
+	if (!floor) return null
+
+	// A short name need not stop at the floor. The floor is set by the length every
+	// plate must survive, so a name well under it leaves most of its strip empty —
+	// which reads as a small word in a big bar however thick the strokes are.
+	// Bounded to one step above the floor: `marina` can physically take 5x where
+	// `borrowyard` takes 3x, and that much variation stops looking like a size and
+	// starts looking like emphasis the room does not mean. Growth is allowed only
+	// while the whole name still fits, so this never trades letters for size — it
+	// only spends room that would otherwise go unused.
+	// Same font as the floor, never merely a thicker one: letting the font vary put
+	// three typefaces in one row of plates, which reads as a rendering fault rather
+	// than as one name having more space. Only the scale is allowed to move.
+	const grown = thick.filter((c) => c.font === floor.font && c.scale > floor.scale && c.scale <= floor.scale + 1 && c.room >= text.length).sort(thickest)[0]
+	const pick = grown ?? floor
+	return { font: pick.font, text: cut(text, pick.room), scale: pick.scale }
 }
