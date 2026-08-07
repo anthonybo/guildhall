@@ -60,3 +60,15 @@ test('a chunk ending on a bare introducer is held, not released', () => {
 	assert.equal(demux(`${E}[`).rest, `${E}[`)
 	assert.equal(demux(`${E}O`).rest, `${E}O`)
 })
+
+test('focus-in triggers a re-send and focus-out does not', () => {
+	// cmux does not implement mode 2033, so focus-in is the only byte a workspace
+	// switch-back produces there. Focus-out is unreliable — switching away from an
+	// already-unfocused surface emits nothing — so it is consumed but never acted on.
+	const inn = demux(`${E}[I`)
+	assert.equal(inn.lost, true)
+	assert.equal(inn.keys, '', 'focus-in leaked into the key handler')
+	const out = demux(`${E}[O`)
+	assert.equal(out.lost, false, 'focus-out should not force a re-send')
+	assert.equal(out.keys, '', 'focus-out leaked into the key handler')
+})
