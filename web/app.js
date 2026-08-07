@@ -181,12 +181,12 @@ var Canvas = class {
   cellAt(col, row) {
     return this.overlay[row]?.[col] ?? null;
   }
-  text(col, row, s, f, b) {
+  text(col, row, s, f, b, bold = false) {
     if (row < 0 || row >= this.rows) return;
     for (const [i, ch] of [...s].entries()) {
       const c = col + i;
       if (c < 0 || c >= this.w) continue;
-      this.overlay[row][c] = { ch, fg: f, bg: b };
+      this.overlay[row][c] = { ch, fg: f, bg: b, bold };
     }
   }
   render() {
@@ -195,6 +195,7 @@ var Canvas = class {
       let out = "";
       let cf = -2;
       let cb = -2;
+      let cbold = false;
       const ov = this.overlay[r];
       const t0 = r * 2 * this.w;
       const b0 = (r * 2 + 1) * this.w;
@@ -219,6 +220,11 @@ var Canvas = class {
         if (bot !== cb) {
           out += bot < 0 ? "\x1B[49m" : `\x1B[48;2;${bot >> 16 & 255};${bot >> 8 & 255};${bot & 255}m`;
           cb = bot;
+        }
+        const wantBold = !!o?.bold;
+        if (wantBold !== cbold) {
+          out += wantBold ? "\x1B[1m" : "\x1B[22m";
+          cbold = wantBold;
         }
         out += ch;
       }
@@ -1396,8 +1402,50 @@ var Office = class extends SimBase {
     const id = ch.activity?.spotId;
     return id ? this.spots.get(id)?.posture ?? "stand" : "stand";
   }
-  /** Project nameplates and per-character status labels. */
-  overlay(cv2, placed, selected, showAll = true) {
+  /**
+   * Project nameplates and per-character status labels.
+   *
+   * `vertical` runs the name down the column beside the pod instead of along the
+   * aisle beneath it. A horizontal plate is as wide as the name, which is what
+   * forced every long project to truncate and what made neighbouring plates fight
+   * over the same row; a vertical one costs one column and as many rows as the
+   * band already has, so the room reads as columns of desks rather than a wall of
+   * labels.
+   */
+  overlay(cv2, placed, selected, showAll = true, vertical = false) {
+    if (!vertical) {
+      this.horizontalPlates(cv2);
+      return this.labels(cv2, placed, selected, showAll);
+    }
+    const out = this.labels(cv2, placed, selected, showAll);
+    this.verticalPlates(cv2);
+    return out;
+  }
+  /**
+   * One character per row, in the gap column left of the pod.
+   *
+   * The band is eight rows tall, so eight characters fit without touching the
+   * neighbouring pod at all — which means no claim tracking, no measuring toward
+   * the next plate, and no possibility of two names colliding.
+   */
+  verticalPlates(cv2) {
+    const named = /* @__PURE__ */ new Set();
+    for (const pod of this.pods) {
+      if (named.has(pod.proj)) continue;
+      named.add(pod.proj);
+      const col = pod.c0 * TILE - 1;
+      if (col < 0) continue;
+      const top = Math.floor(pod.monitorRow * TILE / 2);
+      const bottom = Math.floor((pod.seatRow + 1) * TILE / 2);
+      const rows = Math.max(0, Math.min(cv2.rows, bottom) - top);
+      if (rows < 3) continue;
+      const text = cut(pod.proj, rows);
+      const colour = this.zoneColor.get(pod.proj) ?? ROOFS[0];
+      const start = top + Math.floor((rows - text.length) / 2);
+      for (let i = 0; i < text.length; i++) cv2.text(col, start + i, text[i], C.ink, colour, true);
+    }
+  }
+  horizontalPlates(cv2) {
     const named = /* @__PURE__ */ new Set();
     const claimed = /* @__PURE__ */ new Map();
     const blocks = (row) => claimed.get(row) ?? [];
@@ -1424,6 +1472,9 @@ var Office = class extends SimBase {
       cv2.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0]);
       claimed.set(plateRow, [...here, [startCol, startCol + text.length]]);
     }
+  }
+  /** Per-character status labels, which are the same either way. */
+  labels(cv2, placed, selected, showAll = true) {
     for (const p of placed) {
       for (let i = 0; i < CHAR_H / 2; i++) {
         const row = (p.y >> 1) + i;
@@ -2006,17 +2057,26 @@ function apply(data) {
   stampEl.textContent = `${sessions.length} session${sessions.length === 1 ? "" : "s"} \xB7 updated ${new Date(data.at).toLocaleTimeString()}`;
 }
 function connect() {
+  let failures = 0;
   const es = new EventSource("/api/stream");
   es.onopen = () => {
+    failures = 0;
     bar.link.className = "link live";
     bar.link.textContent = "live";
   };
-  es.onmessage = (e) => apply(JSON.parse(e.data));
+  es.onmessage = (e) => {
+    failures = 0;
+    apply(JSON.parse(e.data));
+  };
   es.onerror = () => {
     bar.link.className = "link down";
     bar.link.textContent = "reconnecting";
+    if (++failures >= 4) location.reload();
   };
 }
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && bar.link.classList.contains("down")) location.reload();
+});
 addEventListener("resize", () => {
   roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0;
   cv = null;

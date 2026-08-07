@@ -7,7 +7,7 @@
  */
 import { R, type RGB } from './theme.ts'
 
-type Cell = { ch: string; fg: RGB | null; bg: RGB | null }
+type Cell = { ch: string; fg: RGB | null; bg: RGB | null; bold?: boolean }
 
 export class Canvas {
 	w: number
@@ -89,12 +89,12 @@ export class Canvas {
 		return this.overlay[row]?.[col] ?? null
 	}
 
-	text(col: number, row: number, s: string, f: RGB | null, b: RGB | null) {
+	text(col: number, row: number, s: string, f: RGB | null, b: RGB | null, bold = false) {
 		if (row < 0 || row >= this.rows) return
 		for (const [i, ch] of [...s].entries()) {
 			const c = col + i
 			if (c < 0 || c >= this.w) continue
-			this.overlay[row][c] = { ch, fg: f, bg: b }
+			this.overlay[row][c] = { ch, fg: f, bg: b, bold }
 		}
 	}
 
@@ -104,6 +104,10 @@ export class Canvas {
 			let out = ''
 			let cf = -2
 			let cb = -2
+			// bold is a single cell attribute, tracked like the colours so it is only
+			// emitted on change — a vertical nameplate is one glyph per row, and a
+			// regular-weight glyph at that spacing reads as scattered dots
+			let cbold = false
 			const ov = this.overlay[r]
 			const t0 = r * 2 * this.w
 			const b0 = (r * 2 + 1) * this.w
@@ -128,6 +132,11 @@ export class Canvas {
 				if (bot !== cb) {
 					out += bot < 0 ? '\x1b[49m' : `\x1b[48;2;${(bot >> 16) & 255};${(bot >> 8) & 255};${bot & 255}m`
 					cb = bot
+				}
+				const wantBold = !!o?.bold
+				if (wantBold !== cbold) {
+					out += wantBold ? '\x1b[1m' : '\x1b[22m'
+					cbold = wantBold
 				}
 				out += ch
 			}

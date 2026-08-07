@@ -342,19 +342,39 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 
 /* ── the feed ── */
 
+/**
+ * The feed, and getting it back by itself.
+ *
+ * EventSource reconnects on its own, so a server restart heals without a refresh
+ * — but only if the session is still good, and it will otherwise retry against a
+ * 401 forever while the page sits there saying "reconnecting". After a few
+ * failures we reload, which lets the server decide: the room if the cookie is
+ * still valid, the passcode screen if it is not.
+ */
 function connect() {
+	let failures = 0
 	const es = new EventSource('/api/stream')
 	es.onopen = () => {
+		failures = 0
 		bar.link.className = 'link live'
 		bar.link.textContent = 'live'
 	}
-	es.onmessage = (e) => apply(JSON.parse(e.data))
+	es.onmessage = (e) => {
+		failures = 0
+		apply(JSON.parse(e.data))
+	}
 	es.onerror = () => {
 		bar.link.className = 'link down'
 		bar.link.textContent = 'reconnecting'
-		// EventSource retries on its own; this only reports it
+		if (++failures >= 4) location.reload()
 	}
 }
+
+// A phone suspends the tab; coming back to a dead connection with stale numbers
+// looks like a working page telling you something untrue.
+document.addEventListener('visibilitychange', () => {
+	if (document.visibilityState === 'visible' && bar.link.classList.contains('down')) location.reload()
+})
 
 addEventListener('resize', () => {
 	roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0
