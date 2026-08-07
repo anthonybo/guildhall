@@ -88,6 +88,24 @@ export function supportsImages() {
 	return p === 'ghostty' || p === 'kitty' || p === 'wezterm'
 }
 
+/**
+ * Ask the terminal to report when its surface becomes visible or hidden (DEC
+ * 2033) and to send in-band size reports (DEC 2048).
+ *
+ * A cmux tab switch and a move to another display are exactly the two moments
+ * images go missing, and neither raises SIGWINCH. 2033 fires on the first and
+ * 2048 on the second, which turns a guess on a timer into an actual event.
+ */
+export const WATCH_ON = '\x1b[?2033h\x1b[?2048h'
+export const WATCH_OFF = '\x1b[?2033l\x1b[?2048l'
+
+/** Replies these modes produce: visible again, and a resize carrying pixel size. */
+export const BECAME_VISIBLE = /\x1b\[\?999;1n/
+export const SIZE_REPORT = /\x1b\[48;\d+;\d+;\d+;\d+t/
+/** A placement naming an image the terminal no longer holds. Only ever seen when
+ *  the command was not silenced with q=2. */
+export const IMAGE_GONE = /\x1b_G[^\x1b]*;ENOENT[^\x1b]*\x1b\\/
+
 /** Send image data once and keep it resident under `id`; place it later by id. */
 export function transmit(id: number, png: Buffer) {
 	const b64 = png.toString('base64')
@@ -96,7 +114,8 @@ export function transmit(id: number, png: Buffer) {
 	for (let i = 0; i < b64.length; i += SIZE) {
 		const piece = b64.slice(i, i + SIZE)
 		const more = i + SIZE < b64.length ? 1 : 0
-		const head = i === 0 ? `a=t,f=100,i=${id},q=2,m=${more}` : `m=${more}`
+		// q=1: silent on success, but a quota or memory failure still reports
+		const head = i === 0 ? `a=t,f=100,i=${id},q=1,m=${more}` : `m=${more}`
 		out += `${ESC}_G${head};${piece}${ESC}\\`
 	}
 	return out
@@ -107,8 +126,12 @@ export function transmit(id: number, png: Buffer) {
  * C=1 leaves the cursor where it was, so placements never disturb text layout.
  * z=1 keeps sprites above the drawn background, which is opaque text cells.
  */
-export function place(id: number, cols: number, rows: number, placement: number, z = 1) {
-	return `${ESC}_Ga=p,i=${id},p=${placement},c=${cols},r=${rows},z=${z},C=1,q=2${ESC}\\`
+export function place(id: number, cols: number, rows: number, placement: number, z = 1, loud = false) {
+	// One placement per frame goes out loud. If the terminal has dropped its image
+	// store it answers ENOENT, which is the only direct signal that this happened;
+	// the rest stay silent so a wipe does not return sixty-odd error replies.
+	const q = loud ? 1 : 2
+	return `${ESC}_Ga=p,i=${id},p=${placement},c=${cols},r=${rows},z=${z},C=1,q=${q}${ESC}\\`
 }
 
 /** Drop every visible placement but keep the transmitted images cached. */
@@ -120,3 +143,46 @@ export const cursorTo = (row: number, col: number) => `\x1b[${row};${col}H`
 /** DEC 2026: batch a whole frame so the terminal never shows a half-drawn one. */
 export const SYNC_START = '\x1b[?2026h'
 export const SYNC_END = '\x1b[?2026l'
+
+/**
+ * Split terminal replies out of a stdin chunk.
+ *
+ * Reports and keystrokes arrive on the same stream, so the reply regexes are
+ * applied first and whatever survives is typing. A reply can straddle two reads,
+ * so an incomplete trailing escape is returned in `rest` to be prepended next
+ * time rather than delivered as a bare ESC plus garbage.
+ *
+ * `lost` is true when the terminal said an image is missing, or when the surface
+ * became visible again, or when it reported a new size — all three mean the image
+ * layer may need re-sending.
+ */
+export function demux(input: string) {
+	let s = input
+	let lost = false
+	for (const re of [IMAGE_GONE, BECAME_VISIBLE, SIZE_REPORT]) {
+		for (;;) {
+			const m = re.exec(s)
+			if (!m) break
+			s = s.slice(0, m.index) + s.slice(m.index + m[0].length)
+			lost = true
+		}
+	}
+	// A trailing escape that has not terminated yet is held for the next chunk.
+	// Termination follows ECMA-48: CSI takes parameter bytes 0x30-0x3F and
+	// intermediates 0x20-0x2F, then any final byte 0x40-0x7E — so `~` ends a
+	// sequence just as a letter does, and testing for letters alone wedged
+	// bracketed paste. APC runs to ESC \\.
+	const cut = s.lastIndexOf(ESC)
+	if (cut >= 0) {
+		const tail = s.slice(cut)
+		const done =
+			/^\x1b_[\s\S]*\x1b\\$/.test(tail) || // APC, terminated
+			/^\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]$/.test(tail) || // CSI, terminated
+			/^\x1b[O][\x40-\x7e]$/.test(tail) || // SS3 function key
+			/^\x1b(?![[O])[\x30-\x7e]$/.test(tail) // a bare two-byte escape, but `[` and `O` introduce more
+		// never hold indefinitely: an escape we do not understand must still reach
+		// the key handler rather than silently eating everything typed after it
+		if (!done && tail.length < 32) return { keys: s.slice(0, cut), rest: tail, lost }
+	}
+	return { keys: s, rest: '', lost }
+}

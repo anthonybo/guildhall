@@ -12,7 +12,10 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
+	WATCH_OFF,
+	WATCH_ON,
 	clearPlacements,
+	demux,
 	cursorTo,
 	encodePNG,
 	place,
@@ -285,7 +288,9 @@ function drawMonitors() {
 			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
-		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2)
+		// the first workstation is the sentinel; if the store was wiped it answers
+		// ENOENT and the reader below re-arms every transmit
+		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2, pid === 501)
 	}
 	for (const b of office.badges) {
 		const { id, fresh } = idFor(b.asking ? 'badge:ask' : `badge:${b.level}`)
@@ -299,8 +304,24 @@ function drawMonitors() {
 }
 
 function cleanup() {
-	if (alt) OUT.write(clearAll() + '\x1b[?25h\x1b[?1049l')
+	if (alt) OUT.write(clearAll() + WATCH_OFF + '\x1b[?25h\x1b[?1049l')
 	process.exit(0)
+}
+
+/** Terminal replies arrive on stdin mixed in with keystrokes. Peel off complete
+ *  reports, act on them, and pass whatever is left through as typing. A reply can
+ *  be split across reads, so hold a partial one until it completes. */
+let inbox = ''
+function onInput(b: Buffer) {
+	const { keys, rest, lost } = demux(inbox + b.toString('binary'))
+	inbox = rest
+	if (lost) {
+		// the surface was hidden, moved, or lost its images: re-send every pixel on
+		// the next frame. 27KB, and only when something actually went missing.
+		sent.clear()
+		draw()
+	}
+	if (keys) onKey(Buffer.from(keys, 'binary'))
 }
 
 function onKey(b: Buffer) {
@@ -389,12 +410,12 @@ function main() {
 		return
 	}
 	alt = true
-	OUT.write('\x1b[?1049h\x1b[?25l')
+	OUT.write('\x1b[?1049h\x1b[?25l' + (IMAGES ? WATCH_ON : ''))
 	eraseDisplay()
 	if (process.stdin.isTTY) {
 		process.stdin.setRawMode(true)
 		process.stdin.resume()
-		process.stdin.on('data', onKey)
+		process.stdin.on('data', onInput)
 	}
 	process.on('SIGINT', cleanup)
 	process.on('SIGTERM', cleanup)
