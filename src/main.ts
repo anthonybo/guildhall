@@ -33,6 +33,7 @@ import { badge, monitor } from './screens.ts'
 import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
+import * as H from './help.ts'
 import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
 
@@ -65,7 +66,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   guildhall --once       print one frame and exit
   guildhall --no-awake   start with the sleep hold disarmed
 
-keys   ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+keys   ? help · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
 env    GUILDHALL_CMUX    path to the cmux binary
        GUILDHALL_NO_IMAGES  force half-block rendering`)
 	process.exit(0)
@@ -201,6 +202,8 @@ let mode: Mode = 'split'
 let faultsOnly = false
 /** All labels on, or only the ones that need you plus the selection. */
 let labels = true
+/** the help panel, which suppresses the image layer while it is up */
+let showHelp = false
 let selectedId: string | null = null
 let sessions: Session[] = []
 let timers: NodeJS.Timeout[] = []
@@ -264,6 +267,13 @@ function layout() {
 /** Render the current state. Draws only — advancing the animation is separate. */
 function draw() {
 	const { cols, rows, townRows, tableRows } = geom
+	if (showHelp) {
+		// No image layer at all while this is up. Kitty images always draw above
+		// text, so a panel with sprites still placed would have characters walking
+		// across the sentence explaining them.
+		paint([...H.panel(cols, rows + 1), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		return
+	}
 	const list = visible()
 	let townLines: string[] = []
 	let images = ''
@@ -413,6 +423,26 @@ function onInput(b: Buffer) {
 function onKey(b: Buffer) {
 	const k = b.toString()
 	if (k === 'q' || k === '\x03') return cleanup()
+	if (showHelp) {
+		// anything dismisses it — hunting for the right key to close a help panel is
+		// its own small indignity
+		showHelp = false
+		prev = []
+		eraseDisplay()
+		layout()
+		draw()
+		return
+	}
+	if (k === '?') {
+		showHelp = true
+		prev = []
+		eraseDisplay()
+		OUT.write(clearAll())
+		imageIds.clear()
+		sent.clear()
+		draw()
+		return
+	}
 	if (k === '\x1b[A') moveSelection(-1)
 	else if (k === '\x1b[B') moveSelection(1)
 	else if (k === '\r' || k === '\n') {

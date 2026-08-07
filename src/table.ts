@@ -152,7 +152,8 @@ export function footer(
 	const awakeHint = `${fg(C.faint)}a ${fg(dot)}${glyph} ${verb}${R}`
 
 	const bits = ['↑↓ move', '⏎ jump to tab', `f ${faultsOnly ? 'all' : 'faults'}`, `tab ${mode}`]
-	const tailBits = ['r redraw', 'q quit']
+	// `?` leads the tail in gold: a help key nobody can find is not a help key
+	const tailBits = [`${fg(C.gold)}? help${fg(C.faint)}`, 'q quit']
 	const line = `${fg(C.faint)} ${bits.join('  ·  ')}  ·  ${R}${awakeHint}${fg(C.faint)}  ·  ${tailBits.join('  ·  ')}${R}`
 	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
 	return clip(`${line}${tail}`, total)
