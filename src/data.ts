@@ -36,10 +36,19 @@ export function xpOf(d: { revs?: number; files?: number; subs?: number; turns?: 
 	return 6 * (d.revs ?? 0) + 4 * (d.files ?? 0) + 15 * (d.subs ?? 0) + 0.15 * (d.turns ?? 0)
 }
 
-/** Pokemon "Medium Fast": level n costs n^3. Seven levels is one doubling above
- *  about L20, so the top of the scale keeps separating instead of saturating. */
-export const xpForLevel = (n: number) => n ** 3
-export const levelFor = (xp: number) => Math.max(1, Math.floor(Math.cbrt(xp)))
+/**
+ * Level n costs 2n^2 XP.
+ *
+ * The first cut used Pokemon's "Medium Fast" n^3, which is tuned for a game that
+ * ends at 100 and deliberately makes the last levels brutal. Against real session
+ * data it did the opposite of its job: the busiest session reached 19 while four
+ * mid-sized ones all tied at 10-11, because a cubic curve compresses everything
+ * above the knee into a handful of ranks. A quadratic still costs more per level
+ * (rank 60 is 4x the work of rank 30) but keeps the ranks apart where the data
+ * actually lives, and puts a realistic ceiling near 99 rather than near 20.
+ */
+export const xpForLevel = (n: number) => 2 * n ** 2
+export const levelFor = (xp: number) => Math.max(1, Math.min(99, Math.floor(Math.sqrt(xp / 2))))
 
 export const RANK: Record<State, number> = { error: 0, needs: 1, working: 2, shell: 3, review: 4, done: 5, parked: 6 }
 
@@ -69,8 +78,10 @@ export type Session = {
 	toolKind: 'edit' | 'read' | 'run' | 'search' | 'agent' | 'think'
 	/** turns this session has completed — the work it has actually done */
 	turns: number
-	/** derived rank, 1..99, from turns completed */
+	/** derived rank, from work done — see xpOf */
 	level: number
+	/** raw score behind `level`, kept so progress within a rank is visible */
+	xp: number
 }
 
 const isAlive = (pid: number) => {
@@ -573,6 +584,7 @@ export function collect(): Session[] {
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			turns: d.turns ?? 0,
 			level: levelFor(xpOf(d)),
+			xp: Math.round(xpOf(d)),
 			palette: looks.get(s.sessionId)?.palette ?? 0,
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}

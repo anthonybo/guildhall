@@ -15,6 +15,7 @@ function session(id: string, proj: string, state: State): Session {
 	return {
 		id,
 		pid: 1,
+		xp: 0,
 		name: id,
 		proj,
 		cwd: `/x/${proj}`,

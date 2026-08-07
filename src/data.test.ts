@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { collect, levelFor, xpForLevel, xpOf } from './data.ts'
+import { tierOf } from './theme.ts'
 
 test('no two live sessions collapse onto a container directory name', () => {
 	const list = collect()
@@ -24,12 +25,13 @@ test('a session that ended on a question is reported as needing you', () => {
 })
 
 test('the level curve separates the top instead of saturating', () => {
-	// n^3: seven levels is one doubling above about L20, so a session that has done
-	// far more work reads far higher rather than tying at a cap
+	// 2n^2: still superlinear, but ranks stay apart across the range real sessions
+	// occupy instead of piling up above the knee the way the old n^3 curve did
 	assert.equal(xpForLevel(2), 8)
-	assert.equal(xpForLevel(10), 1000)
-	assert.equal(xpForLevel(23), 12167)
-	assert.equal(levelFor(12167), 23)
+	assert.equal(xpForLevel(10), 200)
+	assert.equal(xpForLevel(50), 5000)
+	assert.equal(levelFor(5000), 50)
+	assert.equal(levelFor(1_000_000), 99, 'the badge only has room for two digits')
 	assert.equal(levelFor(0), 1)
 	// and the weights favour change made over turns spent
 	assert.ok(xpOf({ revs: 100 }) > xpOf({ turns: 1000 }), 'turns outweigh revisions')
@@ -40,6 +42,8 @@ test('live sessions land on distinct levels', () => {
 	if (list.length < 3) return
 	const levels = list.map((s) => s.level)
 	assert.ok(Math.max(...levels) > Math.min(...levels) + 2, 'every session landed on the same rank')
+	// and the tier colours have to move too, or a wide spread still paints one hue
+	assert.ok(new Set(list.map((s) => tierOf(s.level).name)).size >= 3, 'one tier swallowed the whole room')
 })
 
 test('a project name is never a filename or a literal null', () => {

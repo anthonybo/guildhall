@@ -82,16 +82,25 @@ export const C = {
  */
 /** Level tiers, coloured like ranks. The chip on a character is one cell, so the
  *  colour does the work and the digit only refines it. */
+/**
+ * Eight tiers spread across the real range. The curve is open-ended, so a ladder
+ * that topped out at 9 painted every serious session the same colour — which is
+ * exactly the saturation the n^3 curve was chosen to avoid.
+ */
 export const TIERS: { min: number; color: RGB; name: string }[] = [
 	{ min: 1, color: [150, 158, 185], name: 'new' },
-	{ min: 3, color: [120, 200, 130], name: 'steady' },
-	{ min: 5, color: [110, 180, 250], name: 'seasoned' },
-	{ min: 7, color: [190, 150, 250], name: 'veteran' },
-	{ min: 9, color: [255, 200, 90], name: 'elder' },
+	{ min: 5, color: [130, 190, 140], name: 'steady' },
+	{ min: 12, color: [110, 200, 200], name: 'seasoned' },
+	{ min: 20, color: [110, 180, 250], name: 'skilled' },
+	{ min: 28, color: [160, 150, 250], name: 'veteran' },
+	{ min: 38, color: [210, 140, 235], name: 'expert' },
+	{ min: 50, color: [255, 170, 110], name: 'elder' },
+	{ min: 65, color: [255, 210, 90], name: 'legend' },
 ]
 export const tierOf = (level: number) => TIERS.filter((t) => level >= t.min).pop() ?? TIERS[0]
-/** 1-9 show the digit; beyond that the colour carries it and the glyph caps out. */
-export const levelGlyph = (level: number) => (level < 10 ? String(level) : '★')
+/** The number, always. The old star capped the scale at 9 and made every serious
+ *  session look identical. */
+export const levelGlyph = (level: number) => String(Math.max(1, Math.min(99, level)))
 export const tierName = (level: number) => tierOf(level).name
 
 export const LOOK: Record<State, { glyph: string; label: string; color: RGB }> = {
