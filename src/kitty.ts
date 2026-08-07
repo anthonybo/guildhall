@@ -96,11 +96,23 @@ export function supportsImages() {
  * images go missing, and neither raises SIGWINCH. 2033 fires on the first and
  * 2048 on the second, which turns a guess on a timer into an actual event.
  */
-export const WATCH_ON = '\x1b[?2033h\x1b[?2048h'
-export const WATCH_OFF = '\x1b[?2033l\x1b[?2048l'
+export const WATCH_ON = '\x1b[?2033h\x1b[?2048h\x1b[?1004h'
+export const WATCH_OFF = '\x1b[?2033l\x1b[?2048l\x1b[?1004l'
 
-/** Replies these modes produce: visible again, and a resize carrying pixel size. */
+/**
+ * Replies these modes produce.
+ *
+ * 2033 is the correct signal but cmux's libghostty fork does not implement it —
+ * DECRQM answers `\x1b[?2033;0$y`, meaning unrecognised, and `\x1b[?998n` is never
+ * answered. Focus reporting (1004) is supported there and `\x1b[I` is the only
+ * byte a workspace switch-back produces, so it is the practical trigger. Focus-out
+ * is deliberately not a trigger: it is edge-triggered and a switch away from an
+ * already-unfocused surface emits nothing at all.
+ */
 export const BECAME_VISIBLE = /\x1b\[\?999;1n/
+export const FOCUS_IN = /\x1b\[I/
+/** Consumed so it never reaches the key handler, but not a reason to re-send. */
+export const FOCUS_OUT = /\x1b\[O/
 export const SIZE_REPORT = /\x1b\[48;\d+;\d+;\d+;\d+t/
 /** A placement naming an image the terminal no longer holds. Only ever seen when
  *  the command was not silenced with q=2. */
@@ -159,7 +171,14 @@ export const SYNC_END = '\x1b[?2026l'
 export function demux(input: string) {
 	let s = input
 	let lost = false
-	for (const re of [IMAGE_GONE, BECAME_VISIBLE, SIZE_REPORT]) {
+	for (const re of [FOCUS_OUT]) {
+		for (;;) {
+			const m = re.exec(s)
+			if (!m) break
+			s = s.slice(0, m.index) + s.slice(m.index + m[0].length)
+		}
+	}
+	for (const re of [IMAGE_GONE, BECAME_VISIBLE, SIZE_REPORT, FOCUS_IN]) {
 		for (;;) {
 			const m = re.exec(s)
 			if (!m) break

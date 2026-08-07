@@ -378,16 +378,18 @@ function start() {
 	layout()
 	draw()
 	timers.push(setInterval(animate, 110))
-	// A terminal drops the images it holds when its surface is hidden — a cmux tab
-	// switch, or the window moving to another display — and unlike a resize there
-	// is no event for it. Periodically forget the ids so the next frame
-	// re-transmits and the room heals itself.
+	// Backstop only. Measured against cmux directly, a workspace switch loses
+	// neither the image store nor the renderer's textures, so this exists purely
+	// for a terminal that does drop them without reporting it. The real triggers
+	// are events — focus-in, a size report, or an ENOENT reply — so this runs a
+	// minute apart rather than every five seconds, which was re-sending every
+	// image twelve times a minute to fix a problem that turned out to be elsewhere.
 	timers.push(
 		setInterval(() => {
 			// forget only that the pixels were sent; the ids stay stable so the
 			// terminal replaces each image instead of accumulating new ones
 			sent.clear()
-		}, 5000),
+		}, 60_000),
 	)
 	timers.push(
 		setInterval(() => {
