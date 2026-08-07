@@ -83,13 +83,16 @@ export function detail(s: Session | undefined, total: number) {
 	]
 }
 
-export function summary(list: Session[], total: number) {
+export function summary(list: Session[], total: number, awake = false) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
 	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}`
+	// Shown only while the assertion is actually held, so it reads as a live state
+	// rather than a setting you have to remember the value of.
+	const hold = awake ? `  ${fg(C.gold)}☕${fg(C.label)} sleep held${R}` : ''
+	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
 	return clip(left, total)
 }
 

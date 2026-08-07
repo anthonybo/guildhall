@@ -33,12 +33,16 @@ import { badge, monitor } from './screens.ts'
 import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
+import * as awake from './awake.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CMUX = '/Applications/cmux.app/Contents/Resources/bin/cmux'
 const ONCE = process.argv.includes('--once')
 const BENCH = process.argv.includes('--bench')
 const IMAGES = supportsImages() && !ONCE && !BENCH
+// observing should not change the machine's behaviour unless asked, but holding
+// sleep off while a build runs is the common case, so it is on unless refused
+awake.configure(!process.argv.includes('--no-awake') && !ONCE && !BENCH)
 
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */
@@ -236,7 +240,7 @@ function draw() {
 		body.push(...det)
 	}
 	while (body.length < rows) body.push('')
-	paint([T.summary(sessions, cols), ...body.slice(0, rows), T.footer(cols, office.hiddenCount, faultsOnly, mode)], images)
+	paint([T.summary(sessions, cols, awake.isHolding()), ...body.slice(0, rows), T.footer(cols, office.hiddenCount, faultsOnly, mode)], images)
 }
 
 /** One simulation step, then redraw. Only the animation timer calls this. */
@@ -394,6 +398,8 @@ function start() {
 	timers.push(
 		setInterval(() => {
 			sessions = collect()
+			// hold the machine open while anyone is mid-task, and let go when they stop
+			awake.sync(sessions)
 			layout()
 			draw()
 		}, 2000),
