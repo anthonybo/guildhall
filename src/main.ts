@@ -38,7 +38,7 @@ import * as H from './help.ts'
 import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
 import * as cfgStore from './config.ts'
-import { createServer, persistedToken } from './serve.ts'
+import { addresses, createServer, persistedToken } from './serve.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -312,7 +312,8 @@ function draw() {
 		// No image layer at all while this is up. Kitty images always draw above
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
-		paint([...H.panel(cols, rows + 1), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		const net = addresses()
+		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: persistedToken(), lan: net.lan, vpn: net.vpn }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
 		return
 	}
 	const list = visible()

@@ -21,7 +21,35 @@ function stateLine(state: State, meaning: string) {
 	return `${fg(look.color)}${look.glyph} ${look.label.padEnd(10)}${R}${fg(C.muted)}${meaning}${R}`
 }
 
-function body(): (string | Line)[] {
+export type ShareInfo = { on: boolean; port: number; token: string; lan: string[]; vpn: string[] }
+
+/**
+ * The address to type into the other machine.
+ *
+ * This has to be somewhere on screen or the feature is unusable: the passcode
+ * lives in a file, the port is a setting, and expecting anyone to assemble a URL
+ * out of three places they cannot see is how a working feature goes unused.
+ */
+function shareLines(share?: ShareInfo): (string | Line)[] {
+	if (!share?.on) {
+		return [
+			`${fg(C.muted)}${bold}s${R}${fg(C.muted)} starts a small read-only web server so your other machines${R}`,
+			`${fg(C.muted)}and your phone can see this. It is ${bold}off by default${R}${fg(C.muted)} and the choice${R}`,
+			`${fg(C.muted)}is remembered. Turn it on and this panel shows the address.${R}`,
+		]
+	}
+	const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}/?k=${share.token}`)
+	return [
+		`${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`,
+		...(urls.length
+			? urls.slice(0, 3).map((u) => `${fg(C.gold)}${u}${R}`)
+			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
+		`${fg(C.muted)}The passcode is only needed once; it becomes a cookie. Same${R}`,
+		`${fg(C.muted)}address works over a VPN, since that is just another interface.${R}`,
+	]
+}
+
+function body(share?: ShareInfo): (string | Line)[] {
 	const tier = (n: number) => `${fg(tierOf(n).color)}${tierOf(n).name}${R}`
 	return [
 		{ text: 'guildhall', kind: 'title' },
@@ -62,12 +90,9 @@ function body(): (string | Line)[] {
 		`${fg(C.muted)}on its carpet, its nameplate and its row in the table.${R}`,
 		'',
 		{ text: 'SHARING — off unless you turn it on', kind: 'head' },
-		`${fg(C.muted)}${bold}s${R}${fg(C.muted)} starts a small read-only web server so your other machines${R}`,
-		`${fg(C.muted)}and your phone can see this. It is ${bold}off by default${R}${fg(C.muted)} and the choice${R}`,
-		`${fg(C.muted)}is remembered. While it is on, the header says ${fg(C.screenAgent)}◉ sharing${fg(C.muted)}.${R}`,
+		...shareLines(share),
 		`${fg(C.muted)}It answers on your local network and on any VPN interface, never${R}`,
-		`${fg(C.muted)}on the public internet, and needs a passcode kept in${R}`,
-		`${fg(C.faint)}~/.config/guildhall/token${R}`,
+		`${fg(C.muted)}on the public internet.${R}`,
 		`${fg(C.fillWarn)}Anyone who reaches it can read session titles, the last thing${R}`,
 		`${fg(C.fillWarn)}each said, filenames being edited and commands that were run.${R}`,
 		`${fg(C.muted)}Nothing it serves can change anything — there is no endpoint that${R}`,
@@ -99,8 +124,8 @@ const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg
  * showing through the gaps. The caller suppresses the image layer entirely while
  * this is open, since kitty images always draw above text.
  */
-export function panel(cols: number, rows: number): string[] {
-	const items = body()
+export function panel(cols: number, rows: number, share?: ShareInfo): string[] {
+	const items = body(share)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
 	const boxW = Math.min(cols - 2, Math.max(46, inner))
