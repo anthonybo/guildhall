@@ -110,6 +110,149 @@ function projectColours(names) {
 }
 var R = "\x1B[0m";
 
+// web/dom.ts
+var $ = (sel) => document.querySelector(sel);
+var rgb = (c) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
+var ago = (ms) => {
+  const m = Math.round(ms / 6e4);
+  if (m < 1) return "now";
+  if (m < 60) return `${m}m`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
+};
+
+// src/data/select.ts
+function needsAttention(s) {
+  if (s.state === "needs") return s.waitingFor ?? "blocked";
+  if (s.ctxUsed / s.ctxLimit > 0.9) return "context almost full";
+  return null;
+}
+function order(list) {
+  return [...list].sort((a, b) => {
+    const at = needsAttention(a) ? 0 : 1;
+    const bt = needsAttention(b) ? 0 : 1;
+    if (at !== bt) return at - bt;
+    if (a.stale !== b.stale) return b.stale - a.stale;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+// web/list.ts
+var WEIGHT = {
+  error: "26%",
+  needs: "22%",
+  working: "16%",
+  shell: "16%",
+  review: "11%",
+  done: "7%",
+  parked: "3%"
+};
+var BANDS = [
+  { key: "error", label: "failed", has: (s) => s.state === "error" },
+  { key: "needs", label: "needs you", has: (s) => s.state === "needs" },
+  { key: "live", label: "working", has: (s) => s.state === "working" || s.state === "shell" },
+  { key: "review", label: "finished, unread", has: (s) => s.state === "review" },
+  { key: "done", label: "your turn", has: (s) => s.state === "done" },
+  { key: "parked", label: "parked", has: (s) => s.state === "parked" }
+];
+var opened = /* @__PURE__ */ new Set();
+var tokens = (n) => n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+var listEl;
+var emptyEl;
+var current = [];
+function mountList(list, empty) {
+  listEl = list;
+  emptyEl = empty;
+}
+function details(s) {
+  const dl = document.createElement("dl");
+  dl.className = "detail";
+  const rows = [
+    ["title", s.title || "\u2014"],
+    ["folder", s.cwd],
+    ["level", `${s.level} ${tierOf(s.level).name} \xB7 ${tokens(s.xp)} xp`],
+    ["turns", String(s.turns)],
+    ["context", s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"],
+    ["idle", ago(s.stale)],
+    ...s.tab ? [["tab", `\u2318${s.tab}`]] : [],
+    ...s.waitingFor ? [["waiting on", s.waitingFor]] : [],
+    ...s.last && s.last !== s.doing ? [["last said", s.last]] : []
+  ];
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = k;
+    const dd = document.createElement("dd");
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  return dl;
+}
+function paintList(list) {
+  current = list;
+  const sorted = order(list);
+  const hues = projectColours(list.map((s) => s.proj));
+  emptyEl.hidden = sorted.length > 0;
+  const nodes = [];
+  for (const band2 of BANDS) {
+    const members = sorted.filter(band2.has);
+    if (!members.length) continue;
+    const head = document.createElement("li");
+    head.className = "band";
+    head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
+    head.style.setProperty("--tint", WEIGHT[band2.key] ?? "10%");
+    head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
+    head.querySelector(".band-name").textContent = band2.label;
+    head.querySelector(".band-n").textContent = String(members.length);
+    nodes.push(head);
+    nodes.push(...members.map(row));
+  }
+  listEl.replaceChildren(...nodes);
+  function row(s) {
+    const look = LOOK[s.state];
+    const li = document.createElement("li");
+    const busy = s.state === "working" || s.state === "shell";
+    li.className = "row" + (needsAttention(s) ? " attn" : "") + (busy ? " live" : "");
+    if (busy) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
+    li.style.setProperty("--state", rgb(look.color));
+    li.style.setProperty("--tint", WEIGHT[s.state] ?? "10%");
+    li.style.setProperty("--tier", rgb(tierOf(s.level).color));
+    li.style.setProperty("--proj", rgb(hues.get(s.proj) ?? look.color));
+    const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
+    li.innerHTML = `
+			<span class="lv">${s.level}</span>
+			<span class="proj"></span>
+			<span class="meta">
+				<span class="state">${look.glyph} ${look.label}</span>
+				${s.ctxUsed ? `<span class="ctx${pct > 90 ? " hot" : ""}">${pct}%</span>` : ""}
+				<span>${ago(s.stale)}</span>
+			</span>
+			<span class="doing"></span>`;
+    li.querySelector(".proj").textContent = s.proj;
+    li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
+    li.tabIndex = 0;
+    li.setAttribute("role", "button");
+    const open = opened.has(s.id);
+    li.setAttribute("aria-expanded", String(open));
+    if (open) {
+      li.classList.add("open");
+      li.append(details(s));
+    }
+    const toggle = () => {
+      if (opened.has(s.id)) opened.delete(s.id);
+      else opened.add(s.id);
+      paintList(current);
+    };
+    li.addEventListener("click", toggle);
+    li.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        toggle();
+      }
+    });
+    return li;
+  }
+}
+
 // src/canvas.ts
 var Canvas = class {
   w;
@@ -823,11 +966,11 @@ var RoomBase = class {
   }
   /* ───────────────────── population ───────────────────── */
   /** Re-plan only when the viewport or the project mix actually changes. */
-  fit(wPx, hPx, sessions2) {
+  fit(wPx, hPx, sessions3) {
     const cols = Math.max(12, Math.min(Math.floor(wPx / TILE), Math.floor(wPx / TILE)));
     const rows = Math.max(8, Math.floor(hPx / TILE));
     const byProj = /* @__PURE__ */ new Map();
-    for (const s of sessions2) byProj.set(s.proj, (byProj.get(s.proj) ?? 0) + 1);
+    for (const s of sessions3) byProj.set(s.proj, (byProj.get(s.proj) ?? 0) + 1);
     const projects = [...byProj.entries()].map(([name, seats]) => ({ name, seats })).sort((a, b) => b.seats - a.seats || a.name.localeCompare(b.name));
     const sig = `${cols}x${rows}|${projects.map((p) => `${p.name}:${p.seats}`).join(",")}`;
     if (sig === this.signature) return;
@@ -861,8 +1004,8 @@ var RoomBase = class {
   }
   /** Claim and release. Existing claims are never disturbed — that stickiness
    *  is what stops characters being re-targeted onto occupied chairs. */
-  assign(sessions2) {
-    const byId = new Map(sessions2.map((s) => [s.id, s]));
+  assign(sessions3) {
+    const byId = new Map(sessions3.map((s) => [s.id, s]));
     for (const [id, ch] of [...this.chars]) {
       if (byId.has(id)) continue;
       const st = ch.seatId ? this.spots.get(ch.seatId) : void 0;
@@ -883,7 +1026,7 @@ var RoomBase = class {
       spot.taken = ch.id;
     }
     const desks = [...this.spots.values()].filter((s) => s.kind === "desk").sort((a, b) => a.row - b.row || a.col - b.col);
-    const newcomers = sessions2.filter((s) => !this.chars.has(s.id) || !this.chars.get(s.id).seatId).sort((a, b) => RANK[a.state] - RANK[b.state] || a.id.localeCompare(b.id));
+    const newcomers = sessions3.filter((s) => !this.chars.has(s.id) || !this.chars.get(s.id).seatId).sort((a, b) => RANK[a.state] - RANK[b.state] || a.id.localeCompare(b.id));
     for (const s of newcomers) {
       const seat = this.claimDesk(s, desks);
       if (!seat) continue;
@@ -892,7 +1035,7 @@ var RoomBase = class {
       if (existing) existing.seatId = seat.id;
       else this.chars.set(s.id, this.spawn(s, seat));
     }
-    this.hiddenCount = sessions2.filter((s) => !this.chars.get(s.id)?.seatId).length;
+    this.hiddenCount = sessions3.filter((s) => !this.chars.get(s.id)?.seatId).length;
   }
   /** Nearest free desk to the project's existing cluster, never evicting anyone. */
   claimDesk(s, desks) {
@@ -1020,13 +1163,13 @@ var SimBase = class extends RoomBase {
    * leaves nobody mid-path and only the desk-bound five in a seat. It costs ~50ms
    * once, which is invisible next to the poll that produced the sessions.
    */
-  settle(sessions2, seconds = 20) {
+  settle(sessions3, seconds = 20) {
     const step = 1 / 30;
-    for (let i = 0; i < Math.round(seconds / step); i++) this.update(step, sessions2);
+    for (let i = 0; i < Math.round(seconds / step); i++) this.update(step, sessions3);
   }
-  update(dt, sessions2) {
+  update(dt, sessions3) {
     this.ballT += dt * 1.6;
-    const byId = new Map(sessions2.map((s) => [s.id, s]));
+    const byId = new Map(sessions3.map((s) => [s.id, s]));
     for (const ch of this.chars.values()) {
       const s = byId.get(ch.id);
       if (!s) continue;
@@ -1333,8 +1476,8 @@ var SimBase = class extends RoomBase {
 var Office = class extends SimBase {
   /** whether nameplates are drawn as rotated images beside each pod */
   vertical = false;
-  draw(cv2, sessions2) {
-    const byId = new Map(sessions2.map((s) => [s.id, s]));
+  draw(cv2, sessions3) {
+    const byId = new Map(sessions3.map((s) => [s.id, s]));
     cv2.clear(C.floorDark);
     for (let r = 0; r < this.rows; r++) {
       for (let c = 0; c < this.cols; c++) {
@@ -2102,22 +2245,6 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   return { rgba, w, h };
 }
 
-// src/data/select.ts
-function needsAttention(s) {
-  if (s.state === "needs") return s.waitingFor ?? "blocked";
-  if (s.ctxUsed / s.ctxLimit > 0.9) return "context almost full";
-  return null;
-}
-function order(list) {
-  return [...list].sort((a, b) => {
-    const at = needsAttention(a) ? 0 : 1;
-    const bt = needsAttention(b) ? 0 : 1;
-    if (at !== bt) return at - bt;
-    if (a.stale !== b.stale) return b.stale - a.stale;
-    return a.id.localeCompare(b.id);
-  });
-}
-
 // web/settings.ts
 var DEFAULTS = { labels: "vertical", room: true };
 var SETTINGS = [
@@ -2216,25 +2343,19 @@ function mountSettings(button, panel, onChange) {
   });
 }
 
-// web/app.ts
-var $ = (sel) => document.querySelector(sel);
-var rgb = (c) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
-var bar = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
-var listEl = $("#list");
-var emptyEl = $("#empty");
-var roomEl = $("#room");
-var canvas = $("#canvas");
-var stampEl = $("#stamp");
-var offlineEl = $("#offline");
-var ctx2d = canvas.getContext("2d");
-var buffer = document.createElement("canvas");
-var bufferCtx = buffer.getContext("2d");
+// web/room.ts
+var roomEl;
+var canvas;
+var ctx2d;
+var buffer;
+var bufferCtx;
 var sessions = [];
 var office = null;
 var cv = null;
 var sheetsReady = false;
-var seenAt = 0;
-var live = false;
+var settled = false;
+var setRoomSessions = (list) => sessions = list;
+var relayout = () => cv = null;
 async function loadSheets() {
   const imgs = [];
   for (let i = 0; i < 6; i++) {
@@ -2256,7 +2377,6 @@ function roomSize(n) {
   const tileRows = Math.max(24, Math.min(34, bands * 4 + 12));
   return { cols, rows: tileRows * 2 };
 }
-var settled = false;
 function ensureOffice(list) {
   const { cols, rows } = roomSize(list.length);
   if (!cv || cv.w !== cols || cv.rows !== rows) {
@@ -2359,119 +2479,26 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-var ago = (ms) => {
-  const m = Math.round(ms / 6e4);
-  if (m < 1) return "now";
-  if (m < 60) return `${m}m`;
-  const h = Math.round(m / 60);
-  return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
-};
-var opened = /* @__PURE__ */ new Set();
-var tokens = (n) => n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
-function details(s) {
-  const dl = document.createElement("dl");
-  dl.className = "detail";
-  const rows = [
-    ["title", s.title || "\u2014"],
-    ["folder", s.cwd],
-    ["level", `${s.level} ${tierOf(s.level).name} \xB7 ${tokens(s.xp)} xp`],
-    ["turns", String(s.turns)],
-    ["context", s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"],
-    ["idle", ago(s.stale)],
-    ...s.tab ? [["tab", `\u2318${s.tab}`]] : [],
-    ...s.waitingFor ? [["waiting on", s.waitingFor]] : [],
-    ...s.last && s.last !== s.doing ? [["last said", s.last]] : []
-  ];
-  for (const [k, v] of rows) {
-    const dt = document.createElement("dt");
-    dt.textContent = k;
-    const dd = document.createElement("dd");
-    dd.textContent = v;
-    dl.append(dt, dd);
-  }
-  return dl;
+function mountRoom(room, el) {
+  roomEl = room;
+  canvas = el;
+  ctx2d = canvas.getContext("2d");
+  buffer = document.createElement("canvas");
+  bufferCtx = buffer.getContext("2d");
+  loadSheets().catch(() => {
+    sheetsReady = false;
+  });
+  requestAnimationFrame(frame);
 }
-var WEIGHT = {
-  error: "26%",
-  needs: "22%",
-  working: "16%",
-  shell: "16%",
-  review: "11%",
-  done: "7%",
-  parked: "3%"
-};
-var BANDS = [
-  { key: "error", label: "failed", has: (s) => s.state === "error" },
-  { key: "needs", label: "needs you", has: (s) => s.state === "needs" },
-  { key: "live", label: "working", has: (s) => s.state === "working" || s.state === "shell" },
-  { key: "review", label: "finished, unread", has: (s) => s.state === "review" },
-  { key: "done", label: "your turn", has: (s) => s.state === "done" },
-  { key: "parked", label: "parked", has: (s) => s.state === "parked" }
-];
-function paintList(list) {
-  const sorted = order(list);
-  const hues = projectColours(list.map((s) => s.proj));
-  emptyEl.hidden = sorted.length > 0;
-  const nodes = [];
-  for (const band2 of BANDS) {
-    const members = sorted.filter(band2.has);
-    if (!members.length) continue;
-    const head = document.createElement("li");
-    head.className = "band";
-    head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
-    head.style.setProperty("--tint", WEIGHT[band2.key] ?? "10%");
-    head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
-    head.querySelector(".band-name").textContent = band2.label;
-    head.querySelector(".band-n").textContent = String(members.length);
-    nodes.push(head);
-    nodes.push(...members.map(row));
-  }
-  listEl.replaceChildren(...nodes);
-  function row(s) {
-    {
-      const look = LOOK[s.state];
-      const li = document.createElement("li");
-      li.className = "row" + (needsAttention(s) ? " attn" : "");
-      li.style.setProperty("--state", rgb(look.color));
-      li.style.setProperty("--tint", WEIGHT[s.state] ?? "10%");
-      li.style.setProperty("--tier", rgb(tierOf(s.level).color));
-      li.style.setProperty("--proj", rgb(hues.get(s.proj) ?? look.color));
-      const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
-      li.innerHTML = `
-				<span class="lv">${s.level}</span>
-				<span class="proj"></span>
-				<span class="meta">
-					<span class="state">${look.glyph} ${look.label}</span>
-					${s.ctxUsed ? `<span class="ctx${pct > 90 ? " hot" : ""}">${pct}%</span>` : ""}
-					<span>${ago(s.stale)}</span>
-				</span>
-				<span class="doing"></span>`;
-      li.querySelector(".proj").textContent = s.proj;
-      li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
-      li.tabIndex = 0;
-      li.setAttribute("role", "button");
-      const open = opened.has(s.id);
-      li.setAttribute("aria-expanded", String(open));
-      if (open) {
-        li.classList.add("open");
-        li.append(details(s));
-      }
-      const toggle = () => {
-        if (opened.has(s.id)) opened.delete(s.id);
-        else opened.add(s.id);
-        paintList(sessions);
-      };
-      li.addEventListener("click", toggle);
-      li.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          toggle();
-        }
-      });
-      return li;
-    }
-  }
-}
+
+// web/app.ts
+var bar = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
+var roomEl2 = $("#room");
+var stampEl = $("#stamp");
+var offlineEl = $("#offline");
+var sessions2 = [];
+var seenAt = 0;
+var live = false;
 function paintCounts(list) {
   const counts = {};
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
@@ -2491,7 +2518,8 @@ function paintCounts(list) {
   );
 }
 function apply(data) {
-  sessions = data.sessions;
+  sessions2 = data.sessions;
+  setRoomSessions(sessions2);
   if (data.version) {
     const [num, commit] = data.version.split(" \xB7 ");
     const build = document.createElement("span");
@@ -2502,15 +2530,15 @@ function apply(data) {
     bar.ver.title = data.update ? `v${data.update} is available` : "";
   }
   showRoom();
-  paintCounts(sessions);
-  paintList(sessions);
+  paintCounts(sessions2);
+  paintList(sessions2);
   seenAt = Date.now();
   freshness();
 }
 function freshness() {
   if (!seenAt) return;
   const age = Date.now() - seenAt;
-  const n = sessions.length;
+  const n = sessions2.length;
   const when = age < 6e4 ? "moments ago" : `${ago(age)} ago`;
   stampEl.textContent = `${n} session${n === 1 ? "" : "s"} \xB7 updated ${when}`;
   const stale = !live && age > 2e4;
@@ -2563,6 +2591,15 @@ function connect() {
   open();
   return { probe: () => (delay = 1e3, probe()) };
 }
+function showRoom() {
+  roomEl2.hidden = window.innerWidth <= 720 || !settings.room || sessions2.length === 0;
+}
+mountList($("#list"), $("#empty"));
+mountRoom(roomEl2, $("#canvas"));
+mountSettings($("#gear"), $("#settings"), () => {
+  showRoom();
+  relayout();
+});
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState !== "visible") return;
   freshness();
@@ -2570,18 +2607,7 @@ document.addEventListener("visibilitychange", () => {
 });
 addEventListener("resize", () => {
   showRoom();
-  cv = null;
-});
-function showRoom() {
-  roomEl.hidden = window.innerWidth <= 720 || !settings.room || sessions.length === 0;
-}
-mountSettings($("#gear"), $("#settings"), () => {
-  showRoom();
-  cv = null;
-});
-loadSheets().catch(() => {
-  sheetsReady = false;
+  relayout();
 });
 var feed = connect();
 setInterval(freshness, 1e3);
-requestAnimationFrame(frame);

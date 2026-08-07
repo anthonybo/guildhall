@@ -11,7 +11,13 @@
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<title>guildhall</title>
+		<!-- app.css is the shell — palette, header, settings, room frame. list.css is
+		     the session list, which is the whole app on a phone. Split because one
+		     file had reached the repo's 500-line ceiling, and they change for
+		     different reasons. Order matters: list.css overrides the reduced-motion
+		     rule app.css sets globally. -->
 		<link rel="stylesheet" href="/app.css" />
+		<link rel="stylesheet" href="/list.css" />
 	</head>
 	<body>
 		<header id="bar">
