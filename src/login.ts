@@ -222,8 +222,8 @@ export function loginPage(state: LoginState = {}) {
       <div class="win"><i class="screen"></i><i class="stand"></i><i class="desk"></i></div>
     </div>
 
-    <p class="msg" role="status" aria-live="polite">${esc(message)}</p>
-    <p class="hint">${locked ? 'The lights come back on when the wait is over.' : 'Enter the four-digit passcode.'}</p>
+    <p class="msg" role="status" aria-live="polite" data-wait="${state.waitSeconds ?? 0}">${esc(message)}</p>
+    <p class="hint" id="hint">${locked ? 'The lights come back on when the wait is over.' : 'Enter the four-digit passcode.'}</p>
   </form>
   <p class="foot">read-only · your local network</p>
 </main>
@@ -232,36 +232,66 @@ export function loginPage(state: LoginState = {}) {
 (() => {
   const input = document.getElementById('code')
   const form = document.getElementById('form')
+  const msg = document.querySelector('.msg')
+  const hint = document.getElementById('hint')
   const wins = [...document.querySelectorAll('.win')]
-  if (!input || input.disabled) return
 
-  const paint = () => {
-    const n = input.value.length
-    wins.forEach((w, i) => {
-      w.classList.toggle('lit', i < n)
-      w.classList.toggle('next', i === n)
-    })
-  }
-
-  input.addEventListener('input', () => {
-    // digits only, however they arrived — paste, autofill, or a stray keystroke
-    input.value = input.value.replace(/\\D/g, '').slice(0, 4)
-    paint()
-    if (input.value.length === 4) {
-      // light the floor left to right before handing over, so a correct code
-      // feels like the room coming on rather than a page navigating
-      wins.forEach((w, i) => setTimeout(() => { w.classList.remove('lit'); w.classList.add('ok') }, i * 70))
-      setTimeout(() => form.submit(), 340)
+  // The wait was rendered once as a fixed number, so it never ticked and the
+  // field stayed disabled after the lock had expired — the page said "wait 15
+  // seconds" forever and there was no way in but a manual reload. Count it down
+  // here and open up when it reaches zero.
+  let left = Number(msg?.dataset.wait || 0)
+  if (left > 0) {
+    const tick = () => {
+      left -= 1
+      if (left > 0) {
+        msg.textContent = 'Too many tries. Wait ' + left + ' second' + (left === 1 ? '' : 's') + '.'
+        return
+      }
+      clearInterval(timer)
+      msg.textContent = ''
+      if (hint) hint.textContent = 'Enter the four-digit passcode.'
+      input.disabled = false
+      input.focus({ preventScroll: true })
+      start()
     }
-  })
+    msg.textContent = 'Too many tries. Wait ' + left + ' second' + (left === 1 ? '' : 's') + '.'
+    var timer = setInterval(tick, 1000)
+    return
+  }
+  if (!input) return
+  start()
 
-  // there is no visible field, so anywhere on the page means "type here"
-  const focus = () => input.focus({ preventScroll: true })
-  document.addEventListener('click', focus)
-  document.addEventListener('touchend', focus, { passive: true })
-  window.addEventListener('pageshow', focus)
-  focus()
-  paint()
+  function start() {
+
+    const paint = () => {
+      const n = input.value.length
+      wins.forEach((w, i) => {
+        w.classList.toggle('lit', i < n)
+        w.classList.toggle('next', i === n)
+      })
+    }
+
+      input.addEventListener('input', () => {
+      // digits only, however they arrived — paste, autofill, or a stray keystroke
+      input.value = input.value.replace(/\\D/g, '').slice(0, 4)
+      paint()
+      if (input.value.length === 4) {
+        // light the floor left to right before handing over, so a correct code
+      // feels like the room coming on rather than a page navigating
+        wins.forEach((w, i) => setTimeout(() => { w.classList.remove('lit'); w.classList.add('ok') }, i * 70))
+        setTimeout(() => form.submit(), 340)
+      }
+    })
+
+    // there is no visible field, so anywhere on the page means "type here"
+    const focus = () => input.focus({ preventScroll: true })
+    document.addEventListener('click', focus)
+    document.addEventListener('touchend', focus, { passive: true })
+    window.addEventListener('pageshow', focus)
+    focus()
+    paint()
+  }
 })()
 </script>
 </body>

@@ -1,5 +1,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
+
+// Every test in this file writes settings, so it must never touch the real ones.
+// It used to: the suite reset the passcode in ~/.config/guildhall on every run,
+// which looked like a chosen code refusing to stick. Set before any import that
+// reads it — the modules resolve the directory per call, not at load.
+process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-test-'))
+
+
 import { compare, newestTag } from './update.ts'
 
 test('versions compare by number, not by string', () => {
