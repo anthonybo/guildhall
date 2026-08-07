@@ -25,8 +25,10 @@ import { encodePNG } from '../src/kitty.ts'
 import * as T from '../src/table.ts'
 import { order } from '../src/data.ts'
 
-const SX = 4 // raster pixels per terminal column
-const SY = 8 // raster pixels per terminal row
+// 8/16 rather than 4/8: a nameplate's ink band is 11px and needs two columns of
+// room, which 4px per column cannot give. Sprites stay sharp at any multiple.
+const SX = 8
+const SY = 16
 const CW = 8.4 // display width of a column, in SVG units
 const LH = 16.8 // display height of a row — SY/SX * CW keeps the room square
 
@@ -51,8 +53,11 @@ office.assign(sessions)
 // let the room settle so the idle characters are at facilities rather than
 // standing on their spawn tiles, which is not what it looks like in use
 for (let i = 0; i < 900; i++) office.update(1 / 30, sessions)
+office.vertical = true
 const placed = office.draw(cv, sessions)
-office.overlay(cv, placed, sessions[0].id, true)
+office.vertical = true
+const placed2 = placed
+office.overlay(cv, placed2, sessions[0].id, true, true)
 
 const { rgba: raster, w: W, h: H } = renderRoom(cv, office, placed, SX, SY)
 

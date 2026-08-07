@@ -19,6 +19,8 @@ import {
 	encodePNG,
 	place,
 	supportsImages,
+	cellFrom,
+	DEFAULT_CELL,
 	SYNC_END,
 	SYNC_START,
 	transmit,
@@ -31,7 +33,7 @@ import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from '.
 import { frameOf, shrink } from './characters.ts'
 import { loadSheets } from './sheets.ts'
 import { badge, monitor } from './screens.ts'
-import { LOOK, tierOf } from './theme.ts'
+import { C, LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 import * as H from './help.ts'
@@ -39,6 +41,8 @@ import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
 import * as cfgStore from './config.ts'
 import { addresses, createServer } from './serve.ts'
+import { choose, plate } from './nameplate.ts'
+import { PLATE_COLS, PLATE_ROWS } from './office/model.ts'
 import { passcode, setPasscode } from './auth.ts'
 import * as update from './update.ts'
 
@@ -149,6 +153,11 @@ let nextId = 1000
 /** One placement per frame goes out un-silenced so the terminal can report a
  *  missing image. It has to be whichever is drawn first, not a particular class:
  *  hanging it off the first monitor meant no sentinel at all in a room with none. */
+/** Real pixels per cell, as reported by the terminal. Plates are authored at
+ *  exactly this size: kitty and Ghostty bilinear-filter images, so anything
+ *  bigger gets averaged on the way down and 1px stems wash out to grey. */
+let cell = { ...DEFAULT_CELL }
+
 let sentinelUsed = false
 const loudOnce = () => (sentinelUsed ? false : ((sentinelUsed = true), true))
 
@@ -329,16 +338,18 @@ function draw() {
 	let images = ''
 	sentinelUsed = false
 	if (townRows > 0) {
+		// set before draw(), which is what decides whether to emit plate placements
+		office.vertical = cfg.labels === 'vertical' && IMAGES
 		const placed = office.draw(cv, list)
 		if (!IMAGES)
 			for (const p of placed) {
 				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
-		office.overlay(cv, placed, selectedId ?? undefined, labels, cfg.labels === 'vertical')
+		office.overlay(cv, placed, selectedId ?? undefined, labels, office.vertical)
 		townLines = cv.render()
 		// furniture first, then monitors, then people on top of both
-		if (IMAGES) images = drawProps() + drawMonitors() + drawImages(placed)
+		if (IMAGES) images = drawProps() + drawPlates() + drawMonitors() + drawImages(placed)
 		else {
 			for (const pr of office.props) {
 				const size = PROP_SIZE[pr.kind]
@@ -432,6 +443,27 @@ function drawProps() {
 }
 
 /** Monitors sit on the desk row, which no character overlaps, so no z conflict. */
+function drawPlates() {
+	const pre: string[] = []
+	let out = ''
+	let pid = 700
+	const w = PLATE_COLS * cell.w
+	const h = PLATE_ROWS * cell.h
+	for (const p of office.plates) {
+		const pick = choose(p.proj, w, h)
+		if (!pick) continue // too small to read; RimWorld's rule — draw nothing
+		const { id, fresh } = idFor(`plate:${p.proj}:${w}x${h}`)
+		if (fresh) {
+			const g = plate(pick.font, pick.text, w, h, p.colour, C.ink, C.night)
+			// factor 1, deliberately: see the note on `cell`
+			const up = upscale(g.grid, 1)
+			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
+		}
+		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, PLATE_COLS, PLATE_ROWS, pid++, 2, loudOnce())
+	}
+	return pre.join('') + out
+}
+
 function drawMonitors() {
 	const pre: string[] = []
 	let out = ''
@@ -468,7 +500,15 @@ function cleanup() {
  *  be split across reads, so hold a partial one until it completes. */
 let inbox = ''
 function onInput(b: Buffer) {
-	const { keys, rest, lost } = demux(inbox + b.toString('binary'))
+	const raw = inbox + b.toString('binary')
+	const size = cellFrom(raw)
+	if (size && size.w > 0 && size.h > 0 && (size.w !== cell.w || size.h !== cell.h)) {
+		// a font-size change means every plate is now the wrong size for its box
+		cell = size
+		imageIds.clear()
+		sent.clear()
+	}
+	const { keys, rest, lost } = demux(raw)
 	inbox = rest
 	if (lost) {
 		// the surface was hidden, moved, or lost its images: re-send every pixel on
