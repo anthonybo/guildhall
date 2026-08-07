@@ -21,7 +21,32 @@ function stateLine(state: State, meaning: string) {
 	return `${fg(look.color)}${look.glyph} ${look.label.padEnd(10)}${R}${fg(C.muted)}${meaning}${R}`
 }
 
-export type ShareInfo = { on: boolean; port: number; token: string; lan: string[]; vpn: string[] }
+export type ShareInfo = {
+	on: boolean
+	port: number
+	token: string
+	lan: string[]
+	vpn: string[]
+	/** digits typed so far while changing the code, or null when not changing it */
+	pin?: string | null
+	/** what happened last time it was changed */
+	pinNote?: string
+}
+
+/** The passcode line: what it is now, or what is being typed instead. */
+function passcodeLines(share: ShareInfo): string[] {
+	if (share.pin !== null && share.pin !== undefined) {
+		const typed = '●'.repeat(share.pin.length) + '○'.repeat(4 - share.pin.length)
+		return [
+			`${fg(C.label)}new passcode  ${bold}${fg(C.gold)}${typed}${R}`,
+			`${fg(C.faint)}type four digits · ⌫ to fix · esc to leave it alone${R}`,
+		]
+	}
+	return [
+		`${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`,
+		`${fg(C.faint)}p to change it${R}${share.pinNote ? `${fg(C.muted)} · ${share.pinNote}${R}` : ''}`,
+	]
+}
 
 /**
  * The address to type into the other machine.
@@ -46,10 +71,10 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 		...(urls.length
 			? urls.slice(0, 3).map((u) => `${fg(C.gold)}${u}${R}`)
 			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
-		`${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`,
+		...passcodeLines(share),
 		`${fg(C.muted)}Asked once per device, then remembered. Five wrong tries and${R}`,
 		`${fg(C.muted)}that device waits, doubling each time — which is what makes${R}`,
-		`${fg(C.muted)}four digits safe. Change it in ${fg(C.faint)}~/.config/guildhall/passcode${R}`,
+		`${fg(C.muted)}four digits safe. Changing it signs every device out.${R}`,
 	]
 }
 
@@ -109,6 +134,7 @@ function body(share?: ShareInfo): (string | Line)[] {
 		key('l', 'all labels, or only the ones that need you'),
 		key('a', 'keep the machine awake, or let it sleep'),
 		key('s', 'share to your network, or stop sharing'),
+		key('p', 'set a new passcode (while this is open)'),
 		key('tab', 'room / split / table'),
 		key('r', 'force a redraw'),
 		key('?', 'close this'),

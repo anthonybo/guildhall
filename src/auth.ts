@@ -41,6 +41,43 @@ export function passcode(): string {
 
 export const passcodePath = () => FILE
 
+/**
+ * Codes common enough that trying them first beats searching.
+ *
+ * A random four-digit code is one in ten thousand. A chosen one is not: a small
+ * set of codes — runs, repeats, years, keypad shapes — covers a large share of
+ * what people actually pick, so an attacker starts there and the throttle buys
+ * far less time than it appears to. These are refused rather than warned about,
+ * because a warning at the moment of choosing is a warning that gets clicked past.
+ */
+const WEAK = new Set([
+	'0000', '1111', '2222', '3333', '4444', '5555', '6666', '7777', '8888', '9999',
+	'1234', '2345', '3456', '4567', '5678', '6789', '0123', '9876', '4321', '1230',
+	'1212', '1122', '1313', '2020', '2021', '2022', '2023', '2024', '2025', '2026',
+	'6969', '1004', '2580', '1379', '0852', '1010', '0007', '1990', '1991', '1992',
+	'1993', '1994', '1995', '1996', '1997', '1998', '1999', '2000', '2001', '2002',
+])
+
+export type SetResult = { ok: true } | { ok: false; why: string }
+
+/**
+ * Choose a new passcode. Every paired device is signed out, because a code you
+ * changed that leaves the old phones logged in has not really been changed.
+ */
+export function setPasscode(code: string): SetResult {
+	if (!/^\d{4}$/.test(code)) return { ok: false, why: 'four digits, nothing else' }
+	if (WEAK.has(code)) return { ok: false, why: 'too common — a guesser tries that one first' }
+	try {
+		fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })
+		fs.writeFileSync(FILE, code + '\n', { mode: 0o600 })
+	} catch {
+		return { ok: false, why: 'could not write the file' }
+	}
+	sessions.clear()
+	byAddress.clear()
+	return { ok: true }
+}
+
 const equal = (a: string, b: string) => {
 	const x = Buffer.from(a)
 	const y = Buffer.from(b)

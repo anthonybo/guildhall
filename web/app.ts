@@ -30,6 +30,9 @@ const roomEl = $<HTMLElement>('#room')
 const canvas = $<HTMLCanvasElement>('#canvas')
 const stampEl = $<HTMLElement>('#stamp')
 const ctx2d = canvas.getContext('2d')!
+/** The room at its native pixel size, before being blown up onto the display. */
+const buffer = document.createElement('canvas')
+const bufferCtx = buffer.getContext('2d')!
 
 let sessions: Session[] = []
 let office: Office | null = null
@@ -111,38 +114,61 @@ function frame(now: number) {
 	const placed = off.draw(cv!, sessions)
 	off.overlay(cv!, placed, undefined, true)
 
-	// 4 and 8 put a 16x32 sprite on screen unresampled; the canvas is then scaled
-	// up by CSS with image-rendering: pixelated, which keeps every edge hard
+	// The room is pixel art and must be scaled by whole pixels with no smoothing.
+	// The nameplates are TEXT, and drawing them into that small buffer meant they
+	// were stretched along with it — which is why they were unreadable. So the
+	// pixels go through an offscreen buffer blown up with smoothing off, and the
+	// text is drawn afterwards at the display's own resolution.
 	const { rgba, w, h } = renderRoom(cv!, off, placed, 4, 8, screenFrame)
-	if (canvas.width !== w || canvas.height !== h) {
-		canvas.width = w
-		canvas.height = h
+	if (buffer.width !== w || buffer.height !== h) {
+		buffer.width = w
+		buffer.height = h
 	}
-	ctx2d.putImageData(new ImageData(rgba, w, h), 0, 0)
-	drawLabels(off)
+	bufferCtx.putImageData(new ImageData(rgba, w, h), 0, 0)
+
+	const dpr = Math.min(3, window.devicePixelRatio || 1)
+	const cssW = roomEl.clientWidth
+	const cssH = Math.round((cssW * h) / w)
+	const pxW = Math.round(cssW * dpr)
+	const pxH = Math.round(cssH * dpr)
+	if (canvas.width !== pxW || canvas.height !== pxH) {
+		canvas.width = pxW
+		canvas.height = pxH
+		canvas.style.height = `${cssH}px`
+	}
+	ctx2d.imageSmoothingEnabled = false
+	ctx2d.drawImage(buffer, 0, 0, pxW, pxH)
+	drawLabels(pxW, pxH)
 }
 
-/** Nameplates and status labels live in the canvas text layer, not the pixels. */
-function drawLabels(off: Office) {
-	const cw = canvas.width / cv!.w
-	const ch = canvas.height / cv!.rows
-	ctx2d.font = `${Math.round(ch * 0.8)}px ui-monospace, Menlo, monospace`
+/**
+ * Nameplates and status labels, drawn as real glyphs at full resolution.
+ *
+ * They live in the canvas text layer rather than in the pixel buffer, which is
+ * what makes this possible — flattened into 4-pixel-wide cells and then stretched
+ * they were a smear, and the room's one job is telling you which desk is whose.
+ */
+function drawLabels(pxW: number, pxH: number) {
+	const cw = pxW / cv!.w
+	const ch = pxH / cv!.rows
+	// a hair under the cell so descenders do not clip, and never below legibility
+	ctx2d.font = `${Math.max(9, Math.round(ch * 0.82))}px ui-monospace, SFMono-Regular, Menlo, monospace`
 	ctx2d.textBaseline = 'middle'
+	ctx2d.textAlign = 'center'
 	for (let r = 0; r < cv!.rows; r++) {
 		for (let c = 0; c < cv!.w; c++) {
 			const cell = cv!.cellAt(c, r)
 			if (!cell) continue
 			if (cell.bg) {
 				ctx2d.fillStyle = rgb(cell.bg)
-				ctx2d.fillRect(c * cw, r * ch, cw, ch)
+				ctx2d.fillRect(Math.floor(c * cw), Math.floor(r * ch), Math.ceil(cw), Math.ceil(ch))
 			}
 			if (cell.ch.trim()) {
 				ctx2d.fillStyle = rgb(cell.fg ?? [220, 220, 220])
-				ctx2d.fillText(cell.ch, c * cw, r * ch + ch / 2)
+				ctx2d.fillText(cell.ch, c * cw + cw / 2, r * ch + ch / 2)
 			}
 		}
 	}
-	void off
 }
 
 /* ── the list ── */
@@ -155,14 +181,83 @@ const ago = (ms: number) => {
 	return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`
 }
 
+/**
+ * Which rows are open, held across repaints.
+ *
+ * The feed replaces the list every two seconds, so without this an expanded row
+ * would slam shut mid-read — which is worse than not being able to open one.
+ */
+const opened = new Set<string>()
+
+const tokens = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n))
+
+/** The rest of what is known about a session, shown when its row is opened. */
+function details(s: Session) {
+	const dl = document.createElement('dl')
+	dl.className = 'detail'
+	const rows: [string, string][] = [
+		['title', s.title || '—'],
+		['folder', s.cwd],
+		['level', `${s.level} ${tierOf(s.level).name} · ${tokens(s.xp)} xp`],
+		['turns', String(s.turns)],
+		['context', s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : 'nothing yet'],
+		['idle', ago(s.stale)],
+		...(s.tab ? ([['tab', `⌘${s.tab}`]] as [string, string][]) : []),
+		...(s.waitingFor ? ([['waiting on', s.waitingFor]] as [string, string][]) : []),
+		...(s.last && s.last !== s.doing ? ([['last said', s.last]] as [string, string][]) : []),
+	]
+	for (const [k, v] of rows) {
+		const dt = document.createElement('dt')
+		dt.textContent = k
+		const dd = document.createElement('dd')
+		dd.textContent = v // never innerHTML: this is the session's own prose
+		dl.append(dt, dd)
+	}
+	return dl
+}
+
+/**
+ * The list, in bands.
+ *
+ * On a phone there is no room, so this is the whole app — and a flat list sorted
+ * by urgency still makes you read every row to work out where "live" stops and
+ * "finished ages ago" starts. Named bands do that in one glance, and they hold
+ * their order even when a session changes state, so nothing jumps under your
+ * thumb mid-read.
+ */
+const BANDS: { key: string; label: string; has: (s: Session) => boolean }[] = [
+	{ key: 'error', label: 'failed', has: (s) => s.state === 'error' },
+	{ key: 'needs', label: 'needs you', has: (s) => s.state === 'needs' },
+	{ key: 'live', label: 'working', has: (s) => s.state === 'working' || s.state === 'shell' },
+	{ key: 'review', label: 'finished, unread', has: (s) => s.state === 'review' },
+	{ key: 'done', label: 'your turn', has: (s) => s.state === 'done' },
+	{ key: 'parked', label: 'parked', has: (s) => s.state === 'parked' },
+]
+
 function paintList(list: Session[]) {
 	const sorted = order(list)
 	// the same assignment the room makes, so a name here and its carpet upstairs
 	// are the same colour
 	const hues = projectColours(list.map((s) => s.proj))
 	emptyEl.hidden = sorted.length > 0
-	listEl.replaceChildren(
-		...sorted.map((s) => {
+
+	const nodes: HTMLElement[] = []
+	for (const band of BANDS) {
+		const members = sorted.filter(band.has)
+		if (!members.length) continue
+		const head = document.createElement('li')
+		head.className = 'band'
+		head.style.setProperty('--state', rgb(LOOK[members[0].state].color))
+		head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`
+		head.querySelector('.band-name')!.textContent = band.label
+		head.querySelector('.band-n')!.textContent = String(members.length)
+		nodes.push(head)
+		nodes.push(...members.map(row))
+	}
+	listEl.replaceChildren(...nodes)
+
+	function row(s: Session) {
+		{
 			const look = LOOK[s.state]
 			const li = document.createElement('li')
 			li.className = 'row' + (needsAttention(s) ? ' attn' : '')
@@ -184,9 +279,32 @@ function paintList(list: Session[]) {
 			// names, and it must never be able to become markup
 			li.querySelector('.proj')!.textContent = s.proj
 			li.querySelector('.doing')!.textContent = s.doing || s.last || '—'
+
+			// a row is a button: the whole thing is the target, because a small
+			// chevron is a poor thing to aim at on a phone
+			li.tabIndex = 0
+			li.setAttribute('role', 'button')
+			const open = opened.has(s.id)
+			li.setAttribute('aria-expanded', String(open))
+			if (open) {
+				li.classList.add('open')
+				li.append(details(s))
+			}
+			const toggle = () => {
+				if (opened.has(s.id)) opened.delete(s.id)
+				else opened.add(s.id)
+				paintList(sessions)
+			}
+			li.addEventListener('click', toggle)
+			li.addEventListener('keydown', (e) => {
+				if (e.key === 'Enter' || e.key === ' ') {
+					e.preventDefault()
+					toggle()
+				}
+			})
 			return li
-		}),
-	)
+		}
+	}
 }
 
 function paintCounts(list: Session[]) {

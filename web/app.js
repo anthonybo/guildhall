@@ -1399,19 +1399,30 @@ var Office = class extends SimBase {
   /** Project nameplates and per-character status labels. */
   overlay(cv2, placed, selected, showAll = true) {
     const named = /* @__PURE__ */ new Set();
+    const claimed = /* @__PURE__ */ new Map();
+    const blocks = (row) => claimed.get(row) ?? [];
     for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
       if (named.has(pod.proj)) continue;
       named.add(pod.proj);
       const band = this.pods.filter((p) => p.deskRow === pod.deskRow);
       const rightOf = band.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0);
       const leftOf = band.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1);
-      const roomRight = ((rightOf.length ? rightOf[0].c0 : this.cols - 1) - pod.c0) * TILE - 1;
-      const roomLeft = (pod.c1 + 1 - (leftOf.length ? leftOf[0].c1 + 1 : 1)) * TILE - 1;
-      const span = Math.max(roomRight, roomLeft);
-      const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `;
-      const startCol = roomLeft > roomRight ? (pod.c1 + 1) * TILE - text.length : pod.c0 * TILE;
       const plateRow = Math.min(cv2.rows - 1, Math.floor((pod.seatRow + 1) * TILE / 2));
-      cv2.text(Math.max(0, startCol), plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0]);
+      const here = blocks(plateRow);
+      const left0 = pod.c0 * TILE;
+      const right0 = (pod.c1 + 1) * TILE;
+      const podRight = (rightOf.length ? rightOf[0].c0 : this.cols - 1) * TILE;
+      const wallRight = Math.min(podRight, ...here.filter((b) => b[0] >= left0).map((b) => b[0]));
+      const podLeft = (leftOf.length ? leftOf[0].c1 + 1 : 1) * TILE;
+      const wallLeft = Math.max(podLeft, ...here.filter((b) => b[1] <= right0).map((b) => b[1]));
+      const roomRight = wallRight - left0 - 1;
+      const roomLeft = right0 - wallLeft - 1;
+      const span = Math.max(roomRight, roomLeft);
+      if (span < 5) continue;
+      const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `;
+      const startCol = Math.max(0, roomLeft > roomRight ? right0 - text.length : left0);
+      cv2.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0]);
+      claimed.set(plateRow, [...here, [startCol, startCol + text.length]]);
     }
     for (const p of placed) {
       for (let i = 0; i < CHAR_H / 2; i++) {
@@ -1770,6 +1781,8 @@ var roomEl = $("#room");
 var canvas = $("#canvas");
 var stampEl = $("#stamp");
 var ctx2d = canvas.getContext("2d");
+var buffer = document.createElement("canvas");
+var bufferCtx = buffer.getContext("2d");
 var sessions = [];
 var office = null;
 var cv = null;
@@ -1823,33 +1836,45 @@ function frame(now) {
   const placed = off.draw(cv, sessions);
   off.overlay(cv, placed, void 0, true);
   const { rgba, w, h } = renderRoom(cv, off, placed, 4, 8, screenFrame);
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
+  if (buffer.width !== w || buffer.height !== h) {
+    buffer.width = w;
+    buffer.height = h;
   }
-  ctx2d.putImageData(new ImageData(rgba, w, h), 0, 0);
-  drawLabels(off);
+  bufferCtx.putImageData(new ImageData(rgba, w, h), 0, 0);
+  const dpr = Math.min(3, window.devicePixelRatio || 1);
+  const cssW = roomEl.clientWidth;
+  const cssH = Math.round(cssW * h / w);
+  const pxW = Math.round(cssW * dpr);
+  const pxH = Math.round(cssH * dpr);
+  if (canvas.width !== pxW || canvas.height !== pxH) {
+    canvas.width = pxW;
+    canvas.height = pxH;
+    canvas.style.height = `${cssH}px`;
+  }
+  ctx2d.imageSmoothingEnabled = false;
+  ctx2d.drawImage(buffer, 0, 0, pxW, pxH);
+  drawLabels(pxW, pxH);
 }
-function drawLabels(off) {
-  const cw = canvas.width / cv.w;
-  const ch = canvas.height / cv.rows;
-  ctx2d.font = `${Math.round(ch * 0.8)}px ui-monospace, Menlo, monospace`;
+function drawLabels(pxW, pxH) {
+  const cw = pxW / cv.w;
+  const ch = pxH / cv.rows;
+  ctx2d.font = `${Math.max(9, Math.round(ch * 0.82))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
   ctx2d.textBaseline = "middle";
+  ctx2d.textAlign = "center";
   for (let r = 0; r < cv.rows; r++) {
     for (let c = 0; c < cv.w; c++) {
       const cell = cv.cellAt(c, r);
       if (!cell) continue;
       if (cell.bg) {
         ctx2d.fillStyle = rgb(cell.bg);
-        ctx2d.fillRect(c * cw, r * ch, cw, ch);
+        ctx2d.fillRect(Math.floor(c * cw), Math.floor(r * ch), Math.ceil(cw), Math.ceil(ch));
       }
       if (cell.ch.trim()) {
         ctx2d.fillStyle = rgb(cell.fg ?? [220, 220, 220]);
-        ctx2d.fillText(cell.ch, c * cw, r * ch + ch / 2);
+        ctx2d.fillText(cell.ch, c * cw + cw / 2, r * ch + ch / 2);
       }
     }
   }
-  void off;
 }
 var ago = (ms) => {
   const m = Math.round(ms / 6e4);
@@ -1858,12 +1883,59 @@ var ago = (ms) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 };
+var opened = /* @__PURE__ */ new Set();
+var tokens = (n) => n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+function details(s) {
+  const dl = document.createElement("dl");
+  dl.className = "detail";
+  const rows = [
+    ["title", s.title || "\u2014"],
+    ["folder", s.cwd],
+    ["level", `${s.level} ${tierOf(s.level).name} \xB7 ${tokens(s.xp)} xp`],
+    ["turns", String(s.turns)],
+    ["context", s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"],
+    ["idle", ago(s.stale)],
+    ...s.tab ? [["tab", `\u2318${s.tab}`]] : [],
+    ...s.waitingFor ? [["waiting on", s.waitingFor]] : [],
+    ...s.last && s.last !== s.doing ? [["last said", s.last]] : []
+  ];
+  for (const [k, v] of rows) {
+    const dt = document.createElement("dt");
+    dt.textContent = k;
+    const dd = document.createElement("dd");
+    dd.textContent = v;
+    dl.append(dt, dd);
+  }
+  return dl;
+}
+var BANDS = [
+  { key: "error", label: "failed", has: (s) => s.state === "error" },
+  { key: "needs", label: "needs you", has: (s) => s.state === "needs" },
+  { key: "live", label: "working", has: (s) => s.state === "working" || s.state === "shell" },
+  { key: "review", label: "finished, unread", has: (s) => s.state === "review" },
+  { key: "done", label: "your turn", has: (s) => s.state === "done" },
+  { key: "parked", label: "parked", has: (s) => s.state === "parked" }
+];
 function paintList(list) {
   const sorted = order(list);
   const hues = projectColours(list.map((s) => s.proj));
   emptyEl.hidden = sorted.length > 0;
-  listEl.replaceChildren(
-    ...sorted.map((s) => {
+  const nodes = [];
+  for (const band of BANDS) {
+    const members = sorted.filter(band.has);
+    if (!members.length) continue;
+    const head = document.createElement("li");
+    head.className = "band";
+    head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
+    head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
+    head.querySelector(".band-name").textContent = band.label;
+    head.querySelector(".band-n").textContent = String(members.length);
+    nodes.push(head);
+    nodes.push(...members.map(row));
+  }
+  listEl.replaceChildren(...nodes);
+  function row(s) {
+    {
       const look = LOOK[s.state];
       const li = document.createElement("li");
       li.className = "row" + (needsAttention(s) ? " attn" : "");
@@ -1882,9 +1954,29 @@ function paintList(list) {
 				<span class="doing"></span>`;
       li.querySelector(".proj").textContent = s.proj;
       li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
+      li.tabIndex = 0;
+      li.setAttribute("role", "button");
+      const open = opened.has(s.id);
+      li.setAttribute("aria-expanded", String(open));
+      if (open) {
+        li.classList.add("open");
+        li.append(details(s));
+      }
+      const toggle = () => {
+        if (opened.has(s.id)) opened.delete(s.id);
+        else opened.add(s.id);
+        paintList(sessions);
+      };
+      li.addEventListener("click", toggle);
+      li.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          toggle();
+        }
+      });
       return li;
-    })
-  );
+    }
+  }
 }
 function paintCounts(list) {
   const counts = {};

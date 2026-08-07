@@ -84,11 +84,11 @@ body {
 #canvas {
 	display: block;
 	width: 100%;
-	height: auto;
 	border: 1px solid var(--line);
 	border-radius: 6px;
-	/* pixel art must never be smoothed; a bilinear upscale turns it to soup */
-	image-rendering: pixelated;
+	/* The canvas is drawn at device resolution and the upscale happens inside it,
+	   with smoothing off, so the pixels stay hard AND the labels stay type. Letting
+	   CSS do the scaling stretched the glyphs along with the art. */
 }
 
 /* ── the list ── */
@@ -99,12 +99,47 @@ body {
 	display: grid;
 	gap: 0.5rem;
 }
+/* Band headings. Sticky, so while scrolling a long parked list you never lose
+   track of which band you are in — the answer to "is anything live" must survive
+   being halfway down the page. */
+.band {
+	position: sticky;
+	top: 3rem;
+	z-index: 1;
+	display: flex;
+	align-items: baseline;
+	gap: 0.6rem;
+	margin: 0.6rem 0 -0.1rem;
+	padding: 0.35rem 0.1rem;
+	background: var(--bg);
+	color: var(--state);
+	font-size: 0.72rem;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+}
+.band:first-child {
+	margin-top: 0;
+}
+.band-n {
+	color: var(--faint);
+	letter-spacing: 0;
+}
+/* a rule running to the edge, so the band reads as a divider not a row */
+.band::after {
+	content: '';
+	flex: 1;
+	height: 1px;
+	background: var(--line);
+}
+
 .row {
+	cursor: pointer;
 	display: grid;
 	grid-template-columns: auto 1fr auto;
 	grid-template-areas:
 		'lv proj meta'
-		'lv doing doing';
+		'lv doing doing'
+		'detail detail detail';
 	gap: 0.15rem 0.6rem;
 	padding: 0.6rem 0.7rem;
 	background: var(--panel);
@@ -166,6 +201,42 @@ body {
 }
 .row.attn .doing {
 	color: var(--label);
+}
+.row:focus-visible {
+	outline: 2px solid var(--state);
+	outline-offset: 2px;
+}
+/* a chevron that turns, so it is obvious a row has more behind it */
+.proj::after {
+	content: '›';
+	margin-left: 0.5em;
+	color: var(--faint);
+	display: inline-block;
+	transition: transform 140ms ease;
+}
+.row.open .proj::after {
+	transform: rotate(90deg);
+}
+
+/* ── the opened row ── */
+.detail {
+	grid-area: detail;
+	display: grid;
+	grid-template-columns: max-content 1fr;
+	gap: 0.3rem 0.9rem;
+	margin: 0.65rem 0 0;
+	padding-top: 0.6rem;
+	border-top: 1px solid var(--line);
+	font-size: 0.82rem;
+}
+.detail dt {
+	color: var(--faint);
+}
+.detail dd {
+	margin: 0;
+	color: var(--muted);
+	/* a path or a sentence must wrap rather than widen the card */
+	overflow-wrap: anywhere;
 }
 
 .empty,

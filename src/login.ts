@@ -85,59 +85,82 @@ export function loginPage(state: LoginState = {}) {
   .windows {
     display: flex;
     justify-content: center;
-    gap: 0.7rem;
+    gap: 0.55rem;
     margin: 2.25rem 0 0;
   }
+  /* Each slot is a workstation, drawn the way the room draws one: a monitor on a
+     stand, sitting on a desk. Typing a digit switches that screen on — the app's
+     own signal for "somebody is working here". */
   .win {
     position: relative;
-    width: 3.4rem;
-    height: 4.1rem;
-    background: var(--panel);
-    border: 1px solid var(--line);
-    border-radius: 3px;
-    display: grid;
-    place-items: center;
-    font-size: 1.6rem;
-    font-variant-numeric: tabular-nums;
-    color: transparent;          /* the digit is never shown, only that it landed */
-    transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+    width: 3.9rem;
+    height: 4.6rem;
   }
-  /* the sill: a window has one, a text box does not */
-  .win::after {
+  /* the screen, in its bezel */
+  .win .screen {
+    position: absolute;
+    inset: 0 0 1.15rem 0;
+    background: #14131c;
+    border: 2px solid #3a3648;
+    border-radius: 2px;
+    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  }
+  /* two lines of "code", dark until the screen comes on */
+  .win .screen::before,
+  .win .screen::after {
     content: '';
     position: absolute;
-    left: 12%;
-    right: 12%;
-    bottom: 0.5rem;
-    height: 2px;
-    background: var(--line);
-    transition: background 140ms ease;
+    left: 15%;
+    height: 3px;
+    background: #23212e;
+    transition: background 160ms ease;
   }
-  .win.lit {
-    background: #3a3220;
+  .win .screen::before { top: 26%; width: 55%; }
+  .win .screen::after  { top: 46%; width: 38%; }
+  /* the stand, and the desk it stands on */
+  .win .stand {
+    position: absolute;
+    left: 50%;
+    bottom: 0.85rem;
+    width: 0.55rem;
+    height: 0.32rem;
+    margin-left: -0.25rem;
+    background: #3a3648;
+  }
+  .win .desk {
+    position: absolute;
+    left: -1px;
+    right: -1px;
+    bottom: 0.35rem;
+    height: 0.5rem;
+    background: #6d5136;
+    border-radius: 1px;
+    box-shadow: 0 2px 0 #523d29;
+  }
+
+  .win.lit .screen {
+    background: #2a2416;
     border-color: var(--gold);
-    box-shadow: 0 0 0 1px rgba(255, 214, 92, 0.25), 0 0 18px -6px rgba(255, 214, 92, 0.7);
+    box-shadow: 0 0 22px -6px rgba(255, 214, 92, 0.75);
   }
-  .win.lit::after { background: var(--gold); }
+  .win.lit .screen::before { background: var(--gold); }
+  .win.lit .screen::after  { background: #b99a3f; }
 
   /* the caret marks where typing goes, since there is no visible field */
-  .win.next::before {
-    content: '';
-    position: absolute;
-    width: 2px;
-    height: 1.5rem;
+  .win.next .screen::before {
     background: var(--gold);
     animation: blink 1.1s steps(2, start) infinite;
   }
   @keyframes blink { 50% { opacity: 0; } }
 
   /* success: the floor lights up left to right, in the working colour */
-  .win.ok {
-    background: #1e3a35;
+  .win.ok .screen {
+    background: #16302c;
     border-color: var(--work);
-    box-shadow: 0 0 0 1px rgba(120, 226, 200, 0.3), 0 0 22px -6px rgba(120, 226, 200, 0.8);
+    box-shadow: 0 0 26px -6px rgba(120, 226, 200, 0.85);
   }
-  .win.ok::after { background: var(--work); }
+  .win.ok .screen::before,
+  .win.ok .screen::after { background: var(--work); }
 
   form.wrong .windows { animation: shake 320ms ease; }
   @keyframes shake {
@@ -155,7 +178,7 @@ export function loginPage(state: LoginState = {}) {
     height: 1px;
   }
   /* keyboard focus has to be visible even though the field is not */
-  #code:focus-visible ~ .windows .win.next { outline: 2px solid var(--work); outline-offset: 3px; }
+  #code:focus-visible ~ .windows .win.next .screen { outline: 2px solid var(--work); outline-offset: 3px; }
 
   .msg {
     min-height: 1.4rem;
@@ -181,7 +204,7 @@ export function loginPage(state: LoginState = {}) {
 <main>
   <form id="form" method="POST" action="/auth" class="${state.wrong ? 'wrong' : ''}" autocomplete="off">
     <h1 class="mark">GUILDHALL</h1>
-    <p class="sub">The office is locked.</p>
+    <p class="sub">The office is closed.</p>
 
     <!-- autocomplete off, and the opt-outs the common password managers respect:
          an invisible field they decide to decorate puts a dropdown over the
@@ -193,7 +216,10 @@ export function loginPage(state: LoginState = {}) {
            ${locked ? 'disabled' : 'autofocus'}>
 
     <div class="windows" id="windows" aria-hidden="true">
-      <div class="win"></div><div class="win"></div><div class="win"></div><div class="win"></div>
+      <div class="win"><i class="screen"></i><i class="stand"></i><i class="desk"></i></div>
+      <div class="win"><i class="screen"></i><i class="stand"></i><i class="desk"></i></div>
+      <div class="win"><i class="screen"></i><i class="stand"></i><i class="desk"></i></div>
+      <div class="win"><i class="screen"></i><i class="stand"></i><i class="desk"></i></div>
     </div>
 
     <p class="msg" role="status" aria-live="polite">${esc(message)}</p>
