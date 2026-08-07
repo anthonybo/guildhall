@@ -23,12 +23,15 @@ export const MON_ROWS = TILE / 2 + 2 // screen plus the desk surface beneath it
 /**
  * Nameplate image box, in cells.
  *
- * Three of the four free columns beside a pod. Two fits the 6x13 font's 11px ink
- * band but leaves no room to double it, so on a large terminal font the word
- * stayed a hairline in a wide bar. Three lets the glyphs scale with the cell.
- * One column only fits a 4px x-height and cannot be read at all.
+ * Four of the eight free columns beside a pod — `seatProjects` always leaves two
+ * tiles between pods, so the fourth costs nothing that was being used. Two fits
+ * the 6x13 font's 11px ink band but leaves no room to double it, so on a large
+ * terminal font the word stayed a hairline in a wide bar. Three doubles and
+ * triples it. The fourth is what lets a short name keep growing: the strip's
+ * WIDTH caps the scale, not its height, so at three columns `willow` was pinned
+ * to 3x with half its plate empty even though the height allowed 5x.
  */
-export const PLATE_COLS = 3
+export const PLATE_COLS = 4
 export const PLATE_ROWS = 3 * (TILE / 2)
 
 /** The typing frames have no legs — 6 of 32 source rows are empty padding — so
