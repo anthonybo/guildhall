@@ -232,29 +232,37 @@ body.stale #room {
 	top: 3rem;
 	z-index: 1;
 	display: flex;
-	align-items: baseline;
+	align-items: center;
 	gap: 0.6rem;
-	margin: 0.6rem 0 -0.1rem;
-	padding: 0.35rem 0.1rem;
-	background: var(--bg);
+	margin: 0.9rem 0 0.1rem;
+	/* a solid bar in the status colour, so the section boundary is legible from
+	   across a desk rather than only when you are reading it */
+	padding: 0.4rem 0.6rem;
+	border-left: 5px solid var(--state);
+	border-radius: 4px;
+	background: color-mix(in srgb, var(--state) var(--tint, 10%), var(--bg));
 	color: var(--state);
-	font-size: 0.72rem;
+	font-size: 0.76rem;
+	font-weight: 700;
 	letter-spacing: 0.14em;
 	text-transform: uppercase;
 }
+.band-n {
+	padding: 0.05rem 0.4rem;
+	border-radius: 999px;
+	background: var(--state);
+	color: #1a1c28;
+	font-weight: 700;
+}
 .band:first-child {
 	margin-top: 0;
-}
-.band-n {
-	color: var(--faint);
-	letter-spacing: 0;
 }
 /* a rule running to the edge, so the band reads as a divider not a row */
 .band::after {
 	content: '';
 	flex: 1;
 	height: 1px;
-	background: var(--line);
+	background: color-mix(in srgb, var(--state) 40%, transparent);
 }
 
 .row {
@@ -267,16 +275,18 @@ body.stale #room {
 		'detail detail detail';
 	gap: 0.15rem 0.6rem;
 	padding: 0.6rem 0.7rem;
-	background: var(--panel);
-	border: 1px solid var(--line);
-	/* the status colour as a spine down the left, which survives at arm's length
-	   far better than a coloured word does */
-	border-left: 3px solid var(--state);
+	/* Tinted by state, at the weight its band deserves — see WEIGHT in app.ts.
+	   A spine alone identified the state only once you were already reading the
+	   row; the whole card carrying the colour is what makes a section readable
+	   from across the room, which is the question a phone gets asked. */
+	background: color-mix(in srgb, var(--state) var(--tint, 10%), var(--panel));
+	border: 1px solid color-mix(in srgb, var(--state) 25%, var(--line));
+	border-left: 5px solid var(--state);
 	border-radius: 6px;
 }
+/* anything genuinely waiting on you gets the full outline as well as the wash */
 .row.attn {
 	border-color: var(--state);
-	background: color-mix(in srgb, var(--state) 12%, var(--panel));
 }
 .lv {
 	grid-area: lv;
