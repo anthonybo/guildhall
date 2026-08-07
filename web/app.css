@@ -86,6 +86,91 @@ body {
 	margin-right: 0.35em;
 }
 
+/* ── settings ── */
+.gear {
+	appearance: none;
+	background: none;
+	border: 0;
+	padding: 0.1rem 0.2rem;
+	font: inherit;
+	font-size: 1rem;
+	line-height: 1;
+	color: var(--faint);
+	cursor: pointer;
+	border-radius: 4px;
+}
+.gear:hover,
+.gear[aria-expanded='true'] {
+	color: var(--gold);
+}
+.gear:focus-visible,
+.choice:focus-visible {
+	outline: 2px solid var(--gold);
+	outline-offset: 2px;
+}
+.settings {
+	position: absolute;
+	top: calc(100% + 0.4rem);
+	right: 0.9rem;
+	z-index: 3;
+	width: min(21rem, calc(100vw - 1.8rem));
+	padding: 0.9rem;
+	background: var(--panel);
+	border: 1px solid var(--line);
+	border-radius: 8px;
+	box-shadow: 0 10px 30px rgb(0 0 0 / 45%);
+}
+.set + .set {
+	margin-top: 1rem;
+	padding-top: 1rem;
+	border-top: 1px solid var(--line);
+}
+.set-label {
+	display: block;
+	font-size: 0.82rem;
+	color: var(--label);
+	margin-bottom: 0.45rem;
+}
+.choices {
+	display: flex;
+	/* the controls stack rather than squeeze once the labels stop fitting */
+	flex-wrap: wrap;
+	gap: 0.35rem;
+}
+.choice {
+	flex: 1 1 8rem;
+	appearance: none;
+	padding: 0.4rem 0.5rem;
+	font: inherit;
+	font-size: 0.78rem;
+	color: var(--muted);
+	background: var(--bg);
+	border: 1px solid var(--line);
+	border-radius: 5px;
+	cursor: pointer;
+}
+.choice:hover {
+	color: var(--label);
+	border-color: var(--faint);
+}
+.choice[aria-checked='true'] {
+	color: var(--bg);
+	background: var(--gold);
+	border-color: var(--gold);
+}
+.set-help,
+.set-note {
+	margin: 0.45rem 0 0;
+	font-size: 0.72rem;
+	line-height: 1.4;
+	color: var(--faint);
+}
+.set-note {
+	margin-top: 0.9rem;
+	padding-top: 0.75rem;
+	border-top: 1px solid var(--line);
+}
+
 /* ── the room ── */
 #room {
 	padding: 0.9rem 0.9rem 0;
