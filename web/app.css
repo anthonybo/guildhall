@@ -406,15 +406,17 @@ body.stale #room {
 	}
 	/* Its own row. Six counts cannot share a line with the wordmark, the version
 	   and the connection dot on a phone, and squeezing them onto one wrapped the
-	   header to three ragged rows. Two clean rows beat three ragged ones. */
+	   header to three ragged rows.
+	   The words STAY. Dropping them was the wrong fix for that wrap: a bare ▲ or ◆
+	   is unreadable to anyone who has not memorised a legend, and the count is
+	   worth nothing if you cannot tell what it counts. Each item is `nowrap`, so
+	   the row breaks between counts and never inside one — which was the actual
+	   bug — and two tidy lines of readable text beat one line of hieroglyphs. */
 	.counts {
 		order: 3;
 		flex-basis: 100%;
-		gap: 0.7rem;
-		font-size: 0.82rem;
-	}
-	.counts i {
-		display: none;
+		gap: 0.3rem 0.85rem;
+		font-size: 0.8rem;
 	}
 	.ver .build {
 		display: none;

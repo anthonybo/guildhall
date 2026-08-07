@@ -2434,6 +2434,7 @@ function paintCounts(list) {
       n.textContent = String(counts[k]);
       const word2 = document.createElement("i");
       word2.textContent = ` ${LOOK[k].label}`;
+      el.title = `${counts[k]} ${LOOK[k].label}`;
       el.append(n, word2);
       return el;
     })
