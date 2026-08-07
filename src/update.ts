@@ -19,8 +19,16 @@ import { VERSION } from './version.ts'
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const cacheFile = () => path.join(process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall'), 'update.json')
-/** Once a day is plenty for a tool you rebuild by hand. */
-const EVERY = 24 * 60 * 60 * 1000
+/**
+ * How long a cached answer suppresses the network.
+ *
+ * This was a day, on the reasoning that a hand-rebuilt tool changes slowly. It
+ * does not: this repo ships several versions in an afternoon, and a day-long
+ * cache meant every one of them after the first was invisible until tomorrow —
+ * the indicator simply never appeared. Ten minutes still collapses a burst of
+ * restarts into one lookup, which is all the cache was ever for.
+ */
+const EVERY = 10 * 60 * 1000
 
 let newest: string | null = null
 
@@ -80,12 +88,13 @@ function note(latest: string) {
 export function check(onFound?: (latest: string) => void, cwd = process.cwd()) {
 	const cached = readCache()
 	if (cached) {
+		// Report what the cache knows straight away, whether or not it is still
+		// fresh — a stale cache that already says "newer exists" is right about
+		// that, and waiting for the network to confirm it just delays the badge.
 		note(cached.latest)
-		// a fresh cache is the whole answer; no reason to touch the network
-		if (Date.now() - cached.at < EVERY) {
-			if (newest && onFound) onFound(newest)
-			return
-		}
+		if (newest && onFound) onFound(newest)
+		// only a FRESH cache excuses skipping the lookup
+		if (Date.now() - cached.at < EVERY) return
 	}
 
 	const child = execFile(
