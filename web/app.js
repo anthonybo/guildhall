@@ -416,7 +416,7 @@ var CHAR_W = TILE;
 var CHAR_H = TILE * 2;
 var MON_COLS = TILE;
 var MON_ROWS = TILE / 2 + 2;
-var PLATE_COLS = 2;
+var PLATE_COLS = 3;
 var PLATE_ROWS = 3 * (TILE / 2);
 var SIT_SINK = Math.round(CHAR_H * 6 / 32);
 var WALK_TILES_PER_SEC = 3;
@@ -1915,7 +1915,7 @@ function word(f, s) {
     }
   return { w, h: f.h, px };
 }
-function plate(f, s, wpx, hpx, bg, ink, border) {
+function plate(f, s, wpx, hpx, bg, ink, border, scale = 1) {
   const grid = Array.from({ length: hpx }, () => new Array(wpx).fill(bg));
   if (border) {
     for (let x = 0; x < wpx; x++) {
@@ -1928,16 +1928,19 @@ function plate(f, s, wpx, hpx, bg, ink, border) {
     }
   }
   const m = word(f, s);
-  const dw = m.h;
-  const dh = m.w;
+  const dw = m.h * scale;
+  const dh = m.w * scale;
   const ox = Math.floor((wpx - dw) / 2);
   const oy = Math.floor((hpx - dh) / 2);
   for (let y = 0; y < m.h; y++)
     for (let x = 0; x < m.w; x++) {
       if (!m.px[y][x]) continue;
-      const dx = ox + y;
-      const dy = oy + (m.w - 1 - x);
-      if (dx >= 0 && dy >= 0 && dx < wpx && dy < hpx) grid[dy][dx] = ink;
+      for (let j = 0; j < scale; j++)
+        for (let i = 0; i < scale; i++) {
+          const dx = ox + y * scale + j;
+          const dy = oy + (m.w - 1 - x) * scale + i;
+          if (dx >= 0 && dy >= 0 && dx < wpx && dy < hpx) grid[dy][dx] = ink;
+        }
     }
   return { w: wpx, h: hpx, grid };
 }
@@ -1954,13 +1957,19 @@ function band(f) {
   return bot < top ? f.h : bot - top + 1;
 }
 function choose(text, wpx, hpx) {
+  const best = (f2, s) => {
+    const across = Math.floor((wpx - 3) / band(f2));
+    const along = Math.floor(hpx / (s.length * f2.w));
+    return Math.min(across, along);
+  };
   for (const f2 of LADDER) {
-    if (band(f2) + 2 <= wpx && text.length * f2.w <= hpx) return { font: f2, text };
+    const scale = best(f2, text);
+    if (scale >= 1) return { font: f2, text, scale };
   }
   const f = LADDER[LADDER.length - 1];
-  if (band(f) + 2 > wpx) return null;
+  if (band(f) + 3 > wpx) return null;
   const room = Math.floor(hpx / f.w);
-  return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + "." : text };
+  return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + "." : text, scale: 1 };
 }
 
 // src/render.ts
@@ -2016,7 +2025,7 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   }
   for (const p of scene.plates) {
     const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);
-    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy);
+    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy);
   }
   for (const b of scene.badges) {
     const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color;

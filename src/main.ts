@@ -368,13 +368,20 @@ function draw() {
 		const sel = rowsOut.find((r) => r.s.id === selectedId)?.s
 		const det = T.detail(sel, cols)
 		body.push(T.header(cols))
-		// an expanded row brings its detail with it, and the whole thing still has to
-		// fit the space the table was given
+		// An expanded row brings its detail with it, and the whole thing still has to
+		// fit the space the table was given. Count the lines WE add — `body` already
+		// holds the whole room, so budgeting against its length skipped every row.
 		const budget = Math.max(0, tableRows - 3)
+		let used = 0
 		for (const r of rowsOut) {
-			if (body.length - 1 >= budget) break
+			if (used >= budget) break
 			body.push(r.line)
-			for (const e of r.extra ?? []) if (body.length - 1 < budget) body.push(e)
+			used++
+			for (const e of r.extra ?? []) {
+				if (used >= budget) break
+				body.push(e)
+				used++
+			}
 		}
 		while (body.length < townRows + tableRows - 2) body.push('')
 		body.push(...det)
@@ -454,7 +461,7 @@ function drawPlates() {
 		if (!pick) continue // too small to read; RimWorld's rule — draw nothing
 		const { id, fresh } = idFor(`plate:${p.proj}:${w}x${h}`)
 		if (fresh) {
-			const g = plate(pick.font, pick.text, w, h, p.colour, C.ink, C.night)
+			const g = plate(pick.font, pick.text, w, h, p.colour, C.ink, C.night, pick.scale)
 			// factor 1, deliberately: see the note on `cell`
 			const up = upscale(g.grid, 1)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))

@@ -20,10 +20,15 @@ export const CHAR_H = TILE * 2
 export const MON_COLS = TILE
 export const MON_ROWS = TILE / 2 + 2 // screen plus the desk surface beneath it
 
-/** Nameplate image box, in cells. Two columns is what the 11px ink band of the
- *  6x13 font needs; one column only fits a 4px x-height, which cannot be read.
- *  There are four free columns beside every pod, so two is affordable. */
-export const PLATE_COLS = 2
+/**
+ * Nameplate image box, in cells.
+ *
+ * Three of the four free columns beside a pod. Two fits the 6x13 font's 11px ink
+ * band but leaves no room to double it, so on a large terminal font the word
+ * stayed a hairline in a wide bar. Three lets the glyphs scale with the cell.
+ * One column only fits a 4px x-height and cannot be read at all.
+ */
+export const PLATE_COLS = 3
 export const PLATE_ROWS = 3 * (TILE / 2)
 
 /** The typing frames have no legs — 6 of 32 source rows are empty padding — so

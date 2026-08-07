@@ -93,7 +93,7 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 	// picks sx/sy large enough for the font's ink band to fit across two columns.
 	for (const p of scene.plates) {
 		const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy)
-		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy)
+		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy)
 	}
 	for (const b of scene.badges) {
 		const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color
