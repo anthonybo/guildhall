@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { collect } from './data.ts'
+import { collect, levelFor, xpForLevel, xpOf } from './data.ts'
 
 test('no two live sessions collapse onto a container directory name', () => {
 	const list = collect()
@@ -21,4 +21,23 @@ test('a session that ended on a question is reported as needing you', () => {
 		if (s.state !== 'needs') continue
 		assert.ok(s.waitingFor, `${s.proj} is marked needs-you with no reason given`)
 	}
+})
+
+test('the level curve separates the top instead of saturating', () => {
+	// n^3: seven levels is one doubling above about L20, so a session that has done
+	// far more work reads far higher rather than tying at a cap
+	assert.equal(xpForLevel(2), 8)
+	assert.equal(xpForLevel(10), 1000)
+	assert.equal(xpForLevel(23), 12167)
+	assert.equal(levelFor(12167), 23)
+	assert.equal(levelFor(0), 1)
+	// and the weights favour change made over turns spent
+	assert.ok(xpOf({ revs: 100 }) > xpOf({ turns: 1000 }), 'turns outweigh revisions')
+})
+
+test('live sessions land on distinct levels', () => {
+	const list = collect()
+	if (list.length < 3) return
+	const levels = list.map((s) => s.level)
+	assert.ok(Math.max(...levels) > Math.min(...levels) + 2, 'every session landed on the same rank')
 })

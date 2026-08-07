@@ -26,6 +26,21 @@ const ZOMBIE_WINDOW = 45 * 60_000
 const DONE_WINDOW = 30 * 60_000
 
 export type State = 'error' | 'needs' | 'working' | 'shell' | 'review' | 'done' | 'parked'
+/**
+ * Volume of change, not value: files touched and revised, agents dispatched,
+ * turns taken. Token counts are deliberately excluded — most tokens in agentic
+ * work go to review rather than production, so counting them repeats the
+ * lines-of-code mistake.
+ */
+export function xpOf(d: { revs?: number; files?: number; subs?: number; turns?: number }) {
+	return 6 * (d.revs ?? 0) + 4 * (d.files ?? 0) + 15 * (d.subs ?? 0) + 0.15 * (d.turns ?? 0)
+}
+
+/** Pokemon "Medium Fast": level n costs n^3. Seven levels is one doubling above
+ *  about L20, so the top of the scale keeps separating instead of saturating. */
+export const xpForLevel = (n: number) => n ** 3
+export const levelFor = (xp: number) => Math.max(1, Math.floor(Math.cbrt(xp)))
+
 export const RANK: Record<State, number> = { error: 0, needs: 1, working: 2, shell: 3, review: 4, done: 5, parked: 6 }
 
 export type Session = {
@@ -150,8 +165,93 @@ function transcriptIndex() {
 	return idx
 }
 
+const SKIP_PATH = /\/scratchpad\/|^\/private\/tmp\/|\/\.claude\/projects\//
+
+/**
+ * The lifetime file census, which sits well behind the tail — up to 1.5MB from
+ * the end — so a forward tail read never sees it. Scan backwards in chunks and
+ * stop at the first hit; the newest census is complete, so one record is enough.
+ */
+const censusCache = new Map<string, { size: number; revs: number; files: number; subs: number }>()
+/** A transcript that has not grown cannot have changed, and a poll every two
+ *  seconds must not re-read half a megabyte per session to find that out. */
+const digestCache = new Map<string, { size: number; d: Digest }>()
+
+function census(file: string, maxScan = 4_000_000, chunk = 512_000): Record<string, { version?: number }> {
+	let fd: number
+	try {
+		fd = fs.openSync(file, 'r')
+	} catch {
+		return {}
+	}
+	try {
+		const size = fs.fstatSync(fd).size
+		let read = 0
+		let tail = ''
+		while (read < Math.min(maxScan, size)) {
+			const step = Math.min(chunk, size - read)
+			const buf = Buffer.alloc(step)
+			fs.readSync(fd, buf, 0, step, size - read - step)
+			read += step
+			const lines = (buf.toString('utf8') + tail).split('\n')
+			tail = read < size ? lines[0] : ''
+			for (let i = lines.length - 1; i >= 1; i--) {
+				// cheap substring test first; parsing every line here costs 30x
+				if (!lines[i].includes('"file-history-snapshot"')) continue
+				try {
+					const e = JSON.parse(lines[i])
+					const sn = typeof e.snapshot === 'string' ? JSON.parse(e.snapshot) : e.snapshot
+					const tb = sn?.trackedFileBackups
+					if (tb && Object.keys(tb).length) return tb
+				} catch {}
+			}
+		}
+	} catch {
+	} finally {
+		fs.closeSync(fd)
+	}
+	return {}
+}
+
+/** Sub-agents this session dispatched, counted from their own transcripts. */
+function subagentCount(file: string) {
+	const dir = file.replace(/\.jsonl$/, '')
+	let n = 0
+	const walk = (d: string) => {
+		let entries: fs.Dirent[] = []
+		try {
+			entries = fs.readdirSync(d, { withFileTypes: true })
+		} catch {
+			return
+		}
+		for (const e of entries) {
+			const full = path.join(d, e.name)
+			if (e.isDirectory()) walk(full)
+			else if (e.name.endsWith('.jsonl')) {
+				try {
+					if (fs.statSync(full).size > 20_000) n++
+				} catch {}
+			}
+		}
+	}
+	walk(path.join(dir, 'subagents'))
+	return n
+}
+
 /** Read only the tail — one of these transcripts is 164MB. */
 function digest(file: string) {
+	let statSize = 0
+	try {
+		statSize = fs.statSync(file).size
+	} catch {}
+	const cached = digestCache.get(file)
+	if (cached && cached.size === statSize) return cached.d
+	const d = digestInner(file, statSize)
+	digestCache.set(file, { size: statSize, d })
+	return d
+}
+
+function digestInner(file: string, statSize: number) {
 	let fd: number
 	try {
 		fd = fs.openSync(file, 'r')
@@ -161,8 +261,10 @@ function digest(file: string) {
 	let lines: string[] = []
 	try {
 		const size = fs.fstatSync(fd).size
-		const start = Math.max(0, size - 140_000)
-		const len = Math.min(140_000, size)
+		// 512KB, not 140: records average 7.4KB, so the old window held ~19 of them
+		// and the newest title/status/question records were routinely outside it
+		const start = Math.max(0, size - 512_000)
+		const len = Math.min(512_000, size)
 		const buf = Buffer.alloc(len)
 		fs.readSync(fd, buf, 0, len, start)
 		let s = buf.toString('utf8')
@@ -226,10 +328,35 @@ function digest(file: string) {
 	}
 	// the directory this session actually works in, by weight of evidence
 	if (seen.size) d.subProj = [...seen.entries()].sort((a, b) => b[1] - a[1])[0][0]
+	// The census sits far behind the tail and costs a backward scan, so cache it
+	// against the file size: a poll every two seconds must not re-read megabytes.
+	let size = 0
+	try {
+		size = fs.statSync(file).size
+	} catch {}
+	const hit = censusCache.get(file)
+	if (hit && size - hit.size < 64_000) {
+		d.revs = hit.revs
+		d.files = hit.files
+		d.subs = hit.subs
+		return d
+	}
+	const tb = census(file)
+	let revs = 0
+	let files = 0
+	for (const [p, v] of Object.entries(tb)) {
+		if (SKIP_PATH.test(p)) continue
+		files++
+		revs += Math.min(Math.max(0, (v?.version ?? 1) - 1), 8)
+	}
+	d.revs = revs
+	d.files = files
+	d.subs = subagentCount(file)
+	censusCache.set(file, { size, revs, files, subs: d.subs })
 	return d
 }
 
-type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean; asked?: boolean }
+type Digest = { revs?: number; files?: number; subs?: number; title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean; asked?: boolean }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
@@ -443,10 +570,7 @@ export function collect(): Session[] {
 			unread: !!tab?.unread,
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			turns: d.turns ?? 0,
-			// Doubling curve: every level costs twice the turns of the last, so a
-			// week-old session with 3000 turns sits a couple of ranks above a fresh one
-			// rather than a hundred. Keeps the whole scale inside a single digit.
-			level: Math.max(1, Math.min(9, Math.floor(Math.log2((d.turns ?? 0) / 8 + 1)) + 1)),
+			level: levelFor(xpOf(d)),
 			palette: looks.get(s.sessionId)?.palette ?? 0,
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
