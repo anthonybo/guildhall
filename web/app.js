@@ -416,7 +416,7 @@ var CHAR_W = TILE;
 var CHAR_H = TILE * 2;
 var MON_COLS = TILE;
 var MON_ROWS = TILE / 2 + 2;
-var PLATE_COLS = 3;
+var PLATE_COLS = 4;
 var PLATE_ROWS = 3 * (TILE / 2);
 var SIT_SINK = Math.round(CHAR_H * 6 / 32);
 var WALK_TILES_PER_SEC = 3;
@@ -686,9 +686,9 @@ function addTalkArea(room, socialBands) {
 }
 function addDecor(room, socialBands) {
   if (room.cols <= 14) return;
-  room.props.push({ kind: "plant", x: 1 * TILE, y: 1 * TILE });
+  room.props.push({ kind: "plant", x: 1 * TILE, y: (room.rows - 3) * TILE });
   room.props.push({ kind: "plant", x: (room.cols - 2) * TILE, y: 1 * TILE });
-  room.grid[1][1] = "solid";
+  room.grid[room.rows - 3][1] = "solid";
   room.grid[1][room.cols - 2] = "solid";
   room.props.push({ kind: "whiteboard", x: 3 * TILE, y: 0 });
   room.props.push({ kind: "shelf", x: (room.cols - 4) * TILE, y: 0 });
@@ -1956,20 +1956,31 @@ function band(f) {
     }
   return bot < top ? f.h : bot - top + 1;
 }
+var MIN_CHARS = 10;
+var MAX_SCALE = 4;
+var cut2 = (text, room) => text.length > room ? text.slice(0, room - 1) + "." : text;
 function choose(text, wpx, hpx) {
-  const best = (f2, s) => {
-    const across = Math.floor((wpx - 3) / band(f2));
-    const along = Math.floor(hpx / (s.length * f2.w));
-    return Math.min(across, along);
-  };
-  for (const f2 of LADDER) {
-    const scale = best(f2, text);
-    if (scale >= 1) return { font: f2, text, scale };
+  const cands = [];
+  for (const font of LADDER) {
+    const fits = Math.min(MAX_SCALE, Math.floor((wpx - 3) / band(font)));
+    for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor(hpx / (font.w * scale)), ink: band(font) * scale });
   }
-  const f = LADDER[LADDER.length - 1];
-  if (band(f) + 3 > wpx) return null;
-  const room = Math.floor(hpx / f.w);
-  return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + "." : text, scale: 1 };
+  const thickest = (a, b) => b.ink - a.ink || b.font.h - a.font.h || b.room - a.room;
+  const widest = (a, b) => b.room - a.room || b.ink - a.ink || b.font.h - a.font.h;
+  const usable = cands.filter((c) => c.room >= 4);
+  const thick = usable.filter((c) => c.scale >= 2);
+  const floor = (
+    // Enough letters to read: spend what is left on thickness.
+    thick.filter((c) => c.room >= MIN_CHARS).sort(thickest)[0] ?? // Not enough letters at any size. Every option here is already 2px-stemmed,
+    // so thickness has stopped being the scarce thing and length starts to pay.
+    thick.sort(widest)[0] ?? // The strip is too narrow to double anything. 1:1 is a hairline that kitty's
+    // filter greys out, but a faint name still beats no name.
+    usable.sort(thickest)[0]
+  );
+  if (!floor) return null;
+  const grown = thick.filter((c) => c.font === floor.font && c.scale > floor.scale && c.scale <= floor.scale + 1 && c.room >= text.length).sort(thickest)[0];
+  const pick = grown ?? floor;
+  return { font: pick.font, text: cut2(text, pick.room), scale: pick.scale };
 }
 
 // src/render.ts
@@ -2000,9 +2011,9 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
         const c = g.grid[gy][gx];
         if (!c) continue;
         const px = x0 + x;
-        const py = y0 + y;
-        if (px < 0 || py < 0 || px >= w || py >= h) continue;
-        const i = (py * w + px) * 4;
+        const py2 = y0 + y;
+        if (px < 0 || py2 < 0 || px >= w || py2 >= h) continue;
+        const i = (py2 * w + px) * 4;
         rgba[i] = c[0];
         rgba[i + 1] = c[1];
         rgba[i + 2] = c[2];
@@ -2010,30 +2021,31 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
       }
     }
   };
+  const py = sy / 2;
   for (let y = 0; y < cv2.h; y++) {
     for (let x = 0; x < cv2.w; x++) {
       const c = cv2.get(x, y);
-      if (c) put(x * sx, y * (sy / 2), sx, sy / 2, c);
+      if (c) put(x * sx, y * py, sx, py, c);
     }
   }
   for (const pr of scene.props) {
     const size = PROP_SIZE[pr.kind];
-    stamp(prop(pr.kind), pr.x * sx, pr.y * sx, size.w * TILE * sx, size.h * TILE / 2 * sy);
+    stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py);
   }
   for (const m of scene.monitors) {
-    stamp(monitor(m.lit, frame2, m.seed, m.kind), m.x * sx, m.y * sx, MON_COLS * sx, MON_ROWS * sy);
+    stamp(monitor(m.lit, frame2, m.seed, m.kind), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
   }
   for (const p of scene.plates) {
     const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);
-    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy);
+    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy);
   }
   for (const b of scene.badges) {
     const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color;
-    stamp(badge(b.level, tint, b.asking ? "?" : ""), b.x * sx, b.y * sx, TILE * sx, TILE / 2 * sy);
+    stamp(badge(b.level, tint, b.asking ? "?" : ""), b.x * sx, b.y * py, TILE * sx, TILE * py);
   }
   for (const p of placed) {
     const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color);
-    stamp(g, p.x * sx, p.y * sx, CHAR_W * sx, CHAR_H / 2 * sy);
+    stamp(g, p.x * sx, p.y * py, CHAR_W * sx, CHAR_H * py);
   }
   return { rgba, w, h };
 }
