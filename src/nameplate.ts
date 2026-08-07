@@ -314,7 +314,16 @@ export function choose(text: string, wpx: number, hpx: number) {
 		// nothing to spare — and at that size it is a grey smear rather than a word,
 		// so an exact fit has to count as no fit.
 		const fits = Math.min(MAX_SCALE, Math.floor((wpx - 3) / band(font)))
-		for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor(hpx / (font.w * scale)), ink: band(font) * scale })
+		// -2 on the length axis: the keyline at each end, and nothing more. Dividing
+		// the raw height let a name fill the plate exactly — `quillfeather` measured
+		// 144px of ink in a 144px plate — so the word overwrote the border at both
+		// ends and the q's descender was clipped outright. A name shortened with a
+		// '.' reads as deliberate; a glyph sliced by the frame reads as broken.
+		// Two, not four: the word is centred, so surrendering the keyline rows
+		// already guarantees a clear row either side. Reserving a pixel of air on top
+		// of that bought nothing visible and cost `headroom` its last letter on a
+		// small terminal font.
+		for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor((hpx - 2) / (font.w * scale)), ink: band(font) * scale })
 	}
 	// On a tie the taller font, which has the better letterforms at equal height.
 	const thickest = (a: Pick, b: Pick) => b.ink - a.ink || b.font.h - a.font.h || b.room - a.room

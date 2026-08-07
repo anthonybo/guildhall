@@ -104,3 +104,24 @@ test('the font ladder is ordered largest first', () => {
 		assert.ok(LADDER[i].h <= LADDER[i - 1].h, 'ladder is out of order, so `choose` cannot pick the biggest')
 	}
 })
+
+test('a name never runs into the plate keyline', () => {
+	// `quillfeather` measured 144px of ink in a 144px plate, so it overwrote the
+	// border at both ends and the q's descender was clipped off — which is what
+	// "cut off in the README" turned out to mean. The length axis reserves a
+	// keyline and a pixel of air at each end, exactly as the width axis does.
+	for (const cell of [6, 8, 10, 12, 15, 16]) {
+		const w = PLATE_COLS * cell
+		const h = PLATE_ROWS * cell * 2
+		for (const n of ['quillfeather', 'draftingroom', 'brightwater', 'iptv-epg-matcher', 'marina']) {
+			const pick = choose(n, w, h)
+			assert.ok(pick, `nothing drawn for ${n} at a ${cell}px cell`)
+			const ink = pick.text.length * pick.font.w * pick.scale
+			assert.ok(ink <= h - 2, `${n} paints ${ink}px into a ${h}px plate at a ${cell}px cell`)
+			// and the drawn plate must have a clear border row top and bottom
+			const g = plate(pick.font, pick.text, w, h, [200, 100, 100], [32, 34, 46], [26, 28, 40], pick.scale)
+			const border = g.grid[0][Math.floor(w / 2)]
+			assert.deepEqual(border, [26, 28, 40], `${n} overwrote the top keyline at a ${cell}px cell`)
+		}
+	}
+})
