@@ -2391,6 +2391,15 @@ function details(s) {
   }
   return dl;
 }
+var WEIGHT = {
+  error: "26%",
+  needs: "22%",
+  working: "16%",
+  shell: "16%",
+  review: "11%",
+  done: "7%",
+  parked: "3%"
+};
 var BANDS = [
   { key: "error", label: "failed", has: (s) => s.state === "error" },
   { key: "needs", label: "needs you", has: (s) => s.state === "needs" },
@@ -2410,6 +2419,7 @@ function paintList(list) {
     const head = document.createElement("li");
     head.className = "band";
     head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
+    head.style.setProperty("--tint", WEIGHT[band2.key] ?? "10%");
     head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
     head.querySelector(".band-name").textContent = band2.label;
     head.querySelector(".band-n").textContent = String(members.length);
@@ -2423,6 +2433,7 @@ function paintList(list) {
       const li = document.createElement("li");
       li.className = "row" + (needsAttention(s) ? " attn" : "");
       li.style.setProperty("--state", rgb(look.color));
+      li.style.setProperty("--tint", WEIGHT[s.state] ?? "10%");
       li.style.setProperty("--tier", rgb(tierOf(s.level).color));
       li.style.setProperty("--proj", rgb(hues.get(s.proj) ?? look.color));
       const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;

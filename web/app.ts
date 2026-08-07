@@ -299,6 +299,29 @@ function details(s: Session) {
  * their order even when a session changes state, so nothing jumps under your
  * thumb mid-read.
  */
+/**
+ * How loudly a band is painted, as the percentage of its status colour mixed
+ * into a card.
+ *
+ * Not decoration — a ramp. The question a phone gets glanced at to answer is
+ * "is anything waiting on me, and is anything still running", so the two states
+ * that answer it are painted hardest and everything finished recedes toward the
+ * page. Parked is almost bare: nine parked sessions must not out-shout one that
+ * needs you, and by count they usually would.
+ *
+ * Only the card is toned down. Text keeps its own contrast — a wash behind it
+ * changes nothing about how readable it is.
+ */
+const WEIGHT: Record<string, string> = {
+	error: '26%',
+	needs: '22%',
+	working: '16%',
+	shell: '16%',
+	review: '11%',
+	done: '7%',
+	parked: '3%',
+}
+
 const BANDS: { key: string; label: string; has: (s: Session) => boolean }[] = [
 	{ key: 'error', label: 'failed', has: (s) => s.state === 'error' },
 	{ key: 'needs', label: 'needs you', has: (s) => s.state === 'needs' },
@@ -322,6 +345,7 @@ function paintList(list: Session[]) {
 		const head = document.createElement('li')
 		head.className = 'band'
 		head.style.setProperty('--state', rgb(LOOK[members[0].state].color))
+		head.style.setProperty('--tint', WEIGHT[band.key] ?? '10%')
 		head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`
 		head.querySelector('.band-name')!.textContent = band.label
 		head.querySelector('.band-n')!.textContent = String(members.length)
@@ -336,6 +360,7 @@ function paintList(list: Session[]) {
 			const li = document.createElement('li')
 			li.className = 'row' + (needsAttention(s) ? ' attn' : '')
 			li.style.setProperty('--state', rgb(look.color))
+			li.style.setProperty('--tint', WEIGHT[s.state] ?? '10%')
 			li.style.setProperty('--tier', rgb(tierOf(s.level).color))
 			// the project's own colour, the same hue as its carpet in the room
 			li.style.setProperty('--proj', rgb(hues.get(s.proj) ?? look.color))
