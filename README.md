@@ -2,7 +2,7 @@
 
 Every live Claude Code session as a pixel office, in your terminal.
 
-<img src="docs/room.svg" alt="A terminal showing a pixel-art office: two rows of desks with lit and dark monitors, characters seated at some and standing around a kitchen and ping-pong table below, each project's desks on a coloured carpet. Underneath, a table listing ten sessions with tab number, level, project name in its carpet colour, status, what it is doing, a context gauge and how long it has been idle." width="100%">
+<img src="docs/room.svg" alt="A pixel-art office in a terminal: two rows of desks with monitors showing lines of code, characters seated at them, each project's desks on a coloured carpet with its name on a nameplate and a level badge beside the desk. Two desks carry a question-mark placard for sessions waiting on an answer. Below, people stand talking, sit on a couch and stand by a kitchen counter and a ping-pong table. Underneath the room, a table lists ten sessions with tab number, level, project name in its carpet colour, status, what it is doing, a context gauge and how long it has been idle." width="100%">
 
 Sessions that are working sit at their desks with a lit screen. Sessions waiting
 on you get a placard. Everyone else walks around, gets coffee, plays ping-pong.
@@ -11,10 +11,9 @@ context it has left, and how long it has been ignored. A project's colour is the
 same in both halves, so a character you notice upstairs is one colour-match away
 from its row.
 
-The office above is drawn with half blocks because that is what an SVG can carry.
-In a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm —
-the characters and workstations are real sprites at font resolution. Everything
-else looks exactly like this.
+Sprites need a terminal that speaks the kitty graphics protocol — Ghostty, kitty,
+WezTerm. Anywhere else the room falls back to half blocks and everything else is
+unchanged.
 
 It is **read-only**. It watches the sessions you already run — in cmux or
 anywhere else — and never starts, stops, or moves one. The only thing it writes
@@ -46,7 +45,7 @@ It reflows rather than truncating. Identity is never the thing that goes: the
 context gauge yields first, then the project name narrows, so a row always tells
 you *which* session it is.
 
-<img src="docs/narrow.svg" alt="The same office and table rendered at 72 columns: fewer desks per row, the context gauge dropped, project names shortened, but every session still listed with its tab number, level, name and status." width="70%">
+<img src="docs/narrow.svg" alt="The same office at 72 columns: desks pack into more rows, the context gauge is dropped and project names shorten, but every session is still listed with its tab number, level, name and status." width="70%">
 
 ## What it reads
 
@@ -158,9 +157,14 @@ runs from source without the build step.
 ## Documentation images
 
 `sh tools/make-docs-images.sh` regenerates everything in `docs/`. They are drawn
-from the fictional office in `src/demo.ts` and rendered to SVG, so they are
-reproducible, weigh a few KB, stay crisp at any zoom, and contain nobody's real
-project names or half-finished sentences. Regenerate them when the layout changes.
+from the fictional office in `src/demo.ts`, so they are reproducible and contain
+nobody's real project names or half-finished sentences.
+
+`tools/shot.ts` composites the same layers the terminal does — the sprites,
+workstations and level badges are kitty images and never touch the text grid, so
+a plain ANSI capture shows only the half-block fallback, which looks like a
+different program. The room is embedded as a raster and every label is real SVG
+text on top, which keeps it readable at any zoom.
 
 ## Versioning
 
