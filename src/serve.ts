@@ -6,12 +6,13 @@
  * feature — the moment this is reachable from outside the house, "it can only
  * tell you things" is the property worth having.
  *
- * Authentication is a shared token, not "we are on the LAN". LAN-only is the
- * plan today, but a network boundary stops being a boundary the moment this is
- * put behind a tunnel, and retrofitting auth onto something already deployed is
- * how it ends up never happening. The token arrives once in a URL, is exchanged
- * for a cookie, and the URL is replaced — so it is not left sitting in browser
- * history or in a proxy's access log.
+ * Authentication is a four-digit passcode, not "we are on the LAN". A network
+ * boundary stops being a boundary the moment this goes behind a tunnel, and
+ * retrofitting auth onto something already deployed is how it ends up never
+ * happening. The code is typed into a page, verified here, and exchanged for a
+ * session cookie — it never appears in a URL, in browser history, or in a proxy
+ * log, and the browser never stores the code itself. Four digits are only safe
+ * because of the throttle in auth.ts; see the note there.
  *
  * What it exposes is worth knowing: session titles, the last thing each one
  * said, filenames being edited and shell commands that were run.
@@ -19,9 +20,10 @@
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-import crypto from 'node:crypto'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { attempt, issue, lockedFor, triesLeft, valid } from './auth.ts'
+import { loginPage } from './login.ts'
 import { collect } from './data.ts'
 import { demoSessions } from './demo.ts'
 import type { Session } from './data.ts'
@@ -32,26 +34,32 @@ export type ServeOptions = {
 	port: number
 	/** 0.0.0.0 reaches the LAN; 127.0.0.1 is localhost only, for tunnels. */
 	host: string
-	token: string
 	demo: boolean
 }
 
-/** Timing-safe, and length-safe: timingSafeEqual throws on a length mismatch. */
-function tokenMatches(given: string | undefined, expected: string) {
-	if (!given) return false
-	const a = Buffer.from(given)
-	const b = Buffer.from(expected)
-	if (a.length !== b.length) return false
-	return crypto.timingSafeEqual(a, b)
-}
-
-function presentedToken(req: http.IncomingMessage, url: URL) {
+/** The session this request carries, if any. Never the passcode itself. */
+function sessionOf(req: http.IncomingMessage) {
 	const auth = req.headers.authorization
 	if (auth?.startsWith('Bearer ')) return auth.slice(7)
-	const cookie = req.headers.cookie ?? ''
-	const m = /(?:^|;\s*)gh_token=([^;]+)/.exec(cookie)
-	if (m) return decodeURIComponent(m[1])
-	return url.searchParams.get('k') ?? undefined
+	const m = /(?:^|;\s*)gh_sid=([^;]+)/.exec(req.headers.cookie ?? '')
+	return m ? decodeURIComponent(m[1]) : undefined
+}
+
+/** Who is asking, for throttling. Behind a proxy this is the proxy, which is
+ *  acceptable here: there is no proxy on a home network or a tailnet. */
+const addressOf = (req: http.IncomingMessage) => req.socket.remoteAddress ?? 'unknown'
+
+/** Read a small form body. Capped, because nothing here needs more than 4 bytes. */
+function readBody(req: http.IncomingMessage): Promise<string> {
+	return new Promise((resolve) => {
+		let data = ''
+		req.on('data', (c) => {
+			data += c
+			if (data.length > 512) req.destroy()
+		})
+		req.on('end', () => resolve(data))
+		req.on('error', () => resolve(''))
+	})
 }
 
 /**
@@ -75,28 +83,6 @@ export function addresses() {
 		}
 	}
 	return { lan, vpn }
-}
-
-/**
- * The token, kept across restarts.
- *
- * Regenerating it every launch would mean re-pairing the phone every time the
- * server bounces, which is exactly the friction that ends with someone turning
- * authentication off. Stored 0600 in the user's config directory.
- */
-export function persistedToken(): string {
-	const dir = path.join(os.homedir(), '.config', 'guildhall')
-	const file = path.join(dir, 'token')
-	try {
-		const existing = fs.readFileSync(file, 'utf8').trim()
-		if (existing.length >= 8) return existing
-	} catch {}
-	const token = makeToken()
-	try {
-		fs.mkdirSync(dir, { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file, token + '\n', { mode: 0o600 })
-	} catch {}
-	return token
 }
 
 const MIME: Record<string, string> = {
@@ -125,35 +111,41 @@ export function createServer(opts: ServeOptions) {
 	const timer = setInterval(tick, 2000)
 	timer.unref?.()
 
-	const server = http.createServer((req, res) => {
+	const server = http.createServer(async (req, res) => {
 		const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
+		const addr = addressOf(req)
 
-		if (req.method !== 'GET' && req.method !== 'HEAD') {
-			// nothing here mutates anything; say so plainly rather than 404ing
-			res.writeHead(405, { allow: 'GET, HEAD' }).end('read-only')
-			return
-		}
-
-		if (!tokenMatches(presentedToken(req, url), opts.token)) {
-			res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' }).end(
-				'<!doctype html><meta name=viewport content="width=device-width,initial-scale=1">' +
-					'<body style="font:16px system-ui;background:#191722;color:#d0d0d0;padding:2rem">' +
-					'<h1 style="font-size:1.1rem">guildhall</h1><p>This link needs its passcode. ' +
-					'Open the URL printed when the server started.</p>',
-			)
-			return
-		}
-
-		// Swap the token in the URL for a cookie, so it leaves the address bar and
-		// the browser history, then reload clean.
-		if (url.searchParams.has('k')) {
+		// The one place a request may carry a body, and the only one that changes
+		// anything at all — and what it changes is who you are, never any session.
+		if (req.method === 'POST' && url.pathname === '/auth') {
+			const wait = lockedFor(addr)
+			if (wait > 0) return login(res, 429, { waitSeconds: Math.ceil(wait / 1000) })
+			const code = new URLSearchParams(await readBody(req)).get('code') ?? ''
+			const result = attempt(addr, code)
+			if (!result.ok) {
+				const after = lockedFor(addr)
+				return login(res, 401, after > 0 ? { waitSeconds: Math.ceil(after / 1000) } : { wrong: true, triesLeft: triesLeft(addr) })
+			}
 			res
-				.writeHead(302, {
-					location: url.pathname,
-					'set-cookie': `gh_token=${encodeURIComponent(opts.token)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`,
+				.writeHead(303, {
+					location: '/',
+					// the cookie is a session id, never the passcode, so a browser never
+					// stores the code and restarting the server revokes every device
+					'set-cookie': `gh_sid=${issue()}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`,
 				})
 				.end()
 			return
+		}
+
+		if (req.method !== 'GET' && req.method !== 'HEAD') {
+			// nothing else here mutates anything; say so plainly rather than 404ing
+			res.writeHead(405, { allow: 'GET, HEAD, POST /auth' }).end('read-only')
+			return
+		}
+
+		if (!valid(sessionOf(req))) {
+			const wait = lockedFor(addr)
+			return login(res, 401, wait > 0 ? { waitSeconds: Math.ceil(wait / 1000) } : {})
 		}
 
 		if (url.pathname === '/api/sessions') {
@@ -188,6 +180,12 @@ export function createServer(opts: ServeOptions) {
 	return server
 }
 
+/** The passcode screen, in whichever state applies. Never cached — a stale copy
+ *  of a lockout message would be wrong the moment the lock expires. */
+function login(res: http.ServerResponse, code: number, state: Parameters<typeof loginPage>[0]) {
+	res.writeHead(code, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }).end(loginPage(state))
+}
+
 function send(res: http.ServerResponse, code: number, type: string, body: string | Buffer) {
 	res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }).end(body)
 }
@@ -209,11 +207,5 @@ function serveStatic(res: http.ServerResponse, pathname: string) {
 	send(res, 404, 'text/plain; charset=utf-8', 'not found')
 }
 
-/** A token you can type on a phone: no ambiguous characters, still 60+ bits. */
-export function makeToken() {
-	const alphabet = 'abcdefghjkmnpqrstuvwxyz23456789'
-	const bytes = crypto.randomBytes(12)
-	return [...bytes].map((b) => alphabet[b % alphabet.length]).join('')
-}
 
 export type { Session }

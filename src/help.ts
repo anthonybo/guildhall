@@ -38,14 +38,18 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 			`${fg(C.muted)}is remembered. Turn it on and this panel shows the address.${R}`,
 		]
 	}
-	const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}/?k=${share.token}`)
+	// address and code stay separate on purpose: a code in a URL ends up in browser
+	// history, in a shared link, and in any log the request passes through
+	const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}`)
 	return [
 		`${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`,
 		...(urls.length
 			? urls.slice(0, 3).map((u) => `${fg(C.gold)}${u}${R}`)
 			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
-		`${fg(C.muted)}The passcode is only needed once; it becomes a cookie. Same${R}`,
-		`${fg(C.muted)}address works over a VPN, since that is just another interface.${R}`,
+		`${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`,
+		`${fg(C.muted)}Asked once per device, then remembered. Five wrong tries and${R}`,
+		`${fg(C.muted)}that device waits, doubling each time — which is what makes${R}`,
+		`${fg(C.muted)}four digits safe. Change it in ${fg(C.faint)}~/.config/guildhall/passcode${R}`,
 	]
 }
 

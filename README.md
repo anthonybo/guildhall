@@ -145,11 +145,20 @@ It answers on your local network and on any VPN interface. Binding to `0.0.0.0`
 already covers a Tailscale address, so LAN today and a tailnet later is the same
 server with nothing to change. It is never on the public internet.
 
-Access needs a passcode, kept in `~/.config/guildhall/token` and printed as part
-of the URL. The token is swapped for a cookie on first load so it does not linger
-in browser history. **Anyone who reaches it can read session titles, the last
-thing each session said, filenames being edited and commands that were run** —
-which is the reason it is off unless you ask for it.
+Access needs a four-digit passcode, typed into the page. Press `?` in the
+terminal to see the address and the code. It is asked once per device and then
+remembered as a session cookie — the code itself is never put in a URL, so it
+cannot end up in browser history, a shared link, or a proxy log.
+
+Four digits is ten thousand combinations, which a script would try in under a
+second, so the code is not the security — the throttle is. Five wrong answers
+from one address and it stops answering, doubling each time up to half an hour.
+That turns an exhaustive search from seconds into months. Change the code in
+`~/.config/guildhall/passcode`.
+
+**Anyone who gets in can read session titles, the last thing each session said,
+filenames being edited and commands that were run** — which is the reason it is
+off unless you ask for it.
 
 Nothing it serves can change anything. There is no endpoint that writes, on this
 machine or in any session, so the worst case of leaving it on is disclosure, not
