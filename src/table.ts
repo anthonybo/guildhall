@@ -130,16 +130,38 @@ export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolea
  * which buries a real appearance change in noise — the picture should move when
  * the app looks different, not when anything at all happens.
  */
-export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }, build = BUILD) {
+export type Share = { on: boolean; port: number; error?: string }
+
+/**
+ * Sharing is only ever shown when it is ON, or when it failed to start.
+ *
+ * The opposite of the awake badge, deliberately. Awake has three states you want
+ * to tell apart at a glance; sharing has one state worth announcing — that this
+ * machine is currently answering on the network — and saying "off" on every other
+ * frame would train the eye to ignore the place the warning appears.
+ */
+function shareBadge(share?: Share) {
+	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${fg(C.muted)} · ${share.error}${R}`
+	if (!share?.on) return ''
+	return `  ${fg(C.screenAgent)}◉ ${bold}sharing${R}${fg(C.screenAgent)} · :${share.port}${R}`
+}
+
+export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }, build = BUILD, share?: Share) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
 	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
-	const hold = `  ${awakeBadge(awake)}`
+	// Two halves, and the RIGHT one wins. Everything was one string clipped from
+	// the end, so on a 120-column terminal the machine-state badges fell off — the
+	// "this is answering on the network" warning was the very first thing to go,
+	// which is exactly backwards. Counts are recoverable by looking at the room;
+	// whether a listener is open is not.
 	const stamp = build ? `${fg(C.faint)}v${build}${R}  ` : ''
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
-	return clip(left, total)
+	const right = `${awakeBadge(awake)}${shareBadge(share)}`
+	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}`
+	const room = total - width(right) - 2
+	return room < 20 ? clip(right.trimStart(), total) : `${clip(left, room)}  ${right}`
 }
 
 export function footer(

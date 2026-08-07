@@ -36,6 +36,8 @@ import * as T from './table.ts'
 import * as H from './help.ts'
 import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
+import * as cfgStore from './config.ts'
+import { createServer, persistedToken } from './serve.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -65,8 +67,10 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   guildhall --guard      headless: hold sleep off while sessions work, draw nothing
   guildhall --once       print one frame and exit
   guildhall --no-awake   start with the sleep hold disarmed
+  guildhall --serve      share read-only over the network (off by default)
+  guildhall --no-serve   force sharing off for this run
 
-keys   ? help · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+keys   ? help · s share · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
 env    GUILDHALL_CMUX    path to the cmux binary
        GUILDHALL_NO_IMAGES  force half-block rendering`)
 	process.exit(0)
@@ -86,6 +90,42 @@ const GUARD = process.argv.includes('--guard')
  *  running. Never touches the real registry. */
 const DEMO = process.argv.includes('--demo')
 const collect = () => (DEMO ? demoSessions() : collectReal())
+/**
+ * Sharing is off unless it was turned on deliberately, and the choice persists.
+ * `--serve` / `--no-serve` override the stored setting for one run.
+ */
+const cfg = cfgStore.load()
+if (process.argv.includes('--serve')) cfg.serve = true
+if (process.argv.includes('--no-serve')) cfg.serve = false
+const portArg = process.argv.indexOf('--port')
+if (portArg > 0) cfg.port = Number(process.argv[portArg + 1]) || cfg.port
+
+let server: import('node:http').Server | null = null
+let serveError = ''
+
+/** Start or stop the listener to match the setting. Returns what happened. */
+function syncServe() {
+	if (cfg.serve === !!server) return
+	if (!cfg.serve) {
+		server?.close()
+		server = null
+		return
+	}
+	try {
+		server = createServer({ port: cfg.port, host: cfg.host, token: persistedToken(), demo: DEMO })
+		server.on('error', (e: NodeJS.ErrnoException) => {
+			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} in use` : (e.code ?? 'failed')
+			server = null
+			cfg.serve = false
+		})
+		server.listen(cfg.port, cfg.host)
+		serveError = ''
+	} catch {
+		server = null
+		cfg.serve = false
+		serveError = 'failed to start'
+	}
+}
 const IMAGES = supportsImages() && !ONCE && !BENCH && !GUARD
 // observing should not change the machine's behaviour unless asked, but holding
 // sleep off while a build runs is the common case, so it is on unless refused
@@ -313,9 +353,10 @@ function draw() {
 	}
 	while (body.length < rows) body.push('')
 	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
+	const shareState = { on: !!server, port: cfg.port, error: serveError }
 	paint(
 		[
-			T.summary(sessions, cols, awakeState),
+			T.summary(sessions, cols, awakeState, undefined, shareState),
 			...body.slice(0, rows),
 			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState),
 		],
@@ -400,6 +441,7 @@ function drawMonitors() {
 }
 
 function cleanup() {
+	server?.close()
 	if (alt) OUT.write(clearAll() + WATCH_OFF + '\x1b[?25h\x1b[?1049l')
 	process.exit(0)
 }
@@ -468,6 +510,12 @@ function onKey(b: Buffer) {
 		layout()
 	} else if (k === 'l') {
 		labels = !labels
+	} else if (k === 's') {
+		// Persisted, because a network listener you have to remember to re-enable is
+		// one you will eventually leave on with a flag instead.
+		cfg.serve = !cfg.serve
+		syncServe()
+		cfgStore.save(cfg)
 	} else if (k === 'a') {
 		// Toggling off drops any assertion immediately rather than waiting for the
 		// next poll — the point of reaching for this key is usually "let it sleep now".
@@ -576,6 +624,7 @@ function main() {
 		OUT.write(prev.join('\n') + '\n')
 		return
 	}
+	syncServe()
 	alt = true
 	OUT.write('\x1b[?1049h\x1b[?25l' + (IMAGES ? WATCH_ON : ''))
 	eraseDisplay()
