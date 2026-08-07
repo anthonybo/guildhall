@@ -4,6 +4,7 @@
  * running process, and cmux already writes its window layout.
  */
 import fs from 'node:fs'
+import { StringDecoder } from 'node:string_decoder'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
@@ -27,13 +28,26 @@ const DONE_WINDOW = 30 * 60_000
 
 export type State = 'error' | 'needs' | 'working' | 'shell' | 'review' | 'done' | 'parked'
 /**
- * Volume of change, not value: files touched and revised, agents dispatched,
- * turns taken. Token counts are deliberately excluded — most tokens in agentic
- * work go to review rather than production, so counting them repeats the
+ * Four signals, weighted by how much each one proves.
+ *
+ *   commits  25  a delivered milestone — the strongest evidence of finished work
+ *   edits     3  a file actually changed
+ *   subagents 15 work dispatched and supervised
+ *   minutes    1 time genuinely spent working, summed from turn durations
+ *
+ * Commits are weighted highest but cannot be the base: three of the busiest
+ * sessions here have zero, because commits happen only when you ask for one, so
+ * they measure your instructions rather than the session's work.
+ *
+ * Active minutes come from per-turn durations, never from wall-clock age — a
+ * session left open overnight has done nothing and must score nothing.
+ *
+ * Token counts are deliberately excluded: most tokens in agentic work go to
+ * reading and review rather than production, so counting them repeats the
  * lines-of-code mistake.
  */
-export function xpOf(d: { revs?: number; files?: number; subs?: number; turns?: number }) {
-	return 6 * (d.revs ?? 0) + 4 * (d.files ?? 0) + 15 * (d.subs ?? 0) + 0.15 * (d.turns ?? 0)
+export function xpOf(d: { commits?: number; edits?: number; subs?: number; activeMin?: number }) {
+	return 25 * (d.commits ?? 0) + 3 * (d.edits ?? 0) + 15 * (d.subs ?? 0) + (d.activeMin ?? 0)
 }
 
 /**
@@ -97,10 +111,27 @@ const isAlive = (pid: number) => {
 	}
 }
 
-/** Process start times, so a recycled PID can't masquerade as a live session. */
+/**
+ * Process start times, so a recycled PID can't masquerade as a live session.
+ *
+ * Cached per PID for the life of the run: a process's start time is fixed, and
+ * `ps -o lstart` costs 161ms for ten PIDs — by far the most expensive thing in a
+ * poll that runs every two seconds. Only genuinely new PIDs are ever looked up,
+ * so a steady set of sessions costs nothing. Liveness is separate and free
+ * (`kill(pid, 0)`), so a process that exits is still noticed immediately.
+ */
+const startCache = new Map<number, string>()
+
 function procStarts(pids: number[]) {
 	const m = new Map<number, string>()
 	if (!pids.length) return m
+	for (const p of pids) {
+		const hit = startCache.get(p)
+		if (hit !== undefined) m.set(p, hit)
+	}
+	const missing = pids.filter((p) => !startCache.has(p))
+	if (!missing.length) return m
+	pids = missing
 	try {
 		const out = execFileSync('ps', ['-o', 'pid=,lstart=', '-p', pids.join(',')], {
 			encoding: 'utf8',
@@ -110,9 +141,14 @@ function procStarts(pids: number[]) {
 			const t = line.trim()
 			if (!t) continue
 			const sp = t.indexOf(' ')
-			m.set(Number(t.slice(0, sp)), t.slice(sp + 1).trim())
+			const pid = Number(t.slice(0, sp))
+			const started = t.slice(sp + 1).trim()
+			m.set(pid, started)
+			startCache.set(pid, started)
 		}
 	} catch {}
+	// a PID `ps` did not report is gone; remember that too, or every poll re-asks
+	for (const p of pids) if (!m.has(p)) startCache.set(p, '')
 	return m
 }
 
@@ -159,7 +195,7 @@ export function liveSessions(): Registry[] {
 	})
 }
 
-function transcriptIndex() {
+export function transcriptIndex() {
 	const idx = new Map<string, string>()
 	let dirs: string[] = []
 	try {
@@ -175,58 +211,112 @@ function transcriptIndex() {
 		} catch {
 			continue
 		}
-		for (const f of files) if (f.endsWith('.jsonl')) idx.set(f.slice(0, -6), path.join(p, f))
+		for (const f of files) {
+			if (!f.endsWith('.jsonl')) continue
+			const id = f.slice(0, -6)
+			const full = path.join(p, f)
+			// A session that moves directory keeps its id and gets a second transcript
+			// under the new project slug, so the same id can appear in several dirs.
+			// Blindly overwriting picked whichever came last in readdir order, which
+			// pointed the busiest session here at a transcript abandoned nine days
+			// earlier — wrong activity text, wrong lifetime totals. Newest wins.
+			const prev = idx.get(id)
+			if (prev && mtime(prev) >= mtime(full)) continue
+			idx.set(id, full)
+		}
 	}
 	return idx
 }
 
-const SKIP_PATH = /\/scratchpad\/|^\/private\/tmp\/|\/\.claude\/projects\//
+/** Uncached on purpose: this is reached only when two directories hold the same
+ *  session id, and a cached mtime would freeze that choice as the files grow. */
+function mtime(f: string) {
+	try {
+		return fs.statSync(f).mtimeMs
+	} catch {
+		return 0
+	}
+}
 
 /**
- * The lifetime file census, which sits well behind the tail — up to 1.5MB from
- * the end — so a forward tail read never sees it. Scan backwards in chunks and
- * stop at the first hit; the newest census is complete, so one record is enough.
+ * Lifetime work counters, advanced incrementally.
+ *
+ * These have to be exact totals rather than a sample of the tail, and the largest
+ * transcript here is 171MB — 1.2s to parse in full, which cannot happen on a two
+ * second poll. Transcripts are append-only, so keep the byte offset reached last
+ * time and parse only what has been added since. The full pass happens once.
  */
-const censusCache = new Map<string, { size: number; revs: number; files: number; subs: number }>()
-/** A transcript that has not grown cannot have changed, and a poll every two
- *  seconds must not re-read half a megabyte per session to find that out. */
-const digestCache = new Map<string, { size: number; d: Digest }>()
+type Ledger = { off: number; tail: string; commits: number; edits: number; activeMs: number }
+const ledgers = new Map<string, Ledger>()
+const blank = (): Ledger => ({ off: 0, tail: '', commits: 0, edits: 0, activeMs: 0 })
 
-function census(file: string, maxScan = 4_000_000, chunk = 512_000): Record<string, { version?: number }> {
+function tally(L: Ledger, line: string) {
+	// Substring prefilter first: JSON.parse on every record of a 171MB transcript
+	// is essentially the entire cost of this function.
+	if (line.length < 40) return
+	if (!line.includes('durationMs') && !line.includes('tool_use')) return
+	let e: any
+	try {
+		e = JSON.parse(line)
+	} catch {
+		return
+	}
+	if (typeof e.durationMs === 'number') L.activeMs += e.durationMs
+	const c = e.message?.content
+	if (!Array.isArray(c)) return
+	for (const b of c) {
+		if (b?.type !== 'tool_use') continue
+		if (b.name === 'Edit' || b.name === 'Write' || b.name === 'NotebookEdit') L.edits++
+		else if (b.name === 'Bash' && /\bgit\s+commit\b/.test(b.input?.command ?? '')) L.commits++
+	}
+}
+
+/** Read whatever has been appended since last time and fold it into the totals. */
+function advance(file: string): Ledger {
+	let L = ledgers.get(file)
+	if (!L) {
+		L = blank()
+		ledgers.set(file, L)
+	}
+	let size = 0
+	try {
+		size = fs.statSync(file).size
+	} catch {
+		return L
+	}
+	// shorter than where we stopped: the file was replaced, so the totals are stale
+	if (size < L.off) {
+		L = blank()
+		ledgers.set(file, L)
+	}
+	if (size === L.off) return L
 	let fd: number
 	try {
 		fd = fs.openSync(file, 'r')
 	} catch {
-		return {}
+		return L
 	}
+	const dec = new StringDecoder('utf8') // a chunk boundary can split a character
 	try {
-		const size = fs.fstatSync(fd).size
-		let read = 0
-		let tail = ''
-		while (read < Math.min(maxScan, size)) {
-			const step = Math.min(chunk, size - read)
-			const buf = Buffer.alloc(step)
-			fs.readSync(fd, buf, 0, step, size - read - step)
-			read += step
-			const lines = (buf.toString('utf8') + tail).split('\n')
-			tail = read < size ? lines[0] : ''
-			for (let i = lines.length - 1; i >= 1; i--) {
-				// cheap substring test first; parsing every line here costs 30x
-				if (!lines[i].includes('"file-history-snapshot"')) continue
-				try {
-					const e = JSON.parse(lines[i])
-					const sn = typeof e.snapshot === 'string' ? JSON.parse(e.snapshot) : e.snapshot
-					const tb = sn?.trackedFileBackups
-					if (tb && Object.keys(tb).length) return tb
-				} catch {}
-			}
+		const CHUNK = 4_000_000
+		const buf = Buffer.alloc(CHUNK)
+		while (L.off < size) {
+			const n = fs.readSync(fd, buf, 0, Math.min(CHUNK, size - L.off), L.off)
+			if (n <= 0) break
+			L.off += n
+			const lines = (L.tail + dec.write(buf.subarray(0, n))).split('\n')
+			L.tail = lines.pop() ?? '' // the last line may still be being written
+			for (const line of lines) tally(L, line)
 		}
 	} catch {
 	} finally {
 		fs.closeSync(fd)
 	}
-	return {}
+	return L
 }
+/** A transcript that has not grown cannot have changed, and a poll every two
+ *  seconds must not re-read half a megabyte per session to find that out. */
+const digestCache = new Map<string, { size: number; d: Digest }>()
 
 /** Sub-agents this session dispatched, counted from their own transcripts. */
 function subagentCount(file: string) {
@@ -345,35 +435,15 @@ function digestInner(file: string, statSize: number) {
 	}
 	// the directory this session actually works in, by weight of evidence
 	if (seen.size) d.subProj = [...seen.entries()].sort((a, b) => b[1] - a[1])[0][0]
-	// The census sits far behind the tail and costs a backward scan, so cache it
-	// against the file size: a poll every two seconds must not re-read megabytes.
-	let size = 0
-	try {
-		size = fs.statSync(file).size
-	} catch {}
-	const hit = censusCache.get(file)
-	if (hit && size - hit.size < 64_000) {
-		d.revs = hit.revs
-		d.files = hit.files
-		d.subs = hit.subs
-		return d
-	}
-	const tb = census(file)
-	let revs = 0
-	let files = 0
-	for (const [p, v] of Object.entries(tb)) {
-		if (SKIP_PATH.test(p)) continue
-		files++
-		revs += Math.min(Math.max(0, (v?.version ?? 1) - 1), 8)
-	}
-	d.revs = revs
-	d.files = files
+	const L = advance(file)
+	d.commits = L.commits
+	d.edits = L.edits
+	d.activeMin = L.activeMs / 60_000
 	d.subs = subagentCount(file)
-	censusCache.set(file, { size, revs, files, subs: d.subs })
 	return d
 }
 
-type Digest = { revs?: number; files?: number; subs?: number; title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean; asked?: boolean }
+type Digest = { commits?: number; edits?: number; activeMin?: number; subs?: number; title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean; asked?: boolean }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
