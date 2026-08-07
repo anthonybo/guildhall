@@ -60,6 +60,17 @@ on disk:
 - `~/.claude/projects/<slug>/<sessionId>.jsonl` — the session transcript
 - cmux's window layout, for the tab to jump to
 
+None of those three are documented interfaces, so all of them may change. The
+registry has a supported replacement — `claude agents --json` — and guildhall
+falls back to it whenever the directory comes back empty, which is the shape
+that failure takes: the path moved, or the schema changed and every entry was
+discarded. It is the fallback rather than the primary for a measured reason: the
+CLI costs ~730ms per call against ~0.6ms to read the directory, and the room
+polls every two seconds. The lookup runs in the background and never blocks a
+frame, so the cost of the registry breaking is that sessions appear one poll
+late. The transcript has no supported equivalent, and everything interesting —
+what a session is doing, its context use, its level — comes from there.
+
 ## Two things worth knowing
 
 **Status is derived, not reported.** Claude Code writes `busy` on state *change*,
@@ -79,7 +90,7 @@ at level 37 and a year at 85. See `src/data/score.ts`.
 ## Keeping the machine awake
 
 While any session is mid-task, guildhall holds a power assertion
-(`caffeinate -ims`) so a long build is not lost to a sleeping laptop. It lets go
+(`caffeinate -dims`) so a long build is not lost to a sleeping laptop. It lets go
 when the last one stops.
 
 It is **conditional, not a permanent hold**. Enabled means "do not sleep while
@@ -187,7 +198,7 @@ damage.
 src/
   main.ts          driver: frame loop, input, image transport
   data.ts          joins registry + transcripts + cmux into Sessions
-  data/            paths · registry · transcript · digest · state · score · describe · cmux
+  data/            paths · registry · agents · transcript · digest · state · score · describe · cmux
   office.ts        Office — drawing and labels
   office/          model · plan (pure layout) · room (seats, paths) · sim (behaviour)
   canvas.ts        half-block pixel canvas

@@ -10,6 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { SESS_DIR } from './paths.ts'
+import { agentSessions, refreshAgents } from './agents.ts'
 import type { Registry } from './types.ts'
 
 /** EPERM means the process exists but belongs to someone else — still alive. */
@@ -62,11 +63,29 @@ function procStarts(pids: number[]) {
 	return found
 }
 
-/** Registry entries whose process is running and is the one that wrote them. */
-export function liveSessions(): Registry[] {
+/**
+ * Registry entries whose process is running and is the one that wrote them.
+ *
+ * Falls back to `claude agents --json` when this comes back with nothing — see
+ * agents.ts for why the supported call is the fallback and not the primary. An
+ * empty answer is exactly the shape the expected failure takes: the directory
+ * moved, or the file schema changed and every entry was discarded as malformed.
+ * "Nothing is running" produces the same empty answer and costs only a
+ * background lookup to confirm.
+ */
+export function liveSessions(dir = SESS_DIR): Registry[] {
+	const found = fromFiles(dir)
+	if (found.length) return found
+	refreshAgents()
+	return agentSessions() ?? []
+}
+
+/** `dir` is a parameter purely so a test can point it at nothing and watch the
+ *  fallback take over, without an environment variable or a real registry. */
+function fromFiles(dir: string): Registry[] {
 	let files: string[] = []
 	try {
-		files = fs.readdirSync(SESS_DIR)
+		files = fs.readdirSync(dir)
 	} catch {
 		return []
 	}
@@ -74,7 +93,7 @@ export function liveSessions(): Registry[] {
 	for (const f of files) {
 		if (!/^\d+\.json$/.test(f)) continue
 		try {
-			const d = JSON.parse(fs.readFileSync(path.join(SESS_DIR, f), 'utf8')) as Registry
+			const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Registry
 			if (d.pid && isAlive(d.pid)) found.push(d)
 		} catch {}
 	}
