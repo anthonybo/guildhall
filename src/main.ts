@@ -38,7 +38,8 @@ import * as H from './help.ts'
 import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
 import * as cfgStore from './config.ts'
-import { addresses, createServer, persistedToken } from './serve.ts'
+import { addresses, createServer } from './serve.ts'
+import { passcode } from './auth.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -113,7 +114,7 @@ function syncServe() {
 		return
 	}
 	try {
-		server = createServer({ port: cfg.port, host: cfg.host, token: persistedToken(), demo: DEMO })
+		server = createServer({ port: cfg.port, host: cfg.host, demo: DEMO })
 		server.on('error', (e: NodeJS.ErrnoException) => {
 			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} in use` : (e.code ?? 'failed')
 			server = null
@@ -313,7 +314,7 @@ function draw() {
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
 		const net = addresses()
-		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: persistedToken(), lan: net.lan, vpn: net.vpn }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
 		return
 	}
 	const list = visible()
