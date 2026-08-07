@@ -20,6 +20,7 @@ import { needsAttention, order } from '../src/data/select.ts'
 import { PLATE_COLS, PLATE_ROWS } from '../src/office/model.ts'
 import type { Session } from '../src/data/types.ts'
 import type { Image } from '../src/png.ts'
+import { MIN_CHARS } from '../src/nameplate.ts'
 import { mountSettings, settings } from './settings.ts'
 
 const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
@@ -151,24 +152,19 @@ function frame(now: number) {
 }
 
 /**
- * Nameplates and status labels, drawn as real glyphs at full resolution.
- *
- * They live in the canvas text layer rather than in the pixel buffer, which is
- * what makes this possible — flattened into 4-pixel-wide cells and then stretched
- * they were a smear, and the room's one job is telling you which desk is whose.
- */
-/**
  * Vertical nameplates: a coloured bar with the project turned on its side.
  *
  * Bottom-to-top, following Imhof's rule for labelling vertical features on maps,
  * and the same direction the terminal uses — the two views have to agree about
  * which way a name reads even though they draw it by completely different means.
  *
- * The size is solved rather than guessed: the bar's width bounds the cap height,
- * its length bounds the whole string, and the smaller of the two wins. If even
- * that will not fit, the name is truncated with a real ellipsis — the terminal
- * has to make do with '.' because its pixel font has no such glyph, but there is
- * no reason to inherit that limitation here.
+ * The size is shared, not solved per name. Letting each plate take the largest
+ * size its own name allowed put a huge `willow` beside a tiny
+ * `brightwater-sync`, which reads as emphasis the room does not mean. So one
+ * floor is set from MIN_CHARS — the same length the terminal guarantees — and a
+ * short name may grow a third above it, which is the browser's equivalent of the
+ * terminal's one-scale-step. Anything longer is truncated with a real ellipsis;
+ * the terminal makes do with '.' only because its pixel font has no such glyph.
  */
 function drawPlates(pxW: number, pxH: number) {
 	const cw = pxW / cv!.w
@@ -177,20 +173,23 @@ function drawPlates(pxW: number, pxH: number) {
 	// runs — on the first frame of all they would still be the context defaults
 	ctx2d.textBaseline = 'middle'
 	ctx2d.textAlign = 'center'
+	const w = PLATE_COLS * cw
+	const h = PLATE_ROWS * ch
+	const font = (px: number) => `${px}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+	// 0.62 is the advance-to-size ratio of that stack; 0.66 of the bar's width
+	// leaves the keyline of colour that makes it read as a plate, not as a stripe.
+	const fits = (chars: number) => Math.min(w * 0.66, (h * 0.94) / (chars * 0.62))
+	const floor = fits(MIN_CHARS)
+
 	for (const p of office!.plates) {
-		const w = PLATE_COLS * cw
 		// plate y is in canvas pixels, and a canvas pixel is half a row tall
 		const x0 = p.x * cw
 		const y0 = (p.y / 2) * ch
-		const h = PLATE_ROWS * ch
 		ctx2d.fillStyle = rgb(p.colour)
 		ctx2d.fillRect(Math.floor(x0), Math.floor(y0), Math.ceil(w), Math.ceil(h))
 
-		// 0.62 is the advance-to-size ratio of the monospace stack below; 0.66 of
-		// the bar leaves the keyline of colour either side that makes it read as a
-		// plate rather than as a stripe of text.
-		const size = Math.max(9, Math.floor(Math.min(w * 0.66, (h * 0.94) / (p.proj.length * 0.62))))
-		ctx2d.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+		const size = Math.max(9, Math.floor(Math.min(fits(p.proj.length), floor * (4 / 3))))
+		ctx2d.font = font(Math.max(size, Math.floor(floor)))
 		let text = p.proj
 		while (text.length > 1 && ctx2d.measureText(text).width > h * 0.94) text = text.slice(0, -2) + '…'
 		ctx2d.save()
@@ -202,6 +201,13 @@ function drawPlates(pxW: number, pxH: number) {
 	}
 }
 
+/**
+ * Nameplates and status labels, drawn as real glyphs at full resolution.
+ *
+ * They live in the canvas text layer rather than in the pixel buffer, which is
+ * what makes this possible — flattened into 4-pixel-wide cells and then stretched
+ * they were a smear, and the room's one job is telling you which desk is whose.
+ */
 function drawLabels(pxW: number, pxH: number) {
 	if (office!.vertical) drawPlates(pxW, pxH)
 	const cw = pxW / cv!.w

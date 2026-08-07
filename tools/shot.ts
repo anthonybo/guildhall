@@ -60,7 +60,7 @@ office.vertical = true
 const placed = office.draw(cv, sessions)
 office.vertical = true
 const placed2 = placed
-office.overlay(cv, placed2, sessions[0].id, true, true)
+office.overlay(cv, placed2, sessions[0].id, true)
 
 const { rgba: raster, w: W, h: H } = renderRoom(cv, office, placed, SX, SY)
 

@@ -269,7 +269,7 @@ function band(f: Font) {
  * A preference, not a floor. A strip too short for ten gets a shorter name rather
  * than a thinner one — see the scale rule below, which outranks this.
  */
-const MIN_CHARS = 10
+export const MIN_CHARS = 10
 
 /**
  * Three, not two. On a 15x33 cell the strip is 45px across and doubling a 6x13

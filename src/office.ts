@@ -196,9 +196,12 @@ export class Office extends SimBase {
 	 * band already has, so the room reads as columns of desks rather than a wall of
 	 * labels.
 	 */
-	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true, vertical = false) {
-		// Vertical plates are images now, emitted by draw(); nothing to write here.
-		if (!vertical) this.horizontalPlates(cv)
+	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
+		// `this.vertical`, never a parameter. This used to take the mode as a fifth
+		// argument while draw() read the field, so a caller that set the field and
+		// left the argument alone drew BOTH — a rotated plate beside every desk and
+		// a horizontal one underneath it. One flag decides for both halves now.
+		if (!this.vertical) this.horizontalPlates(cv)
 		return this.labels(cv, placed, selected, showAll)
 	}
 
