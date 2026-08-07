@@ -307,6 +307,16 @@ function onKey(b: Buffer) {
 	} else if (k === 'f') {
 		faultsOnly = !faultsOnly
 		layout()
+	} else if (k === 'r') {
+		// Full image teardown and rebuild. A terminal can drop the images it holds
+		// with no event we can see; until that is properly diagnosed this is the
+		// manual way back.
+		OUT.write(clearAll())
+		imageIds.clear()
+		sent.clear()
+		prev = []
+		OUT.write('\x1b[2J')
+		layout()
 	} else if (k === 'l') {
 		labels = !labels
 	} else if (/^[0-9]$/.test(k)) jump(k === '0' ? 10 : Number(k))
