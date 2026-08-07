@@ -21,6 +21,10 @@
 			<span id="ver" class="ver"></span>
 			<span id="counts" class="counts"></span>
 			<span id="link" class="link" title="connection"></span>
+			<!-- The panel is built from the spec in settings.ts rather than written
+			     out here, so adding an option never means editing two files. -->
+			<button id="gear" class="gear" type="button" aria-expanded="false" aria-controls="settings" title="Settings">⚙</button>
+			<div id="settings" class="settings" role="dialog" aria-label="Settings" hidden></div>
 		</header>
 
 		<!-- The room only appears where there is room for it. On a phone the office

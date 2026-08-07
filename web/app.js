@@ -2066,6 +2066,104 @@ function order(list) {
   });
 }
 
+// web/settings.ts
+var DEFAULTS = { labels: "vertical", room: true };
+var SETTINGS = [
+  {
+    key: "labels",
+    label: "Project names",
+    help: "Down the side of a desk takes far less width, so more projects fit before the room runs out.",
+    options: [
+      { value: "vertical", label: "Down the side" },
+      { value: "horizontal", label: "Along the aisle" }
+    ]
+  },
+  {
+    key: "room",
+    label: "Office",
+    help: "Hiding it stops the animation as well, which is most of what this page costs a laptop battery.",
+    options: [
+      { value: true, label: "Shown" },
+      { value: false, label: "Hidden" }
+    ]
+  }
+];
+var KEY = "guildhall.settings";
+function read() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const out = { ...DEFAULTS };
+    for (const s of SETTINGS) {
+      const v = raw[s.key];
+      if (s.options.some((o) => o.value === v)) out[s.key] = v;
+    }
+    return out;
+  } catch {
+    return { ...DEFAULTS };
+  }
+}
+var settings = read();
+function mountSettings(button, panel, onChange) {
+  for (const s of SETTINGS) {
+    const group = document.createElement("div");
+    group.className = "set";
+    const name = document.createElement("span");
+    name.className = "set-label";
+    name.id = `set-${s.key}`;
+    name.textContent = s.label;
+    const choices = document.createElement("div");
+    choices.className = "choices";
+    choices.setAttribute("role", "radiogroup");
+    choices.setAttribute("aria-labelledby", name.id);
+    for (const o of s.options) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "choice";
+      b.setAttribute("role", "radio");
+      b.textContent = o.label;
+      const sync = () => b.setAttribute("aria-checked", String(settings[s.key] === o.value));
+      sync();
+      b.addEventListener("click", () => {
+        ;
+        settings[s.key] = o.value;
+        try {
+          localStorage.setItem(KEY, JSON.stringify(settings));
+        } catch {
+        }
+        for (const el of choices.querySelectorAll(".choice")) el.setAttribute("aria-checked", "false");
+        b.setAttribute("aria-checked", "true");
+        onChange();
+      });
+      choices.append(b);
+    }
+    const help = document.createElement("p");
+    help.className = "set-help";
+    help.textContent = s.help;
+    group.append(name, choices, help);
+    panel.append(group);
+  }
+  const note = document.createElement("p");
+  note.className = "set-note";
+  note.textContent = "Saved in this browser only. The terminal keeps its own settings.";
+  panel.append(note);
+  const open = (want) => {
+    panel.hidden = !want;
+    button.setAttribute("aria-expanded", String(want));
+    if (want) panel.querySelector(".choice")?.focus();
+    else button.focus();
+  };
+  button.addEventListener("click", (e) => {
+    e.stopPropagation();
+    open(panel.hidden);
+  });
+  document.addEventListener("pointerdown", (e) => {
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open(false);
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !panel.hidden) open(false);
+  });
+}
+
 // web/app.ts
 var $ = (sel) => document.querySelector(sel);
 var rgb = (c) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
@@ -2128,9 +2226,11 @@ function frame(now) {
     screenClock = 0;
     screenFrame++;
   }
+  off.vertical = settings.labels === "vertical";
   const placed = off.draw(cv, sessions);
   off.overlay(cv, placed, void 0, true);
-  const { rgba, w, h } = renderRoom(cv, off, placed, 4, 8, screenFrame);
+  const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] };
+  const { rgba, w, h } = renderRoom(cv, scene, placed, 4, 8, screenFrame);
   if (buffer.width !== w || buffer.height !== h) {
     buffer.width = w;
     buffer.height = h;
@@ -2150,7 +2250,32 @@ function frame(now) {
   ctx2d.drawImage(buffer, 0, 0, pxW, pxH);
   drawLabels(pxW, pxH);
 }
+function drawPlates(pxW, pxH) {
+  const cw = pxW / cv.w;
+  const ch = pxH / cv.rows;
+  ctx2d.textBaseline = "middle";
+  ctx2d.textAlign = "center";
+  for (const p of office.plates) {
+    const w = PLATE_COLS * cw;
+    const x0 = p.x * cw;
+    const y0 = p.y / 2 * ch;
+    const h = PLATE_ROWS * ch;
+    ctx2d.fillStyle = rgb(p.colour);
+    ctx2d.fillRect(Math.floor(x0), Math.floor(y0), Math.ceil(w), Math.ceil(h));
+    const size = Math.max(9, Math.floor(Math.min(w * 0.66, h * 0.94 / (p.proj.length * 0.62))));
+    ctx2d.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+    let text = p.proj;
+    while (text.length > 1 && ctx2d.measureText(text).width > h * 0.94) text = text.slice(0, -2) + "\u2026";
+    ctx2d.save();
+    ctx2d.translate(x0 + w / 2, y0 + h / 2);
+    ctx2d.rotate(-Math.PI / 2);
+    ctx2d.fillStyle = "#20222e";
+    ctx2d.fillText(text, 0, 0);
+    ctx2d.restore();
+  }
+}
 function drawLabels(pxW, pxH) {
+  if (office.vertical) drawPlates(pxW, pxH);
   const cw = pxW / cv.w;
   const ch = pxH / cv.rows;
   ctx2d.font = `${Math.max(9, Math.round(ch * 0.82))}px ui-monospace, SFMono-Regular, Menlo, monospace`;
@@ -2295,7 +2420,7 @@ function apply(data) {
     bar.ver.classList.toggle("newer", !!data.update);
     bar.ver.title = data.update ? `v${data.update} is available` : "";
   }
-  roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0;
+  showRoom();
   paintCounts(sessions);
   paintList(sessions);
   stampEl.textContent = `${sessions.length} session${sessions.length === 1 ? "" : "s"} \xB7 updated ${new Date(data.at).toLocaleTimeString()}`;
@@ -2322,7 +2447,14 @@ document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && bar.link.classList.contains("down")) location.reload();
 });
 addEventListener("resize", () => {
-  roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0;
+  showRoom();
+  cv = null;
+});
+function showRoom() {
+  roomEl.hidden = window.innerWidth <= 720 || !settings.room || sessions.length === 0;
+}
+mountSettings($("#gear"), $("#settings"), () => {
+  showRoom();
   cv = null;
 });
 loadSheets().catch(() => {

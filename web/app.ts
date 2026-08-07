@@ -17,8 +17,10 @@ import { setSheets } from '../src/characters.ts'
 import { renderRoom } from '../src/render.ts'
 import { LOOK, projectColours, tierOf } from '../src/theme.ts'
 import { needsAttention, order } from '../src/data/select.ts'
+import { PLATE_COLS, PLATE_ROWS } from '../src/office/model.ts'
 import type { Session } from '../src/data/types.ts'
 import type { Image } from '../src/png.ts'
+import { mountSettings, settings } from './settings.ts'
 
 const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
 const rgb = (c: readonly number[]) => `rgb(${c[0]} ${c[1]} ${c[2]})`
@@ -111,6 +113,7 @@ function frame(now: number) {
 		screenFrame++
 	}
 
+	off.vertical = settings.labels === 'vertical'
 	const placed = off.draw(cv!, sessions)
 	off.overlay(cv!, placed, undefined, true)
 
@@ -119,7 +122,13 @@ function frame(now: number) {
 	// were stretched along with it — which is why they were unreadable. So the
 	// pixels go through an offscreen buffer blown up with smoothing off, and the
 	// text is drawn afterwards at the display's own resolution.
-	const { rgba, w, h } = renderRoom(cv!, off, placed, 4, 8, screenFrame)
+	//
+	// `plates: []` for the same reason. The terminal has to draw a vertical plate
+	// as a rotated bitmap because a terminal cannot rotate text, and at 4px per
+	// column that bitmap would hold six characters. A canvas has real fonts and
+	// rotate(), so the plates are drawn below at display resolution instead.
+	const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] }
+	const { rgba, w, h } = renderRoom(cv!, scene, placed, 4, 8, screenFrame)
 	if (buffer.width !== w || buffer.height !== h) {
 		buffer.width = w
 		buffer.height = h
@@ -148,7 +157,53 @@ function frame(now: number) {
  * what makes this possible — flattened into 4-pixel-wide cells and then stretched
  * they were a smear, and the room's one job is telling you which desk is whose.
  */
+/**
+ * Vertical nameplates: a coloured bar with the project turned on its side.
+ *
+ * Bottom-to-top, following Imhof's rule for labelling vertical features on maps,
+ * and the same direction the terminal uses — the two views have to agree about
+ * which way a name reads even though they draw it by completely different means.
+ *
+ * The size is solved rather than guessed: the bar's width bounds the cap height,
+ * its length bounds the whole string, and the smaller of the two wins. If even
+ * that will not fit, the name is truncated with a real ellipsis — the terminal
+ * has to make do with '.' because its pixel font has no such glyph, but there is
+ * no reason to inherit that limitation here.
+ */
+function drawPlates(pxW: number, pxH: number) {
+	const cw = pxW / cv!.w
+	const ch = pxH / cv!.rows
+	// set here rather than inherited from drawLabels, which sets them after this
+	// runs — on the first frame of all they would still be the context defaults
+	ctx2d.textBaseline = 'middle'
+	ctx2d.textAlign = 'center'
+	for (const p of office!.plates) {
+		const w = PLATE_COLS * cw
+		// plate y is in canvas pixels, and a canvas pixel is half a row tall
+		const x0 = p.x * cw
+		const y0 = (p.y / 2) * ch
+		const h = PLATE_ROWS * ch
+		ctx2d.fillStyle = rgb(p.colour)
+		ctx2d.fillRect(Math.floor(x0), Math.floor(y0), Math.ceil(w), Math.ceil(h))
+
+		// 0.62 is the advance-to-size ratio of the monospace stack below; 0.66 of
+		// the bar leaves the keyline of colour either side that makes it read as a
+		// plate rather than as a stripe of text.
+		const size = Math.max(9, Math.floor(Math.min(w * 0.66, (h * 0.94) / (p.proj.length * 0.62))))
+		ctx2d.font = `${size}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`
+		let text = p.proj
+		while (text.length > 1 && ctx2d.measureText(text).width > h * 0.94) text = text.slice(0, -2) + '…'
+		ctx2d.save()
+		ctx2d.translate(x0 + w / 2, y0 + h / 2)
+		ctx2d.rotate(-Math.PI / 2)
+		ctx2d.fillStyle = '#20222e'
+		ctx2d.fillText(text, 0, 0)
+		ctx2d.restore()
+	}
+}
+
 function drawLabels(pxW: number, pxH: number) {
+	if (office!.vertical) drawPlates(pxW, pxH)
 	const cw = pxW / cv!.w
 	const ch = pxH / cv!.rows
 	// a hair under the cell so descenders do not clip, and never below legibility
@@ -334,7 +389,7 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 		bar.ver.classList.toggle('newer', !!data.update)
 		bar.ver.title = data.update ? `v${data.update} is available` : ''
 	}
-	roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0
+	showRoom()
 	paintCounts(sessions)
 	paintList(sessions)
 	stampEl.textContent = `${sessions.length} session${sessions.length === 1 ? '' : 's'} · updated ${new Date(data.at).toLocaleTimeString()}`
@@ -377,8 +432,22 @@ document.addEventListener('visibilitychange', () => {
 })
 
 addEventListener('resize', () => {
-	roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0
+	showRoom()
 	cv = null // force a re-fit at the new width
+})
+
+/**
+ * Whether the office is on screen — and with it the animation, since `frame`
+ * returns early while it is hidden. The width rule is not a preference and still
+ * wins: at 100 columns on a phone the room is illegible whatever the setting says.
+ */
+function showRoom() {
+	roomEl.hidden = window.innerWidth <= 720 || !settings.room || sessions.length === 0
+}
+
+mountSettings($<HTMLButtonElement>('#gear'), $<HTMLElement>('#settings'), () => {
+	showRoom()
+	cv = null // labels change the room's geometry, so it has to be re-planned
 })
 
 loadSheets().catch(() => {
