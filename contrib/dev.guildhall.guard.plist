@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Runs `guildhall --guard` at login: holds sleep off while a Claude Code session
+  is working, draws nothing.
+
+  Edit BOTH paths below to match this machine, then:
+    cp contrib/dev.guildhall.guard.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/dev.guildhall.guard.plist
+
+  To stop it:
+    launchctl unload ~/Library/LaunchAgents/dev.guildhall.guard.plist
+
+  KeepAlive restarts it if it ever dies, which matters — a guard that quit
+  silently would look exactly like a guard that is working.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.guildhall.guard</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/local/bin/node</string>
+		<string>/Users/CHANGEME/projects/guildhall/dist/main.mjs</string>
+		<string>--guard</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+
+	<key>StandardOutPath</key>
+	<string>/tmp/guildhall-guard.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/guildhall-guard.log</string>
+</dict>
+</plist>

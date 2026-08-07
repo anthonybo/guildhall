@@ -1,6 +1,6 @@
 /**
- * Colours. The status and gauge values come from headroom's PALETTE.md, which
- * has measured WCAG ratios against a dark terminal background.
+ * Colours, chosen against measured WCAG contrast ratios on a dark terminal
+ * background rather than by eye.
  *
  * Two rules worth keeping: healthy states are low-energy rather than green, so
  * that colour means "look here" instead of meaning nothing; and bright-black is
