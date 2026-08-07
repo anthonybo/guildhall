@@ -163,6 +163,19 @@ It answers on your local network and on any VPN interface. Binding to `0.0.0.0`
 already covers a Tailscale address, so LAN today and a tailnet later is the same
 server with nothing to change. It is never on the public internet.
 
+**When the machine sleeps, the page says so.** The server lives on the machine
+being watched, so a laptop that sleeps once its work finishes takes the feed with
+it. The page keeps the last numbers, dims them, and names their age — *"this is
+how it looked 40 minutes ago"* — rather than presenting hours-old state as
+current, which is the one thing a status page must never do. It reconnects by
+itself when the machine wakes; no refresh, no logging in again.
+
+There is nothing to fix beyond that, because a sleeping machine genuinely has
+nothing to report: every session is idle by definition. If you want it reachable
+around the clock, keep the machine awake in System Settings or run the server
+somewhere that never sleeps. `--guard` will not do it — it holds sleep off only
+while something is *working*, which is exactly the window that has already closed.
+
 Access needs a four-digit passcode, typed into the page. Press `?` in the
 terminal to see the address and the code. It is asked once per device and then
 remembered as a session cookie — the code itself is never put in a URL, so it
