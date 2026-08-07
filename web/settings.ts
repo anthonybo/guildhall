@@ -73,20 +73,23 @@ export const settings: Settings = read()
 export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onChange: () => void) {
 	for (const s of SETTINGS) {
 		const group = document.createElement('div')
-		group.className = 'set'
+		// a divider between groups, never above the first one
+		group.className = 'not-first:mt-4 not-first:border-t not-first:border-line not-first:pt-4'
 		const name = document.createElement('span')
-		name.className = 'set-label'
+		name.className = 'mb-1.5 block text-[0.82rem] text-label'
 		name.id = `set-${s.key}`
 		name.textContent = s.label
 
 		const choices = document.createElement('div')
-		choices.className = 'choices'
+		// the controls stack rather than squeeze once the labels stop fitting
+		choices.className = 'flex flex-wrap gap-1.5'
 		choices.setAttribute('role', 'radiogroup')
 		choices.setAttribute('aria-labelledby', name.id)
 		for (const o of s.options) {
 			const b = document.createElement('button')
 			b.type = 'button'
-			b.className = 'choice'
+			b.className =
+				'flex-1 basis-32 cursor-pointer rounded border border-line bg-bg px-2 py-1.5 text-[0.78rem] text-muted hover:border-faint hover:text-label focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-checked:border-gold aria-checked:bg-gold aria-checked:text-bg'
 			b.setAttribute('role', 'radio')
 			b.textContent = o.label
 			const sync = () => b.setAttribute('aria-checked', String(settings[s.key] === o.value))
@@ -98,7 +101,7 @@ export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onC
 				} catch {
 					// private browsing refuses writes; the choice still applies for this visit
 				}
-				for (const el of choices.querySelectorAll('.choice')) el.setAttribute('aria-checked', 'false')
+				for (const el of choices.querySelectorAll('[role=radio]')) el.setAttribute('aria-checked', 'false')
 				b.setAttribute('aria-checked', 'true')
 				onChange()
 			})
@@ -106,21 +109,21 @@ export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onC
 		}
 
 		const help = document.createElement('p')
-		help.className = 'set-help'
+		help.className = 'mt-1.5 mb-0 text-[0.72rem]/[1.4] text-faint'
 		help.textContent = s.help
 		group.append(name, choices, help)
 		panel.append(group)
 	}
 
 	const note = document.createElement('p')
-	note.className = 'set-note'
+	note.className = 'mt-3.5 mb-0 border-t border-line pt-3 text-[0.72rem]/[1.4] text-faint'
 	note.textContent = 'Saved in this browser only. The terminal keeps its own settings.'
 	panel.append(note)
 
 	const open = (want: boolean) => {
 		panel.hidden = !want
 		button.setAttribute('aria-expanded', String(want))
-		if (want) panel.querySelector<HTMLButtonElement>('.choice')?.focus()
+		if (want) panel.querySelector<HTMLButtonElement>('[role=radio]')?.focus()
 		else button.focus()
 	}
 	button.addEventListener('click', (e) => {

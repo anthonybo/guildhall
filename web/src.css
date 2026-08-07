@@ -1,0 +1,137 @@
+/*
+ * The stylesheet source. `web/app.css` is generated from this — never edit that.
+ *
+ * Almost everything the page needs is a Tailwind utility written on the markup.
+ * What stays here is the part utilities genuinely cannot hold: the palette the
+ * terminal also uses, and the handful of rules that depend on a value only known
+ * at runtime or that need a pseudo-element.
+ */
+@import 'tailwindcss';
+
+/* Classes live in the markup and in the modules that generate it, so both have
+   to be scanned or the utilities they name are never emitted. */
+@source './index.html';
+@source './*.ts';
+
+/*
+ * The same palette as the terminal, so the two views read as one product.
+ * Values are the measured-contrast ones from src/theme.ts rather than eyeballed
+ * approximations; the status colours are injected per-row from the feed.
+ */
+@theme {
+	--color-bg: #191722;
+	--color-panel: #221f2e;
+	--color-line: #302c40;
+	--color-label: #d0d0d0;
+	--color-muted: #8a8a8a;
+	--color-faint: #6e7681;
+	--color-gold: #ffd65c;
+	--color-hot: #ff5f5f;
+	--color-ok: #5faf5f;
+	/* the version turns this colour when a newer build exists */
+	--color-newer: #a0eb96;
+	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/*
+ * A card washed with its own status colour, at the weight its band deserves.
+ *
+ * Not a utility Tailwind can spell: both the colour and the percentage are set
+ * per element from the feed (see WEIGHT in list.ts), and color-mix needs them
+ * together. The ramp is the point — the two states that answer "is anything
+ * waiting on me, and is anything still running" are painted hardest, and parked
+ * is almost bare so that nine parked sessions cannot out-shout one that needs
+ * you, which by count they otherwise would.
+ */
+@utility tint-panel {
+	background: color-mix(in srgb, var(--state) var(--tint, 10%), var(--color-panel));
+}
+@utility tint-page {
+	background: color-mix(in srgb, var(--state) var(--tint, 10%), var(--color-bg));
+}
+/* the same idea for borders, which take a fixed proportion rather than the ramp */
+@utility border-state-soft {
+	border-color: color-mix(in srgb, var(--state) 25%, var(--color-line));
+}
+
+/*
+ * A session that is actually running says so by moving.
+ *
+ * Colour alone cannot separate "working" from "finished a minute ago" at a
+ * glance — both are a card in a colour whose meaning you have to remember.
+ * Motion is unambiguous and needs no legend. One thin sweep along the bottom
+ * edge, which is where a progress bar lives on every device this is read on.
+ *
+ * `transform` only, never `background-position` or `box-shadow`: a transform is
+ * composited on the GPU, so this costs no layout and no paint per frame.
+ * Measured at 0% renderer CPU with three running at once.
+ */
+@utility sweep {
+	position: relative;
+	overflow: hidden;
+	&::after {
+		content: '';
+		position: absolute;
+		left: 0;
+		bottom: 0;
+		width: 45%;
+		height: 2px;
+		background: linear-gradient(90deg, transparent, var(--state), transparent);
+		/* the phase is set per element from the wall clock; see list.ts */
+		animation: sweep 1.6s linear var(--phase, 0s) infinite;
+		pointer-events: none;
+	}
+}
+@keyframes sweep {
+	from {
+		transform: translateX(-100%);
+	}
+	to {
+		/* (100/45)*100 + 100: far enough that the tail clears the right edge */
+		transform: translateX(322%);
+	}
+}
+
+/* A rule running to the edge, so a band heading reads as a divider not a row. */
+@utility band-rule {
+	&::after {
+		content: '';
+		flex: 1;
+		height: 1px;
+		background: color-mix(in srgb, var(--state) 40%, transparent);
+	}
+}
+
+/*
+ * The feed has stopped and the numbers are old.
+ *
+ * Dimming them is the point: it has to be visible at a glance that this is a
+ * photograph and not a window, without hiding the information — what it looked
+ * like an hour ago is still worth something. And the sweep stops, because a
+ * moving bar claims "this is running right now" and we no longer know that.
+ */
+body.stale .list,
+body.stale #room {
+	opacity: 0.55;
+	filter: saturate(0.6);
+}
+body.stale .sweep::after {
+	animation-play-state: paused;
+	opacity: 0.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation: none !important;
+		transition: none !important;
+	}
+	/* The rule above would leave the sweep parked off the left edge, so a running
+	   session would lose its only unambiguous marker. A solid underline says the
+	   same thing without moving. */
+	.sweep::after {
+		width: 100%;
+		background: var(--state);
+	}
+}
