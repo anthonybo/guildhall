@@ -9,6 +9,7 @@
  */
 import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width, type RGB } from './theme.ts'
 import { BUILD } from './version.ts'
+import { available } from './update.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
 export type Row = { s: Session; line: string }
@@ -157,7 +158,15 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 	// "this is answering on the network" warning was the very first thing to go,
 	// which is exactly backwards. Counts are recoverable by looking at the room;
 	// whether a listener is open is not.
-	const stamp = build ? `${fg(C.faint)}v${build}${R}  ` : ''
+	// An update is worth mentioning once, not announcing. The version simply stops
+	// being chrome-grey and picks up a small arrow — enough to notice on a glance
+	// you were making anyway, and nothing to dismiss.
+	const newer = build ? available() : null
+	const stamp = build
+		? newer
+			? `${fg(C.screenAgent)}⇡ v${build}${R}  `
+			: `${fg(C.faint)}v${build}${R}  `
+		: ''
 	const right = `${awakeBadge(awake)}${shareBadge(share)}`
 	const head = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}`
 	const room = total - width(right) - 2

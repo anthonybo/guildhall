@@ -10,6 +10,7 @@
  */
 import { C, LOOK, R, bold, clip, fg, tierOf, width } from './theme.ts'
 import type { State } from './data.ts'
+import { available } from './update.ts'
 
 const PAD = 2
 
@@ -140,8 +141,13 @@ function body(share?: ShareInfo): (string | Line)[] {
 		key('?', 'close this'),
 		key('q', 'quit'),
 		'',
-		{ text: 'Read-only. It never starts, stops or moves a session.', kind: 'dim' },
+		{ text: updateLine() || 'Read-only. It never starts, stops or moves a session.', kind: 'dim' },
 	]
+}
+
+const updateLine = () => {
+	const v = available()
+	return v ? `A newer version is out: v${v}. Pull and run npm start.` : ''
 }
 
 const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg(C.muted)}${meaning}${R}`
