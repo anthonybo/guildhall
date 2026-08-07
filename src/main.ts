@@ -33,7 +33,7 @@ import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 import * as awake from './awake.ts'
-import { VERSION } from './version.ts'
+import { BUILD } from './version.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -53,11 +53,11 @@ const CMUX = (() => {
 })()
 
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
-	console.log(VERSION)
+	console.log(BUILD)
 	process.exit(0)
 }
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
-	console.log(`guildhall ${VERSION} — every live Claude Code session as a pixel office
+	console.log(`guildhall ${BUILD} — every live Claude Code session as a pixel office
 
   guildhall              watch the room
   guildhall --guard      headless: hold sleep off while sessions work, draw nothing

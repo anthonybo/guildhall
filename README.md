@@ -139,6 +139,25 @@ src/
 `npm test` runs the suite; `npm run check` adds the type check. `npm run dev`
 runs from source without the build step.
 
+## Versioning
+
+The header shows `version · commit`, e.g. `v0.2.0 · 616067a`. The commit is read
+straight out of `.git` rather than by shelling out, and it is there to answer the
+one question a version number cannot: *is the process I am looking at the one I
+just built?* A dashboard you leave running for days will happily predate the
+feature you are trying to use — which is exactly how a keep-awake can appear to
+be running while the process is older than it.
+
+To cut a release:
+
+```
+npm run release                              # patch
+npm_config_level=minor npm run release       # minor
+```
+
+That runs the checks, bumps `package.json`, tags the commit, and pushes with the
+tag — so the number and the tag cannot drift apart.
+
 ## Credits
 
 Character sprites and the simulation model come from

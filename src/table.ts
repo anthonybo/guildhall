@@ -8,7 +8,7 @@
  * table look "all over the place".
  */
 import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width } from './theme.ts'
-import { VERSION } from './version.ts'
+import { BUILD } from './version.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
 export type Row = { s: Session; line: string }
@@ -113,7 +113,7 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
 	const hold = `  ${awakeBadge(awake)}`
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}v${VERSION}${R}  ${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
+	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}v${BUILD}${R}  ${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
 	return clip(left, total)
 }
 

@@ -1,6 +1,6 @@
 {
 	"name": "guildhall",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"private": true,
 	"type": "module",
 	"description": "A pixel town of every live Claude Code session, in the terminal",
@@ -10,6 +10,7 @@
 	"scripts": {
 		"start": "npm run --silent build && node dist/main.mjs",
 		"build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error",
+		"release": "npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
