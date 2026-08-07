@@ -8,6 +8,7 @@
  * table look "all over the place".
  */
 import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width } from './theme.ts'
+import { VERSION } from './version.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
 export type Row = { s: Session; line: string }
@@ -83,25 +84,30 @@ export function detail(s: Session | undefined, total: number) {
 	]
 }
 
-export function summary(list: Session[], total: number, awake = false) {
+export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
 	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
-	// Shown only while the assertion is actually held, so it reads as a live state
-	// rather than a setting you have to remember the value of.
-	const hold = awake ? `  ${fg(C.gold)}☕${fg(C.label)} sleep held${R}` : ''
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
+	// Three states, not two: holding right now, armed but nobody working, and off.
+	// "Armed" has to be visible or turning it off looks identical to nobody working.
+	const hold = awake.holding
+		? `  ${fg(C.gold)}☕${fg(C.label)} sleep held${R}`
+		: awake.armed
+			? `  ${fg(C.faint)}☕ awake armed${R}`
+			: `  ${fg(C.faint)}○ sleep allowed${R}`
+	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}v${VERSION}${R}  ${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
 	return clip(left, total)
 }
 
-export function footer(total: number, hidden: number, faultsOnly: boolean, mode: string) {
+export function footer(total: number, hidden: number, faultsOnly: boolean, mode: string, awakeArmed = true) {
 	const bits = [
 		'↑↓ move',
 		'⏎ jump to tab',
 		`f ${faultsOnly ? 'all' : 'faults'}`,
 		`tab ${mode}`,
+		`a ${awakeArmed ? 'let sleep' : 'keep awake'}`,
 		'r redraw',
 		'q quit',
 	]

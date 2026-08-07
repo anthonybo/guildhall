@@ -6,6 +6,8 @@
  * and never launches or modifies one. The only thing it writes is a cmux
  * "focus this tab" request, and only when you press enter.
  */
+import os from 'node:os'
+import { existsSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
@@ -31,11 +33,54 @@ import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 import * as awake from './awake.ts'
+import { VERSION } from './version.ts'
 
-const CMUX = '/Applications/cmux.app/Contents/Resources/bin/cmux'
+/**
+ * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
+ * jump to, whether a tab is unread — is optional: without it the room still shows
+ * every session, just with no ⏎ target. Set GUILDHALL_CMUX to point at a binary
+ * somewhere else.
+ */
+const CMUX = (() => {
+	const override = process.env.GUILDHALL_CMUX
+	if (override) return override
+	const candidates = [
+		'/Applications/cmux.app/Contents/Resources/bin/cmux',
+		`${os.homedir()}/Applications/cmux.app/Contents/Resources/bin/cmux`,
+	]
+	for (const c of candidates) if (existsSync(c)) return c
+	return 'cmux' // fall back to PATH; jump() already swallows a missing binary
+})()
+
+if (process.argv.includes('--version') || process.argv.includes('-v')) {
+	console.log(VERSION)
+	process.exit(0)
+}
+if (process.argv.includes('--help') || process.argv.includes('-h')) {
+	console.log(`guildhall ${VERSION} — every live Claude Code session as a pixel office
+
+  guildhall              watch the room
+  guildhall --guard      headless: hold sleep off while sessions work, draw nothing
+  guildhall --once       print one frame and exit
+  guildhall --no-awake   start with the sleep hold disarmed
+
+keys   ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+env    GUILDHALL_CMUX    path to the cmux binary
+       GUILDHALL_NO_IMAGES  force half-block rendering`)
+	process.exit(0)
+}
+
 const ONCE = process.argv.includes('--once')
 const BENCH = process.argv.includes('--bench')
-const IMAGES = supportsImages() && !ONCE && !BENCH
+/**
+ * Headless: hold sleep off for working sessions and draw nothing.
+ *
+ * The room only protects the machine while it is on screen, which is the wrong
+ * shape for the job — a build runs longest exactly when nobody is watching a
+ * dashboard. This mode is what you leave running (or hand to a LaunchAgent).
+ */
+const GUARD = process.argv.includes('--guard')
+const IMAGES = supportsImages() && !ONCE && !BENCH && !GUARD
 // observing should not change the machine's behaviour unless asked, but holding
 // sleep off while a build runs is the common case, so it is on unless refused
 awake.configure(!process.argv.includes('--no-awake') && !ONCE && !BENCH)
@@ -236,7 +281,15 @@ function draw() {
 		body.push(...det)
 	}
 	while (body.length < rows) body.push('')
-	paint([T.summary(sessions, cols, awake.isHolding()), ...body.slice(0, rows), T.footer(cols, office.hiddenCount, faultsOnly, mode)], images)
+	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
+	paint(
+		[
+			T.summary(sessions, cols, awakeState),
+			...body.slice(0, rows),
+			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState.armed),
+		],
+		images,
+	)
 }
 
 /** One simulation step, then redraw. Only the animation timer calls this. */
@@ -364,6 +417,11 @@ function onKey(b: Buffer) {
 		layout()
 	} else if (k === 'l') {
 		labels = !labels
+	} else if (k === 'a') {
+		// Toggling off drops any assertion immediately rather than waiting for the
+		// next poll — the point of reaching for this key is usually "let it sleep now".
+		awake.configure(!awake.isArmed())
+		awake.sync(sessions)
 	} else if (/^[0-9]$/.test(k)) jump(k === '0' ? 10 : Number(k))
 	// keys only ever redraw; they must not advance the animation or the creatures
 	// lurch forward once per keystroke
@@ -402,8 +460,45 @@ function start() {
 	)
 }
 
+/**
+ * Headless keep-awake. No canvas, no images, no input — just the poll and the
+ * power assertion, logging each transition so it is auditable after the fact.
+ *
+ * Unlike the room, it does not exit when no sessions are live: a machine with
+ * nothing running now is exactly the one that will have something running in ten
+ * minutes, and a guard that quits on an empty room protects nothing.
+ */
+function guard() {
+	// local time, not ISO/UTC: this log is read by a person on this machine, and a
+	// timestamp seven hours off their clock is worse than none
+	const stamp = () => new Date().toLocaleString('sv-SE').slice(0, 19)
+	let last = false
+	const tick = () => {
+		sessions = collect()
+		awake.sync(sessions)
+		const now = awake.isHolding()
+		if (now !== last) {
+			const who = awake.holders(sessions)
+			console.log(now ? `${stamp()}  holding sleep off — ${who.join(', ')}` : `${stamp()}  released`)
+			last = now
+		}
+	}
+	console.log(`${stamp()}  guildhall guard started (pid ${process.pid})`)
+	tick()
+	timers.push(setInterval(tick, 5000))
+	const stop = () => {
+		for (const t of timers) clearInterval(t)
+		awake.configure(false)
+		console.log(`${stamp()}  guard stopped`)
+		process.exit(0)
+	}
+	process.on('SIGINT', stop)
+	process.on('SIGTERM', stop)
+}
+
 function main() {
 	sessions = collect()
+	if (GUARD) return guard()
 	if (!sessions.length) {
 		console.log('no live claude sessions found')
 		process.exit(0)

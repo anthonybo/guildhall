@@ -23,11 +23,14 @@ npm start
 | `↑` `↓` | move the selection |
 | `⏎` | jump to that session's cmux tab |
 | `f` | show only sessions that need you |
+| `l` | all labels, or only the ones that need you |
+| `a` | keep the machine awake, or let it sleep |
 | `tab` | cycle room / split / table |
 | `r` | force a redraw |
 | `q` | quit |
 
-`--no-awake` disables the sleep hold. `--once` prints a single frame and exits.
+`--no-awake` starts with the sleep hold off. `--once` prints a single frame and
+exits.
 
 ## What it reads
 
@@ -62,11 +65,41 @@ when the last one stops. Display sleep is left alone — a dark screen does not
 interrupt a build. Sessions *waiting on you* deliberately do not qualify, or the
 machine would never sleep again.
 
+Press `a` to arm or disarm it at any time; disarming releases the assertion
+immediately. The header shows which of the three states you are in — holding,
+armed but idle, or off. Start with `--no-awake` to have it off from the outset.
+
+**The catch:** the room only protects the machine while it is running, which is
+the wrong shape for the job — a build runs longest exactly when nobody is
+watching a dashboard. `guildhall --guard` is the headless version: same polling
+and the same assertion, no rendering, logging each transition.
+
+```
+guildhall --guard
+2026-08-07 07:56:10  guildhall guard started (pid 1234)
+2026-08-07 07:56:10  holding sleep off — willow, quillfeather
+2026-08-07 08:14:02  released
+```
+
+To have it always on, install it as a launch agent:
+
+```
+cp contrib/dev.guildhall.guard.plist ~/Library/LaunchAgents/
+# edit the two paths inside, then
+launchctl load ~/Library/LaunchAgents/dev.guildhall.guard.plist
+```
+
+Unlike the room, the guard does not exit when no sessions are live — a machine
+with nothing running now is exactly the one that will have something running in
+ten minutes.
+
 ## Requirements
 
-- macOS (the cmux and `caffeinate` integrations are macOS-only; the room itself
-  is not)
 - Node 20+
+- macOS for the two optional integrations. Both degrade rather than fail: without
+  cmux you lose tab-jumping and unread marks, and the sleep hold is a no-op off
+  macOS. The room, the table and the scoring work anywhere Claude Code does.
+  Set `GUILDHALL_CMUX` if your cmux binary is not in the usual place.
 - A terminal implementing the kitty graphics protocol — Ghostty, kitty, or
   WezTerm — for the sprites. Anything else falls back to half-block rendering.
 

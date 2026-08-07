@@ -13,7 +13,6 @@
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"curate": "tsx src/curate.ts",
 		"check": "npm run check:types && npm test",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",

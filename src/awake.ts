@@ -28,14 +28,17 @@ export const shouldHold = (sessions: Session[]) => sessions.some((s) => BUSY.has
 export const holders = (sessions: Session[]) => sessions.filter((s) => BUSY.has(s.state)).map((s) => s.proj)
 
 let assertion: ChildProcess | null = null
-let enabled = true
+let armed = true
 
-/** `--no-awake` turns the whole thing off without touching the call sites. */
+/** `--no-awake` at launch, or the `a` key at runtime. Turning it off releases any
+ *  assertion at once rather than waiting for the next poll. */
 export function configure(on: boolean) {
-	enabled = on
+	armed = on
 	if (!on) release()
 }
 
+/** Armed to hold when someone works — distinct from holding right now. */
+export const isArmed = () => armed
 export const isHolding = () => assertion !== null
 
 function release() {
@@ -50,7 +53,7 @@ function release() {
  * caffeinate every two seconds.
  */
 export function sync(sessions: Session[]) {
-	const want = enabled && shouldHold(sessions)
+	const want = armed && shouldHold(sessions)
 	if (want === isHolding()) return false
 	if (!want) {
 		release()
