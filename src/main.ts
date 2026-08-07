@@ -39,7 +39,7 @@ import * as awake from './awake.ts'
 import { BUILD } from './version.ts'
 import * as cfgStore from './config.ts'
 import { addresses, createServer } from './serve.ts'
-import { passcode } from './auth.ts'
+import { passcode, setPasscode } from './auth.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -246,6 +246,10 @@ let faultsOnly = false
 let labels = true
 /** the help panel, which suppresses the image layer while it is up */
 let showHelp = false
+/** digits typed so far while changing the passcode, or null when not changing it */
+let pin: string | null = null
+/** what happened last time it was changed, shown until the panel closes */
+let pinNote = ''
 let selectedId: string | null = null
 let sessions: Session[] = []
 let timers: NodeJS.Timeout[] = []
@@ -314,7 +318,7 @@ function draw() {
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
 		const net = addresses()
-		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
 		return
 	}
 	const list = visible()
@@ -467,11 +471,36 @@ function onInput(b: Buffer) {
 
 function onKey(b: Buffer) {
 	const k = b.toString()
+
+	// Typing a new passcode swallows every key, including q — otherwise a 4 in the
+	// code would be fine but a q would quit the app mid-entry.
+	if (pin !== null) {
+		if (k === '\x1b') ((pin = null), (pinNote = 'left as it was'))
+		else if (k === '\x7f' || k === '\b') pin = pin.slice(0, -1)
+		else if (/^\d$/.test(k)) {
+			pin += k
+			if (pin.length === 4) {
+				const r = setPasscode(pin)
+				pinNote = r.ok ? 'saved — every paired device must sign in again' : r.why
+				pin = null
+			}
+		}
+		draw()
+		return
+	}
+
 	if (k === 'q' || k === '\x03') return cleanup()
 	if (showHelp) {
-		// anything dismisses it — hunting for the right key to close a help panel is
-		// its own small indignity
+		// `p` starts a passcode change; anything else dismisses the panel, because
+		// hunting for the right key to close a help panel is its own small indignity
+		if (k === 'p') {
+			pin = ''
+			pinNote = ''
+			draw()
+			return
+		}
 		showHelp = false
+		pinNote = ''
 		prev = []
 		eraseDisplay()
 		layout()

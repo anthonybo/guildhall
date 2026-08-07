@@ -171,6 +171,14 @@ export class Office extends SimBase {
 	/** Project nameplates and per-character status labels. */
 	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
 		const named = new Set<string>()
+		// Cells a nameplate already occupies, per row. Plates are drawn widest-pod
+		// first rather than left to right, and they are allowed to spill past their
+		// own pod — so without this a later plate simply overwrote an earlier one and
+		// you got "mari ouncewise". Measuring to the next POD was not enough: the
+		// neighbour's plate can reach back toward you.
+		const claimed = new Map<number, [number, number][]>()
+		const blocks = (row: number) => claimed.get(row) ?? []
+
 		for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
 			if (named.has(pod.proj)) continue
 			named.add(pod.proj)
@@ -181,16 +189,29 @@ export class Office extends SimBase {
 			const band = this.pods.filter((p) => p.deskRow === pod.deskRow)
 			const rightOf = band.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0)
 			const leftOf = band.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1)
-			const roomRight = ((rightOf.length ? rightOf[0].c0 : this.cols - 1) - pod.c0) * TILE - 1
-			const roomLeft = (pod.c1 + 1 - (leftOf.length ? leftOf[0].c1 + 1 : 1)) * TILE - 1
-			const span = Math.max(roomRight, roomLeft)
-			const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `
-			// when growing leftward, end the plate on the pod's right edge
-			const startCol = roomLeft > roomRight ? (pod.c1 + 1) * TILE - text.length : pod.c0 * TILE
 			// the desk row carries monitor images, which draw over text, so the plate
 			// goes on the aisle row below the pod
 			const plateRow = Math.min(cv.rows - 1, Math.floor(((pod.seatRow + 1) * TILE) / 2))
-			cv.text(Math.max(0, startCol), plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0])
+			const here = blocks(plateRow)
+			const left0 = pod.c0 * TILE
+			const right0 = (pod.c1 + 1) * TILE
+
+			// stop at whichever comes first: the next pod, the edge, or a plate already
+			// written on this row
+			const podRight = (rightOf.length ? rightOf[0].c0 : this.cols - 1) * TILE
+			const wallRight = Math.min(podRight, ...here.filter((b) => b[0] >= left0).map((b) => b[0]))
+			const podLeft = (leftOf.length ? leftOf[0].c1 + 1 : 1) * TILE
+			const wallLeft = Math.max(podLeft, ...here.filter((b) => b[1] <= right0).map((b) => b[1]))
+
+			const roomRight = wallRight - left0 - 1
+			const roomLeft = right0 - wallLeft - 1
+			const span = Math.max(roomRight, roomLeft)
+			if (span < 5) continue // no honest room for a name; better none than "m…"
+			const text = ` ${cut(pod.proj, Math.max(3, span - 2))} `
+			// when growing leftward, end the plate on the pod's right edge
+			const startCol = Math.max(0, roomLeft > roomRight ? right0 - text.length : left0)
+			cv.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0])
+			claimed.set(plateRow, [...here, [startCol, startCol + text.length]])
 		}
 		// Characters are images as well, so their extents have to block text just
 		// like furniture does, or a head gets drawn over a label.

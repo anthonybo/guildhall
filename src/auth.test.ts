@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { attempt, issue, lockedFor, passcode, resetThrottle, triesLeft, valid } from './auth.ts'
+import { attempt, issue, lockedFor, passcode, resetThrottle, setPasscode, triesLeft, valid } from './auth.ts'
 import { loginPage } from './login.ts'
 
 test('the passcode is four digits and stable across reads', () => {
@@ -64,4 +64,25 @@ test('a session id is long and random, never the code', () => {
 	assert.notEqual(id, passcode())
 	assert.equal(valid(id), true)
 	assert.equal(valid('not-a-session'), false)
+})
+
+test('a chosen passcode refuses the codes a guesser tries first', () => {
+	// a random code is one in ten thousand; a chosen one is not, because a small
+	// set of runs, repeats and years covers a large share of what people pick
+	for (const weak of ['1234', '0000', '1111', '2580', '2024', '4321']) {
+		const r = setPasscode(weak)
+		assert.equal(r.ok, false, `accepted ${weak}`)
+	}
+	assert.equal(setPasscode('abc').ok, false, 'accepted something that is not digits')
+	assert.equal(setPasscode('12345').ok, false, 'accepted five digits')
+})
+
+test('changing the passcode signs every device out', () => {
+	// a code you changed that leaves the old phones logged in has not been changed
+	const id = issue()
+	assert.equal(valid(id), true)
+	const r = setPasscode('7391')
+	assert.equal(r.ok, true)
+	assert.equal(valid(id), false, 'an old session survived the change')
+	assert.equal(passcode(), '7391')
 })
