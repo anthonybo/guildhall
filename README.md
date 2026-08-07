@@ -92,9 +92,16 @@ sleeps on its normal schedule. The header says which of the three you are in:
 | `◐ awake when working · idle, may sleep` | enabled, nothing running, free to sleep |
 | `○ sleeps normally · never held` | disabled |
 
-Two limits: the **display still sleeps** — a dark screen does not interrupt a
-build, so only system sleep is blocked — and **closing the lid still sleeps the
-machine**, which no power assertion can override.
+The screen is held on as well as the machine. That was not the original
+behaviour, and leaving it out was a mistake worth naming: `displaysleep` is
+commonly two minutes on battery and the screen lock is commonly immediate, so
+the machine stayed up exactly as promised while the display blanked and
+locked — which is indistinguishable from the feature not working. Set
+`"awakeDisplay": false` in the config file to let the screen sleep on its own
+and keep the battery.
+
+One limit remains: **closing the lid still sleeps the machine**, which no power
+assertion can override.
 
 Sessions *waiting on you* deliberately do not qualify. Holding the machine open
 for a session that is waiting on a human would mean never sleeping again.

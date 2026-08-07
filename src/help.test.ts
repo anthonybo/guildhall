@@ -11,7 +11,11 @@ test('the panel answers what the glyphs cannot say for themselves', () => {
 	const t = flat()
 	// the questions this app has actually been asked
 	assert.match(t, /do not sleep while something/, 'does not say the sleep hold is conditional')
-	assert.match(t, /display still|closing the lid/, 'does not state the sleep limits')
+	assert.match(t, /[Cc]losing the lid/, 'does not state the sleep limits')
+	// the screen blanking and locking while "awake" was on read as the feature not
+	// working at all, so the panel has to say the display is covered now
+	assert.match(t, /screen is held on/, 'does not say the display is held too')
+	assert.match(t, /awakeDisplay/, 'does not say how to let the screen sleep')
 	assert.match(t, /work done, not time spent/, 'does not explain what a level counts')
 	assert.match(t, /waiting on an answer/, 'does not explain the ? placard')
 })
