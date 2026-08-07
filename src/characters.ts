@@ -32,6 +32,20 @@ const POSE_FRAMES: Record<Pose, number[]> = {
 }
 
 const sheets: Image[] = []
+
+/**
+ * Hand the sheets in already decoded.
+ *
+ * The browser has no `fs` and does not need one — it fetches the same PNGs and
+ * decodes them with the platform's own decoder. This is the seam that lets the
+ * simulation and every sprite lookup run unchanged on both sides.
+ */
+export function setSheets(imgs: Image[]) {
+	sheets.length = 0
+	sheets.push(...imgs)
+	cache.clear()
+}
+
 export function loadSheets() {
 	if (sheets.length) return sheets.length
 	const files = fs

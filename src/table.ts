@@ -159,9 +159,22 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 	// whether a listener is open is not.
 	const stamp = build ? `${fg(C.faint)}v${build}${R}  ` : ''
 	const right = `${awakeBadge(awake)}${shareBadge(share)}`
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}`
+	const head = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}`
 	const room = total - width(right) - 2
-	return room < 20 ? clip(right.trimStart(), total) : `${clip(left, room)}  ${right}`
+	if (room < 20) return clip(right.trimStart(), total)
+
+	// Drop whole pills rather than slicing one in half. Character-clipping left a
+	// bare glyph with no count attached — a mark that means nothing and reads as a
+	// rendering fault rather than as "there was not room for this".
+	let used = width(head)
+	const kept: string[] = []
+	for (const p of pills) {
+		const next = used + 2 + width(p)
+		if (next > room) break
+		kept.push(p)
+		used = next
+	}
+	return `${clip(head + (kept.length ? '  ' + kept.join('  ') : ''), room)}  ${right}`
 }
 
 export function footer(

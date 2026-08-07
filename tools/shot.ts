@@ -17,15 +17,12 @@
 import fs from 'node:fs'
 import { Canvas } from '../src/canvas.ts'
 import { demoSessions } from '../src/demo.ts'
-import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE } from '../src/office.ts'
-import { frameOf } from '../src/characters.ts'
-import { badge, monitor } from '../src/screens.ts'
-import { PROP_SIZE, prop } from '../src/props.ts'
-import { LOOK, tierOf, type RGB } from '../src/theme.ts'
+import { Office } from '../src/office.ts'
+import { renderRoom } from '../src/render.ts'
+import type { RGB } from '../src/theme.ts'
 import { encodePNG } from '../src/kitty.ts'
 import * as T from '../src/table.ts'
 import { order } from '../src/data.ts'
-import type { Grid } from '../src/characters.ts'
 
 const SX = 4 // raster pixels per terminal column
 const SY = 8 // raster pixels per terminal row
@@ -55,36 +52,7 @@ for (let i = 0; i < 900; i++) office.update(1 / 30, sessions)
 const placed = office.draw(cv, sessions)
 office.overlay(cv, placed, sessions[0].id, true)
 
-const W = cv.w * SX
-const H = cv.rows * SY
-const raster = new Uint8ClampedArray(W * H * 4)
-
-/** Canvas pixels first: one canvas pixel is one column wide and half a row tall. */
-for (let y = 0; y < cv.h; y++) {
-	for (let x = 0; x < cv.w; x++) {
-		const c = cv.get(x, y)
-		if (!c) continue
-		blockFill(x * SX, y * (SY / 2), SX, SY / 2, c)
-	}
-}
-
-/** Then the image layers, in the order the terminal stacks them. */
-for (const pr of office.props) {
-	const size = PROP_SIZE[pr.kind]
-	stamp(prop(pr.kind), pr.x * SX, pr.y * SX, size.w * TILE * SX, ((size.h * TILE) / 2) * SY)
-}
-for (const m of office.monitors) {
-	stamp(monitor(m.lit, 2, m.seed, m.kind), m.x * SX, m.y * SX, MON_COLS * SX, MON_ROWS * SY)
-}
-for (const b of office.badges) {
-	const face = b.asking ? '?' : ''
-	const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color
-	stamp(badge(b.level, tint, face), b.x * SX, b.y * SX, TILE * SX, (TILE / 2) * SY)
-}
-for (const p of placed) {
-	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
-	stamp(g, p.x * SX, p.y * SX, CHAR_W * SX, (CHAR_H / 2) * SY)
-}
+const { rgba: raster, w: W, h: H } = renderRoom(cv, office, placed, SX, SY)
 
 /* ── the SVG: raster underneath, real text on top ── */
 
@@ -125,40 +93,6 @@ fs.writeFileSync(OUT, svg.join('\n'))
 console.log(`wrote ${OUT} (${(svg.join('\n').length / 1024).toFixed(0)}KB, ${roomW.toFixed(0)}x${totalH.toFixed(0)})`)
 
 /* ── helpers ── */
-
-function blockFill(x0: number, y0: number, w: number, h: number, c: RGB) {
-	for (let y = y0; y < y0 + h; y++) {
-		if (y < 0 || y >= H) continue
-		for (let x = x0; x < x0 + w; x++) {
-			if (x < 0 || x >= W) continue
-			const i = (y * W + x) * 4
-			raster[i] = c[0]
-			raster[i + 1] = c[1]
-			raster[i + 2] = c[2]
-			raster[i + 3] = 255
-		}
-	}
-}
-
-/** Nearest-neighbour stamp of a sprite into a box, which is what the terminal does. */
-function stamp(g: Grid, x0: number, y0: number, boxW: number, boxH: number) {
-	for (let y = 0; y < boxH; y++) {
-		const sy = Math.min(g.h - 1, Math.floor((y * g.h) / boxH))
-		for (let x = 0; x < boxW; x++) {
-			const sx = Math.min(g.w - 1, Math.floor((x * g.w) / boxW))
-			const c = g.grid[sy][sx]
-			if (!c) continue // transparent, so the floor shows through
-			const px = x0 + x
-			const py = y0 + y
-			if (px < 0 || py < 0 || px >= W || py >= H) continue
-			const i = (py * W + px) * 4
-			raster[i] = c[0]
-			raster[i + 1] = c[1]
-			raster[i + 2] = c[2]
-			raster[i + 3] = 255
-		}
-	}
-}
 
 // declarations, not const arrows: these are used above where they are written
 function hex(c: RGB) {
