@@ -25,10 +25,13 @@ import { encodePNG } from '../src/kitty.ts'
 import * as T from '../src/table.ts'
 import { order } from '../src/data.ts'
 
-// 8/16 rather than 4/8: a nameplate's ink band is 11px and needs two columns of
-// room, which 4px per column cannot give. Sprites stay sharp at any multiple.
-const SX = 8
-const SY = 16
+// 12/24, matching a real terminal's cell rather than the smallest one that works.
+// This only sets the raster's resolution — the SVG still displays at CW x LH — and
+// the nameplate picker chooses by the pixels it is given, so a thinner raster
+// would document truncated plates that nobody with a normal font actually sees.
+// Sprites stay sharp at any multiple of 4/8.
+const SX = 12
+const SY = 24
 const CW = 8.4 // display width of a column, in SVG units
 const LH = 16.8 // display height of a row — SY/SX * CW keeps the room square
 
