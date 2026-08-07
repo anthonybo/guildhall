@@ -19,6 +19,7 @@ import { Canvas } from '../src/canvas.ts'
 import { demoSessions } from '../src/demo.ts'
 import { Office } from '../src/office.ts'
 import { renderRoom } from '../src/render.ts'
+import { loadSheets } from '../src/sheets.ts'
 import type { RGB } from '../src/theme.ts'
 import { encodePNG } from '../src/kitty.ts'
 import * as T from '../src/table.ts'
@@ -39,6 +40,7 @@ const OUT = process.argv[process.argv.indexOf('-o') + 1] ?? 'docs/room.svg'
 
 /* ── the room, as pixels ── */
 
+loadSheets()
 const sessions = demoSessions()
 const tableRows = Math.min(sessions.length + 4, Math.max(6, Math.floor(ROWS * 0.34)))
 const townRows = ROWS - tableRows

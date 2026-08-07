@@ -9,7 +9,7 @@
 	},
 	"scripts": {
 		"start": "npm run --silent build && node dist/main.mjs",
-		"build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error",
+		"build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error && esbuild web/app.ts --bundle --format=esm --target=es2022 --outfile=web/app.js --log-level=error",
 		"release": "npm run --silent docs && git add -A docs && (git diff --cached --quiet || git commit -m \"Refresh the documentation images\") && npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",

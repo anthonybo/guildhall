@@ -7,10 +7,15 @@
  * Running / Searching). `doingText` fills the widest column in the table and can
  * afford the actual filename or command.
  */
-import path from 'node:path'
 import type { Digest, Session, State } from './types.ts'
 
-const bn = (p: unknown) => (typeof p === 'string' ? path.basename(p) : '?')
+/** The last path segment. Written out rather than using node:path so this module
+ *  stays portable — the browser client shares these rules. */
+const bn = (p: unknown) => {
+	if (typeof p !== 'string') return '?'
+	const parts = p.replace(/[/\\]+$/, '').split(/[/\\]/)
+	return parts[parts.length - 1] || p
+}
 
 /** Collapse whitespace and ellipsize. Counts code points, so emoji survive. */
 export const cut = (s: string, n: number) => {

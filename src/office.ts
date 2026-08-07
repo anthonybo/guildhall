@@ -19,7 +19,8 @@
  *    idle agents wander to random floor tiles and come back.
  */
 import { C, LOOK, ROOFS } from './theme.ts'
-import { cut, RANK, type Session } from './data.ts'
+import { RANK, type Session } from './data/types.ts'
+import { cut } from './data/describe.ts'
 import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'

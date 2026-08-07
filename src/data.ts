@@ -30,6 +30,7 @@ export { RANK } from './data/types.ts'
 export { levelFor, xpForLevel, xpOf } from './data/score.ts'
 export { cut, firstSentence } from './data/describe.ts'
 export { transcriptIndex } from './data/transcript.ts'
+export { needsAttention, order } from './data/select.ts'
 export { liveSessions } from './data/registry.ts'
 
 /** Directories that hold projects rather than being one. */
@@ -109,32 +110,5 @@ export function collect(): Session[] {
 			palette: looks.get(s.sessionId)?.palette ?? 0,
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
-	})
-}
-
-/**
- * One function decides what deserves your attention. The gutter marker, the sort
- * tier, the faults filter and the header count all read from here, so adding a
- * condition touches exactly one place.
- */
-export function needsAttention(s: Session): string | null {
-	if (s.state === 'needs') return s.waitingFor ?? 'blocked'
-	if (s.ctxUsed / s.ctxLimit > 0.9) return 'context almost full'
-	return null
-}
-
-/**
- * Two tiers. Only the attention tier floats, and everything else holds a stable
- * order — if rows reshuffled whenever a status changed, the cursor would land on a
- * different session than the one being read. Longest-ignored first within a tier,
- * and session id as the final tiebreak so the order never depends on the name.
- */
-export function order(list: Session[]) {
-	return [...list].sort((a, b) => {
-		const at = needsAttention(a) ? 0 : 1
-		const bt = needsAttention(b) ? 0 : 1
-		if (at !== bt) return at - bt
-		if (a.stale !== b.stale) return b.stale - a.stale
-		return a.id.localeCompare(b.id)
 	})
 }

@@ -10,7 +10,7 @@
  * with a nearly full context window, and a long tail of parked work. A screenshot
  * where everything is green teaches nothing about what the states look like.
  */
-import type { Session, State } from './data.ts'
+import type { Session, State } from './data/types.ts'
 import { assignLooks } from './characters.ts'
 
 type Sketch = {

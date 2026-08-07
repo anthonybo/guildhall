@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<!-- viewport-fit=cover so the page reaches under a phone's rounded corners,
+		     with safe-area insets doing the actual keeping-out-of-the-way -->
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<meta name="color-scheme" content="dark" />
+		<meta name="theme-color" content="#191722" />
+		<!-- added to a phone home screen this opens without browser chrome -->
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+		<title>guildhall</title>
+		<link rel="stylesheet" href="/app.css" />
+	</head>
+	<body>
+		<header id="bar">
+			<span class="brand">GUILDHALL</span>
+			<span id="counts" class="counts"></span>
+			<span id="link" class="link" title="connection"></span>
+		</header>
+
+		<!-- The room only appears where there is room for it. On a phone the office
+		     at 100 columns is illegible, and the list is the answer to "what is the
+		     status", which is the question the phone is being asked. -->
+		<main id="room" hidden><canvas id="canvas"></canvas></main>
+
+		<ul id="list" class="list"></ul>
+
+		<p id="empty" class="empty" hidden>No live sessions.</p>
+
+		<footer id="foot">
+			<span id="stamp"></span>
+			<span class="ro">read-only</span>
+		</footer>
+
+		<script type="module" src="/app.js"></script>
+	</body>
+</html>
