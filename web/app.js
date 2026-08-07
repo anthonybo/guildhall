@@ -2015,7 +2015,7 @@ function choose(text, wpx, hpx) {
   const cands = [];
   for (const font of LADDER) {
     const fits = Math.min(MAX_SCALE, Math.floor((wpx - 3) / band(font)));
-    for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor(hpx / (font.w * scale)), ink: band(font) * scale });
+    for (let scale = 1; scale <= fits; scale++) cands.push({ font, scale, room: Math.floor((hpx - 2) / (font.w * scale)), ink: band(font) * scale });
   }
   const thickest = (a, b) => b.ink - a.ink || b.font.h - a.font.h || b.room - a.room;
   const widest = (a, b) => b.room - a.room || b.ink - a.ink || b.font.h - a.font.h;
