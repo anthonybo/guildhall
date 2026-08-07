@@ -300,3 +300,31 @@ test('a re-plan never lets two characters hold one desk', () => {
 	const owners = [...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken).map((s) => s.taken)
 	assert.equal(new Set(owners).size, owners.length, 'one session claimed two desks')
 })
+
+test('nobody ends up standing back to back', () => {
+	// Found by scanning 40 simulated rooms: 7 of 5692 adjacent pairs stood back to
+	// back, always the same shape — [talker facing left][idle person][someone else].
+	// The idle rule preferred its right-hand neighbour, which turned its back on a
+	// left-hand neighbour already facing away mid-conversation. Preference alone
+	// cannot see the person behind you, so a side that would leave you back to back
+	// now loses to one that would not.
+	const opposite: Record<string, string> = { left: 'right', right: 'left', up: 'down', down: 'up' }
+	const list = ['a', 'b', 'c', 'd', 'e', 'f'].map((id, i) => session(id, `p${i}`, i < 2 ? 'working' : 'parked'))
+	const { office } = room(list)
+	office.assign(list)
+	for (let f = 0; f < 4000; f++) {
+		office.update(1 / 30, list)
+		if (f % 50) continue
+		const here = [...office.chars.values()].filter((c) => c.state !== 'walk')
+		for (const a of here) {
+			for (const b of here) {
+				if (a.id >= b.id) continue
+				const dc = b.col - a.col
+				const dr = b.row - a.row
+				if (Math.abs(dc) + Math.abs(dr) !== 1) continue
+				const toward = dc === 1 ? 'right' : dc === -1 ? 'left' : dr === 1 ? 'down' : 'up'
+				assert.ok(!(a.dir === opposite[toward] && b.dir === toward), `${a.id} and ${b.id} stood back to back at frame ${f}`)
+			}
+		}
+	}
+})

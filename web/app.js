@@ -1058,9 +1058,16 @@ var SimBase = class extends RoomBase {
         }
         case "idle": {
           ch.frame = 0;
-          const beside = (dc) => [...this.chars.values()].some((o) => o !== ch && o.state !== "walk" && o.row === ch.row && o.col === ch.col + dc);
-          if (beside(1)) ch.dir = "right";
-          else if (beside(-1)) ch.dir = "left";
+          const beside = (dc) => [...this.chars.values()].find((o) => o !== ch && o.state !== "walk" && o.row === ch.row && o.col === ch.col + dc);
+          const right = beside(1);
+          const left = beside(-1);
+          const backToBack = (face) => {
+            const behind = face === "right" ? left : right;
+            return !!behind && behind.dir === (face === "right" ? "left" : "right");
+          };
+          if (right && !(backToBack("right") && left && !backToBack("left"))) ch.dir = "right";
+          else if (left) ch.dir = "left";
+          else if (right) ch.dir = "right";
           if (ch.seatTimer < 0) ch.seatTimer = 0;
           if (working) {
             this.release(ch);
@@ -1460,6 +1467,9 @@ var Office = class extends SimBase {
       const startCol = Math.max(0, roomLeft > roomRight ? right0 - text.length : left0);
       cv2.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0]);
       claimed.set(plateRow, [...here, [startCol, startCol + text.length]]);
+      const spans = this.imageSpans.get(plateRow) ?? [];
+      spans.push([startCol, startCol + text.length]);
+      this.imageSpans.set(plateRow, spans);
     }
   }
   /** Per-character status labels, which are the same either way. */
@@ -1480,29 +1490,37 @@ var Office = class extends SimBase {
       const urgent = s.state === "needs" || s.state === "error";
       if (!urgent && !sel) continue;
       const row = p.y >> 1;
-      const spots = [
-        [row, p.x + CHAR_W],
-        [row, p.x - 1],
-        [row + 1, p.x + CHAR_W],
-        [row - 1, p.x + CHAR_W],
-        [row + 1, p.x - 1],
-        [row - 1, p.x - 1]
-      ];
-      const at = spots.find(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
-      if (!at) continue;
+      const rows = [...Array(CHAR_H / 2).keys()].map((i) => row + i);
+      rows.push(row - 1, row + CHAR_H / 2);
+      const spots = [];
+      for (const r of rows) spots.push([r, p.x + CHAR_W], [r, p.x - 1]);
+      const free = spots.filter(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
+      if (!free.length) continue;
+      const body = s.short || (s.state === "working" || s.state === "shell" ? s.doing : s.title) || s.title;
+      const prefix = s.tab ? `\u2318${s.tab} ` : "";
+      const want = prefix.length + 27;
+      const least = prefix.length + 6;
+      const room = ([r, c]) => {
+        const step = c < p.x ? -1 : 1;
+        let n2 = 0;
+        while (n2 < want) {
+          const x = c + step * (n2 + 1);
+          if (x < 0 || x >= cv2.w || this.blocked(r, x, 1, taken)) break;
+          n2++;
+        }
+        return n2;
+      };
+      const at = free.find((sp) => room(sp) >= least) ?? free[0];
       const [badgeRow, badgeCol] = at;
       cv2.text(badgeCol, badgeRow, look.glyph, C.night, look.color);
       const mine = taken.get(badgeRow) ?? [];
       mine.push([badgeCol, badgeCol + 1]);
       taken.set(badgeRow, mine);
       if (!showAll && !urgent && !sel) continue;
-      if (!urgent && !sel) continue;
-      const body = s.short || (s.state === "working" || s.state === "shell" ? s.doing : s.title) || s.title;
-      const text = `${s.tab ? `\u2318${s.tab} ` : ""}${cut(body, 26)} `;
-      const rightFits = badgeCol + 1 + text.length <= cv2.w && !this.blocked(badgeRow, badgeCol + 1, text.length, taken);
-      const leftCol = p.x - text.length;
-      const fits = rightFits ? badgeCol + 1 : leftCol >= 0 && !this.blocked(badgeRow, leftCol, text.length, taken) ? leftCol : -1;
-      if (fits < 0) continue;
+      const n = room(at);
+      if (n < least) continue;
+      const text = `${prefix}${cut(body, n - prefix.length - 1)} `;
+      const fits = badgeCol < p.x ? badgeCol - text.length : badgeCol + 1;
       cv2.text(fits, badgeRow, text, C.ink, urgent ? look.color : C.paper);
       const used = taken.get(badgeRow) ?? [];
       used.push([fits, fits + text.length]);
