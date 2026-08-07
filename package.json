@@ -9,17 +9,20 @@
 	},
 	"scripts": {
 		"start": "npm run --silent build && node dist/main.mjs",
-		"build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error && esbuild web/app.ts --bundle --format=esm --target=es2022 --outfile=web/app.js --log-level=error",
-		"release": "npm run --silent docs && git add -A docs && (git diff --cached --quiet || git commit -m \"Refresh the documentation images\") && npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
+		"build": "npm run --silent build:cli && npm run --silent build:web",
+		"build:cli": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error",
+		"build:web": "esbuild web/app.ts --bundle --format=esm --target=es2022 --outfile=web/app.js --log-level=error",
+		"release": "npm run --silent docs && npm run --silent build:web && git add -A docs web/app.js && (git diff --cached --quiet || git commit -m \"Refresh the generated documentation images and browser bundle\") && npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"check": "npm run check:types && npm test && npm run check:docs",
+		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",
 		"format": "prettier --write .",
 		"docs": "sh tools/make-docs-images.sh",
-		"check:docs": "sh tools/check-docs-images.sh"
+		"check:docs": "sh tools/check-docs-images.sh",
+		"check:web": "sh tools/check-web-bundle.sh"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

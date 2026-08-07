@@ -23,12 +23,18 @@ two features, which made it useless as a signal. Then bumping it by hand left
 **Bump on anything user-facing.** A new flag, a changed key, different wording on
 screen, a behaviour change. Not for refactors or comment edits.
 
-The release regenerates `docs/` first and commits any change, so the README
-picture can never lag the program. `npm run check` fails if the committed images
-no longer match what the code renders — they are byte-for-byte deterministic, so
-a difference always means somebody changed the look and did not run `npm run
-docs`. The images deliberately carry no version or commit stamp; otherwise every
-commit would churn them and bury the one change that mattered.
+The release regenerates `docs/` and `web/app.js` first and commits any change, so
+neither the README picture nor the browser client can lag the program. `npm run
+check` fails if either is stale — both are byte-for-byte deterministic, so a
+difference always means somebody changed the code and did not regenerate. The
+images deliberately carry no version or commit stamp; otherwise every commit
+would churn them and bury the one change that mattered.
+
+*Why the bundle is checked:* `web/app.js` is tracked but only `npm start` and
+`npm run build` write it, so anyone who edits the room and releases without
+having run the app ships a browser that draws a different program than the
+terminal. The nameplates shipped exactly that way in v0.2.19 — the terminal
+tripled them while the bundle still served the old 1:1 plates.
 
 ## Committing
 
