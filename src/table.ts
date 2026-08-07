@@ -97,9 +97,13 @@ export function detail(s: Session | undefined, total: number) {
  * build, which is worth noticing rather than hiding.
  */
 export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolean }) {
-	if (holding) return `${fg(C.fillOk)}●${fg(C.label)} awake ${bold}ON${R}${fg(C.fillOk)} · holding${R}`
-	if (armed) return `${fg(C.screenEdit)}◐${fg(C.label)} awake ${bold}ON${R}${fg(C.screenEdit)} · idle${R}`
-	return `${fg(C.fillWarn)}○${fg(C.label)} awake ${bold}OFF${R}${fg(C.fillWarn)} · may sleep${R}`
+	// The rule, not the switch position. "awake ON" invited the reading that the
+	// machine would never sleep, when what it actually promises is narrower: sleep
+	// is blocked WHILE something is working, and released the moment it stops.
+	// Naming the condition is the whole job of this badge.
+	if (holding) return `${fg(C.fillOk)}●${fg(C.label)} ${bold}holding awake${R}${fg(C.fillOk)} · work in progress${R}`
+	if (armed) return `${fg(C.screenEdit)}◐${fg(C.label)} awake ${bold}when working${R}${fg(C.screenEdit)} · idle, may sleep${R}`
+	return `${fg(C.fillWarn)}○${fg(C.label)} ${bold}sleeps normally${R}${fg(C.fillWarn)} · never held${R}`
 }
 
 export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }) {
@@ -113,17 +117,25 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 	return clip(left, total)
 }
 
-export function footer(total: number, hidden: number, faultsOnly: boolean, mode: string, awakeArmed = true) {
-	const bits = [
-		'↑↓ move',
-		'⏎ jump to tab',
-		`f ${faultsOnly ? 'all' : 'faults'}`,
-		`tab ${mode}`,
-		// what the key DOES, not what the state is — the header already says the state
-		`a awake ${awakeArmed ? 'off' : 'on'}`,
-		'r redraw',
-		'q quit',
-	]
+export function footer(
+	total: number,
+	hidden: number,
+	faultsOnly: boolean,
+	mode: string,
+	awake: { armed: boolean; holding: boolean } = { armed: true, holding: false },
+) {
+	// `a awake on` read as a claim that awake WAS on, when it meant "press this to
+	// turn it on" — the exact opposite of the truth. Every other hint here names an
+	// action, so this one does too, and it carries the state colour because the
+	// footer is where you are looking when you reach for the key.
+	const dot = awake.holding ? C.fillOk : awake.armed ? C.screenEdit : C.fillWarn
+	const glyph = awake.holding ? '●' : awake.armed ? '◐' : '○'
+	const verb = awake.armed ? 'allow sleep' : 'keep awake'
+	const awakeHint = `${fg(C.faint)}a ${fg(dot)}${glyph} ${verb}${R}`
+
+	const bits = ['↑↓ move', '⏎ jump to tab', `f ${faultsOnly ? 'all' : 'faults'}`, `tab ${mode}`]
+	const tailBits = ['r redraw', 'q quit']
+	const line = `${fg(C.faint)} ${bits.join('  ·  ')}  ·  ${R}${awakeHint}${fg(C.faint)}  ·  ${tailBits.join('  ·  ')}${R}`
 	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
-	return clip(`${fg(C.faint)} ${bits.join('  ·  ')}${R}${tail}`, total)
+	return clip(`${line}${tail}`, total)
 }
