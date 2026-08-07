@@ -53,9 +53,8 @@ const cv = new Canvas(COLS, townRows * 2)
 const office = new Office(seeded(7))
 office.fit(cv.w, cv.h, sessions)
 office.assign(sessions)
-// let the room settle so the idle characters are at facilities rather than
-// standing on their spawn tiles, which is not what it looks like in use
-for (let i = 0; i < 900; i++) office.update(1 / 30, sessions)
+// the same settle the app does on launch, so the picture matches a real start
+office.settle(sessions)
 office.vertical = true
 const placed = office.draw(cv, sessions)
 office.vertical = true

@@ -25,6 +25,24 @@ import {
 import { RoomBase } from './room.ts'
 
 export class SimBase extends RoomBase {
+	/**
+	 * Run the room forward until it looks lived-in, before anyone sees it.
+	 *
+	 * Characters are born at their desk — that is where a session's identity is —
+	 * so the first frame of a fresh launch had everyone standing in a chair,
+	 * including the eight of ten who were parked. They walk off within seconds, but
+	 * the opening image is the one that gets believed, and "everyone is at their
+	 * computer" is the single most misleading thing this room can say.
+	 *
+	 * Twenty seconds of simulation is where the walking stops: measured, 600 ticks
+	 * leaves nobody mid-path and only the desk-bound five in a seat. It costs ~50ms
+	 * once, which is invisible next to the poll that produced the sessions.
+	 */
+	settle(sessions: Session[], seconds = 20) {
+		const step = 1 / 30
+		for (let i = 0; i < Math.round(seconds / step); i++) this.update(step, sessions)
+	}
+
 	update(dt: number, sessions: Session[]) {
 		this.ballT += dt * 1.6
 		const byId = new Map(sessions.map((s) => [s.id, s]))

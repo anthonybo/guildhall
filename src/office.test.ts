@@ -328,3 +328,24 @@ test('nobody ends up standing back to back', () => {
 		}
 	}
 })
+
+test('a fresh room does not open with everyone at their computer', () => {
+	// The opening frame is the one that gets believed, and it used to claim every
+	// session was hard at work: spawn() hardcoded `type` at a desk regardless of
+	// what the session was doing, so launching with eight parked sessions drew
+	// eight people typing. They wandered off within seconds, but by then the wrong
+	// impression was made. Only sessions that belong at a desk start in one.
+	const list = [session('a', 'alpha', 'working'), session('b', 'beta', 'needs'), session('c', 'gamma', 'parked'), session('d', 'delta', 'done'), session('e', 'eps', 'parked')]
+	const { office } = room(list)
+	office.assign(list)
+	const typing = () => [...office.chars.values()].filter((c) => c.state === 'type').length
+	// working and needs belong at a desk; parked and done do not
+	assert.equal(typing(), 2, 'someone who is not at their desk was drawn typing on the first frame')
+
+	// and settling leaves nobody mid-stride, so the first paint is a still room
+	office.settle(list)
+	assert.equal(typing(), 2, 'settling changed who is working')
+	assert.equal([...office.chars.values()].filter((c) => c.state === 'walk').length, 0, 'the room opened with someone mid-walk')
+	// the desks stay owned either way: a desk is the project's identity, not a chair
+	assert.equal([...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken).length, list.length)
+})

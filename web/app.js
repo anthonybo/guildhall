@@ -913,12 +913,26 @@ var RoomBase = class {
     }
     return best;
   }
-  /** Born in the chair, working — the reference does the same, and starting at
-   *  a doorway meant nobody was at a desk for the first minute. */
+  /**
+   * Born where this session would already be, not always in the chair.
+   *
+   * Everyone used to spawn typing at a desk regardless of what their session was
+   * doing, so launching with eight parked sessions and two working ones drew ten
+   * people hard at work — the room's single most important claim, and it was
+   * false for about a minute until they all got up and wandered off. Starting at
+   * a doorway was the older mistake in the other direction; the answer to both is
+   * to start in the state the session is actually in.
+   *
+   * The seat is still claimed either way. A desk is the project's identity — its
+   * nameplate, its level badge, its carpet — and giving it up because nobody is
+   * sitting there would empty the room of exactly the information it exists to
+   * show. The character simply is not in it.
+   */
   spawn(s, seat) {
-    return {
+    const working = this.atDesk(s);
+    const ch = {
       id: s.id,
-      state: "type",
+      state: working ? "type" : "idle",
       dir: seat.facing,
       x: seat.col * TILE + TILE / 2,
       y: seat.row * TILE + TILE / 2,
@@ -928,15 +942,18 @@ var RoomBase = class {
       progress: 0,
       frame: 0,
       frameTimer: 0,
+      // zero, so somebody who is not working leaves on the very first tick
+      // instead of sitting there for the usual two-to-twelve second pause
       idleTimer: 0,
       seatTimer: 0,
       seatId: seat.id,
       activity: null,
-      wasWorking: true,
+      wasWorking: working,
       chatWanted: false,
       bubble: null,
       bubbleTimer: 0
     };
+    return ch;
   }
   /* ───────────────────── simulation ───────────────────── */
   /** Blocked on your approval is still mid-turn, so it stays at the desk. */
@@ -990,6 +1007,23 @@ var RoomBase = class {
 
 // src/office/sim.ts
 var SimBase = class extends RoomBase {
+  /**
+   * Run the room forward until it looks lived-in, before anyone sees it.
+   *
+   * Characters are born at their desk — that is where a session's identity is —
+   * so the first frame of a fresh launch had everyone standing in a chair,
+   * including the eight of ten who were parked. They walk off within seconds, but
+   * the opening image is the one that gets believed, and "everyone is at their
+   * computer" is the single most misleading thing this room can say.
+   *
+   * Twenty seconds of simulation is where the walking stops: measured, 600 ticks
+   * leaves nobody mid-path and only the desk-bound five in a seat. It costs ~50ms
+   * once, which is invisible next to the poll that produced the sessions.
+   */
+  settle(sessions2, seconds = 20) {
+    const step = 1 / 30;
+    for (let i = 0; i < Math.round(seconds / step); i++) this.update(step, sessions2);
+  }
   update(dt, sessions2) {
     this.ballT += dt * 1.6;
     const byId = new Map(sessions2.map((s) => [s.id, s]));
@@ -2222,6 +2256,7 @@ function roomSize(n) {
   const tileRows = Math.max(24, Math.min(34, bands * 4 + 12));
   return { cols, rows: tileRows * 2 };
 }
+var settled = false;
 function ensureOffice(list) {
   const { cols, rows } = roomSize(list.length);
   if (!cv || cv.w !== cols || cv.rows !== rows) {
@@ -2230,6 +2265,10 @@ function ensureOffice(list) {
     office.fit(cv.w, cv.h, list);
   }
   office.assign(list);
+  if (!settled && list.length) {
+    settled = true;
+    office.settle(list);
+  }
   return office;
 }
 var last = performance.now();
