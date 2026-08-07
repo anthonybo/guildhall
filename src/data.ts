@@ -37,18 +37,22 @@ export function xpOf(d: { revs?: number; files?: number; subs?: number; turns?: 
 }
 
 /**
- * Level n costs 2n^2 XP.
+ * Level n costs n^3 / 3 XP.
  *
- * The first cut used Pokemon's "Medium Fast" n^3, which is tuned for a game that
- * ends at 100 and deliberately makes the last levels brutal. Against real session
- * data it did the opposite of its job: the busiest session reached 19 while four
- * mid-sized ones all tied at 10-11, because a cubic curve compresses everything
- * above the knee into a handful of ranks. A quadratic still costs more per level
- * (rank 60 is 4x the work of rank 30) but keeps the ranks apart where the data
- * actually lives, and puts a realistic ceiling near 99 rather than near 20.
+ * Both earlier attempts fitted the curve to a snapshot of the current sessions,
+ * which is the wrong anchor: what decides whether a ceiling is reachable is how
+ * fast a session accumulates. Measured over real transcript lifetimes, the
+ * heaviest session here sustains ~572 XP/day. Anchoring to that rate:
+ *
+ *     1 day -> 11    1 month -> 37    6 months -> 67    ~1.5 years -> 99
+ *     1 week -> 22   3 months -> 53   1 year -> 85
+ *
+ * A cube root is what satisfies both ends — plain n^3 had the right shape and the
+ * wrong scale, reading 19 where it should read 27. Dividing by 3 fixes the scale
+ * without flattening the curve into the no-headroom quadratic that replaced it.
  */
-export const xpForLevel = (n: number) => 2 * n ** 2
-export const levelFor = (xp: number) => Math.max(1, Math.min(99, Math.floor(Math.sqrt(xp / 2))))
+export const xpForLevel = (n: number) => n ** 3 / 3
+export const levelFor = (xp: number) => Math.max(1, Math.min(99, Math.floor(Math.cbrt(xp * 3))))
 
 export const RANK: Record<State, number> = { error: 0, needs: 1, working: 2, shell: 3, review: 4, done: 5, parked: 6 }
 
