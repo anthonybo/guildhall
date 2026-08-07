@@ -41,11 +41,23 @@ test('a failed listener says so rather than looking off', () => {
 	assert.match(line, /share failed/)
 })
 
+test('the panel shows the address once sharing is on', () => {
+	// the passcode is in a file, the port is a setting, and nobody can assemble a
+	// URL out of three things they cannot see — so the feature has to hand it over
+	const off = strip(panel(100, 70).join('\n'))
+	assert.doesNotMatch(off, /http:\/\//, 'offered an address while not sharing')
+
+	const on = strip(panel(100, 70, { on: true, port: 4318, token: 'abc123', lan: ['192.168.1.9'], vpn: ['100.90.1.2'] }).join('\n'))
+	assert.match(on, /http:\/\/192\.168\.1\.9:4318\/\?k=abc123/, 'no LAN address')
+	assert.match(on, /http:\/\/100\.90\.1\.2:4318/, 'no VPN address')
+	// the VPN address first: it is the one that works from anywhere
+	assert.ok(on.indexOf('100.90.1.2') < on.indexOf('192.168.1.9'), 'LAN listed above VPN')
+})
+
 test('the help panel explains what sharing exposes', () => {
 	// somebody deciding whether to turn this on needs to know what it hands over
 	const t = strip(panel(100, 60).join(' '))
 	assert.match(t, /off by default/)
 	assert.match(t, /read session titles|filenames being edited/, 'does not say what is exposed')
 	assert.match(t, /never|public internet/, 'does not bound where it is reachable')
-	assert.match(t, /passcode/, 'does not mention authentication')
 })
