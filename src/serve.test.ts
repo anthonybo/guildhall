@@ -29,13 +29,28 @@ test('sharing is off unless someone turned it on', () => {
 	assert.equal(serve, false)
 })
 
+test('identity survives however tight the header gets', () => {
+	// Making the right half win was right, but taken absolutely it ate the header:
+	// two full-sentence badges are ~56 columns, so on a split pane the name and
+	// version vanished entirely. Badges shrink, then drop; identity never does.
+	const s = demoSessions()
+	for (const w of [150, 120, 100, 84, 76, 64, 52, 40]) {
+		const line = strip(summary(s, w, { armed: true, holding: false }, '0.2.12', { on: true, port: 4318 }))
+		assert.match(line, /GUILDHALL/, `lost the name at ${w}`)
+		assert.match(line, /v0\.2\.12/, `lost the version at ${w}`)
+		assert.ok(line.length <= w, `overflowed ${w}`)
+	}
+})
+
 test('the sharing badge is never the first thing a narrow header drops', () => {
 	// it was: the header was one string clipped from the end, so "this machine is
 	// answering on the network" vanished before the status counts did
 	const s = demoSessions()
 	for (const w of [150, 120, 100, 80, 60]) {
 		const line = strip(summary(s, w, { armed: true, holding: true }, '', { on: true, port: 4318 }))
-		assert.match(line, /sharing/, `lost the sharing badge at ${w} columns`)
+		// full at width, abbreviated when tight — but never absent, because an open
+		// listener is the one thing a small screen must still admit to
+		assert.match(line, /sharing|◉/, `lost the sharing badge at ${w} columns`)
 		assert.ok(line.length <= w, `header overflowed ${w}`)
 	}
 })
