@@ -90,6 +90,8 @@ function roomSize(n: number) {
 	return { cols, rows: tileRows * 2 }
 }
 
+let settled = false
+
 function ensureOffice(list: Session[]) {
 	const { cols, rows } = roomSize(list.length)
 	if (!cv || cv.w !== cols || cv.rows !== rows) {
@@ -98,6 +100,12 @@ function ensureOffice(list: Session[]) {
 		office.fit(cv.w, cv.h, list)
 	}
 	office!.assign(list)
+	// Once, on the first paint. Otherwise a browser resize would teleport everyone
+	// mid-stride, and the room is on screen while it happens here.
+	if (!settled && list.length) {
+		settled = true
+		office!.settle(list)
+	}
 	return office!
 }
 

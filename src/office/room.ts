@@ -262,12 +262,34 @@ export class RoomBase {
 		return best
 	}
 
-	/** Born in the chair, working — the reference does the same, and starting at
-	 *  a doorway meant nobody was at a desk for the first minute. */
+	/**
+	 * Born where this session would already be, not always in the chair.
+	 *
+	 * Everyone used to spawn typing at a desk regardless of what their session was
+	 * doing, so launching with eight parked sessions and two working ones drew ten
+	 * people hard at work — the room's single most important claim, and it was
+	 * false for about a minute until they all got up and wandered off. Starting at
+	 * a doorway was the older mistake in the other direction; the answer to both is
+	 * to start in the state the session is actually in.
+	 *
+	 * The seat is still claimed either way. A desk is the project's identity — its
+	 * nameplate, its level badge, its carpet — and giving it up because nobody is
+	 * sitting there would empty the room of exactly the information it exists to
+	 * show. The character simply is not in it.
+	 */
 	protected spawn(s: Session, seat: Spot): Character {
-		return {
+		// atDesk, not a state list of its own: it also counts `needs`, because a
+		// session blocked on a question is sitting there with the question on screen
+		// and a placard beside it. Spelling the rule out again here sent those two
+		// characters off to the kitchen on the first tick and straight back on the
+		// next, which is worse than the bug being fixed.
+		const working = this.atDesk(s)
+		// idle at the desk rather than at a facility: picking one here would have to
+		// duplicate the broker's rules about pairs and groups, and the first update
+		// tick sends them off anyway with the walk that makes it read as a room
+		const ch: Character = {
 			id: s.id,
-			state: 'type',
+			state: working ? 'type' : 'idle',
 			dir: seat.facing,
 			x: seat.col * TILE + TILE / 2,
 			y: seat.row * TILE + TILE / 2,
@@ -277,15 +299,18 @@ export class RoomBase {
 			progress: 0,
 			frame: 0,
 			frameTimer: 0,
+			// zero, so somebody who is not working leaves on the very first tick
+			// instead of sitting there for the usual two-to-twelve second pause
 			idleTimer: 0,
 			seatTimer: 0,
 			seatId: seat.id,
 			activity: null,
-			wasWorking: true,
+			wasWorking: working,
 			chatWanted: false,
 			bubble: null,
 			bubbleTimer: 0,
 		}
+		return ch
 	}
 
 	/* ───────────────────── simulation ───────────────────── */

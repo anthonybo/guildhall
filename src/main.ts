@@ -320,7 +320,14 @@ function layout() {
 	}
 	geom = { cols, rows, townRows, tableRows }
 	office.assign(list)
+	// Only the first time. A re-layout must never re-settle: it would teleport
+	// everyone mid-stride every time the window changed size.
+	if (!settled && list.length) {
+		settled = true
+		office.settle(list)
+	}
 }
+let settled = false
 
 /** Render the current state. Draws only — advancing the animation is separate. */
 function draw() {
