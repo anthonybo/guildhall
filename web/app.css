@@ -65,9 +65,18 @@ body {
 	color: var(--muted);
 	min-width: 0;
 }
+.counts > span {
+	/* a count is one unbreakable phrase: "1 working" splitting across lines turned
+	   the header into three rows of half-sentences on a phone */
+	white-space: nowrap;
+}
 .counts b {
 	color: var(--label);
 	font-weight: 400;
+}
+.counts i {
+	color: var(--label);
+	font-style: normal;
 }
 .link {
 	margin-left: auto;
@@ -169,6 +178,28 @@ body {
 	margin-top: 0.9rem;
 	padding-top: 0.75rem;
 	border-top: 1px solid var(--line);
+}
+
+/* ── stale feed ── */
+
+/*
+ * The numbers are real but old. Dimming them is the point: it has to be visible
+ * at a glance that this is a photograph and not a window, without hiding the
+ * information — what it looked like an hour ago is still worth something.
+ */
+.offline {
+	margin: 0;
+	padding: 0.65rem 0.9rem;
+	background: color-mix(in srgb, var(--gold) 12%, var(--bg));
+	border-bottom: 1px solid color-mix(in srgb, var(--gold) 35%, var(--line));
+	color: var(--gold);
+	font-size: 0.78rem;
+	line-height: 1.45;
+}
+body.stale .list,
+body.stale #room {
+	opacity: 0.55;
+	filter: saturate(0.6);
 }
 
 /* ── the room ── */
@@ -355,6 +386,45 @@ body {
 @media (max-width: 720px) {
 	#room {
 		display: none !important;
+	}
+}
+
+/*
+ * Phone header.
+ *
+ * Everything competes for one line and there is not one line's worth of room, so
+ * decide what goes rather than let the browser wrap mid-phrase. The counts keep
+ * their glyph and number — which is the reading — and lose the word. The commit
+ * hash goes entirely: nobody identifies a build from a phone. What stays is the
+ * name, the version, the status counts, and whether the feed is live.
+ */
+@media (max-width: 560px) {
+	#bar {
+		flex-wrap: wrap;
+		gap: 0.5rem;
+		padding: 0.5rem 0.7rem;
+	}
+	/* Its own row. Six counts cannot share a line with the wordmark, the version
+	   and the connection dot on a phone, and squeezing them onto one wrapped the
+	   header to three ragged rows. Two clean rows beat three ragged ones. */
+	.counts {
+		order: 3;
+		flex-basis: 100%;
+		gap: 0.7rem;
+		font-size: 0.82rem;
+	}
+	.counts i {
+		display: none;
+	}
+	.ver .build {
+		display: none;
+	}
+	.link {
+		font-size: 0;
+	}
+	.link::before {
+		font-size: 0.9rem;
+		margin: 0;
 	}
 }
 

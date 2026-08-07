@@ -2191,6 +2191,7 @@ var emptyEl = $("#empty");
 var roomEl = $("#room");
 var canvas = $("#canvas");
 var stampEl = $("#stamp");
+var offlineEl = $("#offline");
 var ctx2d = canvas.getContext("2d");
 var buffer = document.createElement("canvas");
 var bufferCtx = buffer.getContext("2d");
@@ -2198,6 +2199,8 @@ var sessions = [];
 var office = null;
 var cv = null;
 var sheetsReady = false;
+var seenAt = 0;
+var live = false;
 async function loadSheets() {
   const imgs = [];
   for (let i = 0; i < 6; i++) {
@@ -2428,8 +2431,10 @@ function paintCounts(list) {
       el.style.color = rgb(LOOK[k].color);
       el.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("b");
-      n.textContent = `${counts[k]} ${LOOK[k].label}`;
-      el.append(n);
+      n.textContent = String(counts[k]);
+      const word2 = document.createElement("i");
+      word2.textContent = ` ${LOOK[k].label}`;
+      el.append(n, word2);
       return el;
     })
   );
@@ -2437,35 +2442,80 @@ function paintCounts(list) {
 function apply(data) {
   sessions = data.sessions;
   if (data.version) {
-    bar.ver.textContent = (data.update ? "\u21E1 v" : "v") + data.version;
+    const [num, commit] = data.version.split(" \xB7 ");
+    const build = document.createElement("span");
+    build.className = "build";
+    build.textContent = commit ? ` \xB7 ${commit}` : "";
+    bar.ver.replaceChildren((data.update ? "\u21E1 v" : "v") + num, build);
     bar.ver.classList.toggle("newer", !!data.update);
     bar.ver.title = data.update ? `v${data.update} is available` : "";
   }
   showRoom();
   paintCounts(sessions);
   paintList(sessions);
-  stampEl.textContent = `${sessions.length} session${sessions.length === 1 ? "" : "s"} \xB7 updated ${new Date(data.at).toLocaleTimeString()}`;
+  seenAt = Date.now();
+  freshness();
+}
+function freshness() {
+  if (!seenAt) return;
+  const age = Date.now() - seenAt;
+  const n = sessions.length;
+  const when = age < 6e4 ? "moments ago" : `${ago(age)} ago`;
+  stampEl.textContent = `${n} session${n === 1 ? "" : "s"} \xB7 updated ${when}`;
+  const stale = !live && age > 2e4;
+  document.body.classList.toggle("stale", stale);
+  offlineEl.hidden = !stale;
+  if (stale) offlineEl.textContent = `Not receiving updates \u2014 the machine is asleep or unreachable. This is how it looked ${when}.`;
 }
 function connect() {
-  let failures = 0;
-  const es = new EventSource("/api/stream");
-  es.onopen = () => {
-    failures = 0;
-    bar.link.className = "link live";
-    bar.link.textContent = "live";
+  let es = null;
+  let delay = 1e3;
+  let timer = 0;
+  const retry = () => {
+    clearTimeout(timer);
+    timer = setTimeout(probe, delay);
+    delay = Math.min(delay * 2, 3e4);
   };
-  es.onmessage = (e) => {
-    failures = 0;
-    apply(JSON.parse(e.data));
+  const probe = async () => {
+    try {
+      const r = await fetch("/api/sessions", { cache: "no-store" });
+      if (r.status === 401) return location.reload();
+      return open();
+    } catch {
+    }
+    retry();
   };
-  es.onerror = () => {
-    bar.link.className = "link down";
-    bar.link.textContent = "reconnecting";
-    if (++failures >= 4) location.reload();
-  };
+  function open() {
+    es?.close();
+    delay = 1e3;
+    es = new EventSource("/api/stream");
+    es.onopen = () => {
+      live = true;
+      bar.link.className = "link live";
+      bar.link.textContent = "live";
+      freshness();
+    };
+    es.onmessage = (e) => {
+      live = true;
+      apply(JSON.parse(e.data));
+    };
+    es.onerror = () => {
+      live = false;
+      bar.link.className = "link down";
+      bar.link.textContent = "offline";
+      es?.close();
+      es = null;
+      freshness();
+      retry();
+    };
+  }
+  open();
+  return { probe: () => (delay = 1e3, probe()) };
 }
 document.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "visible" && bar.link.classList.contains("down")) location.reload();
+  if (document.visibilityState !== "visible") return;
+  freshness();
+  if (!live) feed.probe();
 });
 addEventListener("resize", () => {
   showRoom();
@@ -2481,5 +2531,6 @@ mountSettings($("#gear"), $("#settings"), () => {
 loadSheets().catch(() => {
   sheetsReady = false;
 });
-connect();
+var feed = connect();
+setInterval(freshness, 1e3);
 requestAnimationFrame(frame);
