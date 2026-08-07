@@ -40,3 +40,11 @@ test('the footer advertises the help key', () => {
 	// a help key nobody can find is not a help key
 	assert.match(strip(footer(120, 0, false, 'split')), /\? help/)
 })
+
+test('the help hint is the last thing a narrow terminal loses', () => {
+	// the footer is clipped from the right, so a hint at the tail vanishes exactly
+	// when someone on a small screen most needs to know how to ask what this means
+	for (const w of [130, 100, 80, 60, 46, 30]) {
+		assert.match(strip(footer(w, 0, false, 'split')), /\? help/, `lost the help hint at ${w} columns`)
+	}
+})

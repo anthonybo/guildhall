@@ -198,7 +198,14 @@ export function demux(input: string) {
 			/^\x1b_[\s\S]*\x1b\\$/.test(tail) || // APC, terminated
 			/^\x1b\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]$/.test(tail) || // CSI, terminated
 			/^\x1b[O][\x40-\x7e]$/.test(tail) || // SS3 function key
-			/^\x1b(?![[O])[\x30-\x7e]$/.test(tail) // a bare two-byte escape, but `[` and `O` introduce more
+			/^\x1b(?![[O])[\x30-\x7e]$/.test(tail) || // a bare two-byte escape, but `[` and `O` introduce more
+			// A lone ESC is the Escape key, not the start of something. Holding it
+			// meant Escape never arrived until another key followed — and worse, the
+			// held byte then prefixed that key, so `ESC` then `?` reached the handler
+			// as one unrecognised two-byte string and both were swallowed. Terminals
+			// write a sequence in one go, so an ESC alone at the end of a read is a
+			// keypress; the cost of being wrong is one stray Escape.
+			tail === ESC
 		// never hold indefinitely: an escape we do not understand must still reach
 		// the key handler rather than silently eating everything typed after it
 		if (!done && tail.length < 32) return { keys: s.slice(0, cut), rest: tail, lost }

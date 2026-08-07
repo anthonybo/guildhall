@@ -151,10 +151,13 @@ export function footer(
 	const verb = awake.armed ? 'allow sleep' : 'keep awake'
 	const awakeHint = `${fg(C.faint)}a ${fg(dot)}${glyph} ${verb}${R}`
 
+	// `?` comes FIRST, in gold. The line is clipped from the right, so anything at
+	// the tail is what a narrow terminal loses — and the hint for "how do I find
+	// out what any of this means" is the last thing that should disappear.
 	const bits = ['↑↓ move', '⏎ jump to tab', `f ${faultsOnly ? 'all' : 'faults'}`, `tab ${mode}`]
-	// `?` leads the tail in gold: a help key nobody can find is not a help key
-	const tailBits = [`${fg(C.gold)}? help${fg(C.faint)}`, 'q quit']
-	const line = `${fg(C.faint)} ${bits.join('  ·  ')}  ·  ${R}${awakeHint}${fg(C.faint)}  ·  ${tailBits.join('  ·  ')}${R}`
+	const tailBits = ['r redraw', 'q quit']
+	const line =
+		` ${bold}${fg(C.gold)}? help${R}${fg(C.faint)}  ·  ${bits.join('  ·  ')}  ·  ${R}${awakeHint}${fg(C.faint)}  ·  ${tailBits.join('  ·  ')}${R}`
 	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
 	return clip(`${line}${tail}`, total)
 }
