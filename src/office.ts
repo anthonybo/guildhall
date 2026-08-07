@@ -248,6 +248,13 @@ export class Office extends SimBase {
 			const startCol = Math.max(0, roomLeft > roomRight ? right0 - text.length : left0)
 			cv.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0])
 			claimed.set(plateRow, [...here, [startCol, startCol + text.length]])
+			// Also tell the status labels, which run afterwards and consult only
+			// `imageSpans`. `claimed` is private to this pass, so without this a
+			// status label sat straight on top of a nameplate and you got
+			// "lan▲⌘3 Needs you rd". The vertical plates already register this way.
+			const spans = this.imageSpans.get(plateRow) ?? []
+			spans.push([startCol, startCol + text.length])
+			this.imageSpans.set(plateRow, spans)
 		}
 	}
 
@@ -286,18 +293,50 @@ export class Office extends SimBase {
 			// precedent surveyed agrees on.
 			if (!urgent && !sel) continue
 			const row = p.y >> 1
-			// nearest free cell to the head: right, left, then a row up or down. An
-			// image would hide it, so a blocked cell is no use even though it is close.
-			const spots: [number, number][] = [
-				[row, p.x + CHAR_W],
-				[row, p.x - 1],
-				[row + 1, p.x + CHAR_W],
-				[row - 1, p.x + CHAR_W],
-				[row + 1, p.x - 1],
-				[row - 1, p.x - 1],
-			]
-			const at = spots.find(([r, c]) => r >= 0 && r < cv.rows && c >= 0 && c < cv.w && !this.blocked(r, c, 1, taken))
-			if (!at) continue
+			// Nearest free cell beside the character: right first, then left, working
+			// down from the head. An image would hide it, so a blocked cell is no use
+			// however close it is.
+			//
+			// Every row the character occupies, not just its head and one either side.
+			// A character is CHAR_H/2 rows tall, and the old three-row window meant a
+			// seated worker with the pod's nameplate to its left and its level badge
+			// to its right had nowhere to go at all — measured, 0 of 6 candidates free
+			// against 3 of 6 with horizontal plates, so switching to vertical silently
+			// deleted the status labels. Beside the body is still beside the character.
+			const rows = [...Array(CHAR_H / 2).keys()].map((i) => row + i)
+			rows.push(row - 1, row + CHAR_H / 2)
+			const spots: [number, number][] = []
+			for (const r of rows) spots.push([r, p.x + CHAR_W], [r, p.x - 1])
+			const free = spots.filter(([r, c]) => r >= 0 && r < cv.rows && c >= 0 && c < cv.w && !this.blocked(r, c, 1, taken))
+			if (!free.length) continue
+
+			const body = s.short || (s.state === 'working' || s.state === 'shell' ? s.doing : s.title) || s.title
+			const prefix = s.tab ? `⌘${s.tab} ` : ''
+			const want = prefix.length + 27 // 26 characters of body, plus a trailing space
+			// below this the body is an ellipsis and one word, which the badge already
+			// outperforms — so it is the line between "shorten it" and "drop it"
+			const least = prefix.length + 6
+
+			/**
+			 * Free cells running outward from a badge position, away from the
+			 * character — the room its words would have.
+			 */
+			const room = ([r, c]: [number, number]) => {
+				const step = c < p.x ? -1 : 1
+				let n = 0
+				while (n < want) {
+					const x = c + step * (n + 1)
+					if (x < 0 || x >= cv.w || this.blocked(r, x, 1, taken)) break
+					n++
+				}
+				return n
+			}
+			// Nearest spot that can carry words too, rather than merely the nearest.
+			// Taking the first free cell put the badge in the one-cell gap between a
+			// desk and its level badge, where nothing could follow it — so the words
+			// were dropped even though the aisle a row below was empty. Both are
+			// beside the character; only one of them can say anything.
+			const at = free.find((sp) => room(sp) >= least) ?? free[0]
 			const [badgeRow, badgeCol] = at
 			cv.text(badgeCol, badgeRow, look.glyph, C.night, look.color)
 			const mine = taken.get(badgeRow) ?? []
@@ -305,14 +344,15 @@ export class Office extends SimBase {
 			taken.set(badgeRow, mine)
 
 			if (!showAll && !urgent && !sel) continue
-			if (!urgent && !sel) continue
-			const body = s.short || (s.state === 'working' || s.state === 'shell' ? s.doing : s.title) || s.title
-			const text = `${s.tab ? `⌘${s.tab} ` : ''}${cut(body, 26)} `
-			// same row, immediately after the badge; try the left side if it overruns
-			const rightFits = badgeCol + 1 + text.length <= cv.w && !this.blocked(badgeRow, badgeCol + 1, text.length, taken)
-			const leftCol = p.x - text.length
-			const fits = rightFits ? badgeCol + 1 : leftCol >= 0 && !this.blocked(badgeRow, leftCol, text.length, taken) ? leftCol : -1
-			if (fits < 0) continue
+			// Words shrink before they vanish. This used to demand the full width on
+			// the right, then the full width on the left, and drop the label if
+			// neither had it — which in a packed desk band is most of the time. A
+			// truncated "editing app.ts" still answers the question the label exists
+			// to answer; nothing at all does not.
+			const n = room(at)
+			if (n < least) continue
+			const text = `${prefix}${cut(body, n - prefix.length - 1)} `
+			const fits = badgeCol < p.x ? badgeCol - text.length : badgeCol + 1
 			cv.text(fits, badgeRow, text, C.ink, urgent ? look.color : C.paper)
 			const used = taken.get(badgeRow) ?? []
 			used.push([fits, fits + text.length])

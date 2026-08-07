@@ -174,3 +174,57 @@ test('the rally only starts once both players have arrived', () => {
 	}
 	assert.equal(walkingWithBall, 0, 'the ball was drawn before both players arrived')
 })
+
+test('a needy session is labelled with vertical nameplates, not only horizontal ones', () => {
+	// The regression: badge spots were the head row and one row either side, but a
+	// character is CHAR_H/2 rows tall. With the pod's plate on its left and its
+	// level badge on its right, a seated worker had 0 of 6 candidates free and its
+	// label silently vanished — so turning nameplates vertical deleted the very
+	// thing that says what a session is doing. Beside the body is still beside it.
+	const list = [session('a', 'alpha', 'needs'), session('b', 'beta', 'working')]
+	const words = (vertical: boolean) => {
+		const { cv, office } = room(list)
+		office.vertical = vertical
+		office.overlay(cv, office.draw(cv, list), 'b')
+		const out: string[] = []
+		for (let r = 0; r < cv.rows; r++) {
+			let run = ''
+			for (let c = 0; c < cv.w; c++) {
+				const cell = cv.cellAt(c, r)
+				run = cell?.bg ? run + (cell.ch || ' ') : ((out.push(run), ''))
+			}
+			out.push(run)
+		}
+		return out.filter((s) => /[▲●◆✗◍]/.test(s) && s.trim().length > 3)
+	}
+	assert.ok(words(false).length > 0, 'no worded label at all with horizontal plates')
+	// at least as many, not exactly as many: freeing the aisle row that horizontal
+	// nameplates used to occupy means vertical often fits one more, which is fine.
+	// What must never happen again is vertical fitting fewer.
+	assert.ok(words(true).length >= words(false).length, `vertical plates lost a label: ${words(true).length} vs ${words(false).length}`)
+})
+
+test('a status label never sits on top of a horizontal nameplate', () => {
+	// `horizontalPlates` tracked its claims in a local map that `labels` could not
+	// see, so a label drew straight over a nameplate and produced "lan▲⌘3 Needs
+	// you rd". Both now register in imageSpans, which is what blocked() consults.
+	const list = [session('a', 'alpha', 'needs'), session('b', 'beta', 'working'), session('c', 'gamma', 'parked')]
+	const { cv, office } = room(list)
+	office.vertical = false
+	office.overlay(cv, office.draw(cv, list), 'a')
+	for (let r = 0; r < cv.rows; r++) {
+		let run = ''
+		for (let c = 0; c <= cv.w; c++) {
+			const cell = c < cv.w ? cv.cellAt(c, r) : null
+			if (cell?.bg) run += cell.ch || ' '
+			else {
+				// a nameplate is a bare project name; a status label carries a glyph.
+				// One run holding both means they were drawn over each other.
+				const hasGlyph = /[▲●◆✗◍]/.test(run)
+				const names = ['alpha', 'beta', 'gamma'].filter((n) => run.includes(n))
+				assert.ok(!(hasGlyph && names.length), `label and nameplate share a run: ${JSON.stringify(run)}`)
+				run = ''
+			}
+		}
+	}
+})
