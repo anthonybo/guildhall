@@ -41,3 +41,14 @@ test('live sessions land on distinct levels', () => {
 	const levels = list.map((s) => s.level)
 	assert.ok(Math.max(...levels) > Math.min(...levels) + 2, 'every session landed on the same rank')
 })
+
+test('a project name is never a filename or a literal null', () => {
+	for (const s of collect()) {
+		assert.ok(s.proj, 'a session has no project name')
+		assert.ok(!/\.[a-z]{1,4}$/.test(s.proj), `${s.proj} looks like a filename`)
+		assert.notEqual(s.proj, 'null')
+		assert.notEqual(s.proj, 'undefined')
+		// and never the container the session happened to launch from
+		assert.ok(!/^(projects|repos|workspace)$/.test(s.proj), 'named after a container')
+	}
+})
