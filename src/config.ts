@@ -23,11 +23,14 @@ export type Config = {
 	host: string
 	/** how a project's name sits by its desks: down the side, or along the aisle */
 	labels: 'vertical' | 'horizontal'
+	/** hold the display awake too, not just the machine. Off keeps the screen's own
+	 *  sleep timer, which on battery is usually two minutes and usually locks. */
+	awakeDisplay: boolean
 }
 
 // Vertical needs the graphics protocol, since the plate is a rotated image; on a
 // terminal without it the room falls back to horizontal on its own.
-const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical' }
+const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical', awakeDisplay: true }
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
@@ -41,6 +44,7 @@ export function load(): Config {
 			port: Number.isInteger(raw.port) && raw.port! > 0 && raw.port! < 65536 ? raw.port! : DEFAULTS.port,
 			host: typeof raw.host === 'string' && raw.host ? raw.host : DEFAULTS.host,
 			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
+			awakeDisplay: typeof raw.awakeDisplay === 'boolean' ? raw.awakeDisplay : DEFAULTS.awakeDisplay,
 		}
 	} catch {
 		return { ...DEFAULTS }

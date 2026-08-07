@@ -139,7 +139,7 @@ const IMAGES = supportsImages() && !ONCE && !BENCH && !GUARD
 // --once and --bench never hold anything; --demo arms it purely so the
 // documentation image shows the state you actually run in, and the demo never
 // reaches sync() to spawn anything
-awake.configure(!process.argv.includes('--no-awake') && !BENCH && (!ONCE || DEMO))
+awake.configure(!process.argv.includes('--no-awake') && !BENCH && (!ONCE || DEMO), cfg.awakeDisplay)
 
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */

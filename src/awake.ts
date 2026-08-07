@@ -6,11 +6,21 @@
  * their desk" drives a power assertion: it goes up when the first session starts
  * working and comes down when the last one stops.
  *
- * Only real sleep is blocked (-i idle, -m disk, -s system on AC). Display sleep is
- * deliberately left alone — the screen going dark does not interrupt a build, and
- * keeping it lit all night is not what was asked for. The separate business of
- * looking non-idle to the screensaver needs posted HID events and Accessibility
- * permission, which lives in `awake`, not here.
+ * Sleep is blocked with -i (idle), -m (disk) and -s (system, which the kernel
+ * honours only on AC). -d holds the display as well, and that one is a setting.
+ *
+ * Leaving the display out was the original choice, on the reasoning that a dark
+ * screen does not interrupt a build. That reasoning was wrong about what people
+ * actually see: `displaysleep` is commonly two minutes on battery and the screen
+ * lock is commonly immediate, so the machine stayed up exactly as promised while
+ * the display blanked and locked — which reads as the machine ignoring "awake".
+ * It holds the display by default now, and `awakeDisplay: false` restores the
+ * old behaviour for anyone who would rather have the battery.
+ *
+ * Looking non-idle to the screensaver is a different problem again: only a posted
+ * HID event resets HIDIdleTime, which needs Accessibility permission and lives in
+ * `awake`, not here. Holding the display is enough to stop the lock, because the
+ * lock is triggered by the display sleeping rather than by the idle timer.
  *
  * `-w <pid>` makes caffeinate exit on its own if this process dies without
  * running any cleanup, so an assertion can never outlive the app.
@@ -29,13 +39,21 @@ export const holders = (sessions: Session[]) => sessions.filter((s) => BUSY.has(
 
 let assertion: ChildProcess | null = null
 let armed = true
+let holdDisplay = true
 
 /** `--no-awake` at launch, or the `a` key at runtime. Turning it off releases any
  *  assertion at once rather than waiting for the next poll. */
-export function configure(on: boolean) {
+export function configure(on: boolean, display = holdDisplay) {
+	const flagsChanged = display !== holdDisplay
 	armed = on
-	if (!on) release()
+	holdDisplay = display
+	// A live assertion has its flags baked into the running caffeinate, so changing
+	// them has to drop it; the next sync raises a fresh one with the new set.
+	if (!on || flagsChanged) release()
 }
+
+/** Whether the display is held awake too, not just the machine. */
+export const holdsDisplay = () => holdDisplay
 
 /** Armed to hold when someone works — distinct from holding right now. */
 export const isArmed = () => armed
@@ -61,7 +79,7 @@ export function sync(sessions: Session[]) {
 	}
 	if (process.platform !== 'darwin') return false
 	try {
-		assertion = spawn('caffeinate', ['-ims', '-w', String(process.pid)], { stdio: 'ignore' })
+		assertion = spawn('caffeinate', [holdDisplay ? '-dims' : '-ims', '-w', String(process.pid)], { stdio: 'ignore' })
 		assertion.on('error', () => (assertion = null))
 		assertion.on('exit', () => (assertion = null))
 	} catch {
