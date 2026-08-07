@@ -48,6 +48,15 @@ body {
 	font-weight: 700;
 	letter-spacing: 0.06em;
 }
+.ver {
+	color: var(--faint);
+	font-size: 0.78rem;
+	white-space: nowrap;
+}
+.ver.newer {
+	color: #a0eb96;
+}
+
 .counts {
 	display: flex;
 	flex-wrap: wrap;

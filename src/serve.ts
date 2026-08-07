@@ -24,6 +24,8 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { attempt, issue, lockedFor, triesLeft, valid } from './auth.ts'
 import { loginPage } from './login.ts'
+import { BUILD } from './version.ts'
+import { available } from './update.ts'
 import { collect } from './data.ts'
 import { demoSessions } from './demo.ts'
 import type { Session } from './data.ts'
@@ -96,17 +98,20 @@ const MIME: Record<string, string> = {
 
 export function createServer(opts: ServeOptions) {
 	const sessions = () => (opts.demo ? demoSessions() : collect())
+	/** The browser shows the same version and update mark the terminal does, so a
+	 *  stale phone tab is as visible as a stale terminal. */
+	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: BUILD, update: available() })
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 
 	/** Push only when something actually changed — a phone on wifi should not be
 	 *  woken twice a second to be told nothing happened. */
 	function tick() {
-		const payload = JSON.stringify({ sessions: sessions(), at: Date.now() })
-		const body = payload.replace(/"at":\d+/, '') // compare without the timestamp
-		if (body === last) return
-		last = body
-		for (const res of listeners) res.write(`data: ${payload}\n\n`)
+		const body = payload()
+		const same = body.replace(/"at":\d+/, '') // compare without the timestamp
+		if (same === last) return
+		last = same
+		for (const res of listeners) res.write(`data: ${body}\n\n`)
 	}
 	const timer = setInterval(tick, 2000)
 	timer.unref?.()
@@ -149,7 +154,7 @@ export function createServer(opts: ServeOptions) {
 		}
 
 		if (url.pathname === '/api/sessions') {
-			send(res, 200, MIME['.json'], JSON.stringify({ sessions: sessions(), at: Date.now() }))
+			send(res, 200, MIME['.json'], payload())
 			return
 		}
 
@@ -161,7 +166,7 @@ export function createServer(opts: ServeOptions) {
 				// a proxy that buffers turns a live feed into a slideshow
 				'x-accel-buffering': 'no',
 			})
-			res.write(`data: ${JSON.stringify({ sessions: sessions(), at: Date.now() })}\n\n`)
+			res.write(`data: ${payload()}\n\n`)
 			listeners.add(res)
 			// a comment line every 25s, so an idle connection is not reaped by a
 			// phone radio going to sleep or a proxy timing it out

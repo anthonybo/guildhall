@@ -23,7 +23,7 @@ import type { Image } from '../src/png.ts'
 const $ = <T extends Element>(sel: string) => document.querySelector(sel) as T
 const rgb = (c: readonly number[]) => `rgb(${c[0]} ${c[1]} ${c[2]})`
 
-const bar = { counts: $<HTMLElement>('#counts'), link: $<HTMLElement>('#link') }
+const bar = { counts: $<HTMLElement>('#counts'), link: $<HTMLElement>('#link'), ver: $<HTMLElement>('#ver') }
 const listEl = $<HTMLUListElement>('#list')
 const emptyEl = $<HTMLElement>('#empty')
 const roomEl = $<HTMLElement>('#room')
@@ -325,8 +325,15 @@ function paintCounts(list: Session[]) {
 	)
 }
 
-function apply(data: { sessions: Session[]; at: number }) {
+function apply(data: { sessions: Session[]; at: number; version?: string; update?: string | null }) {
 	sessions = data.sessions
+	// same treatment as the terminal: grey when current, and an arrow in the
+	// working colour when something newer exists
+	if (data.version) {
+		bar.ver.textContent = (data.update ? '⇡ v' : 'v') + data.version
+		bar.ver.classList.toggle('newer', !!data.update)
+		bar.ver.title = data.update ? `v${data.update} is available` : ''
+	}
 	roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0
 	paintCounts(sessions)
 	paintList(sessions)

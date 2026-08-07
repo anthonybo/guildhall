@@ -1774,7 +1774,7 @@ function order(list) {
 // web/app.ts
 var $ = (sel) => document.querySelector(sel);
 var rgb = (c) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
-var bar = { counts: $("#counts"), link: $("#link") };
+var bar = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
 var listEl = $("#list");
 var emptyEl = $("#empty");
 var roomEl = $("#room");
@@ -1995,6 +1995,11 @@ function paintCounts(list) {
 }
 function apply(data) {
   sessions = data.sessions;
+  if (data.version) {
+    bar.ver.textContent = (data.update ? "\u21E1 v" : "v") + data.version;
+    bar.ver.classList.toggle("newer", !!data.update);
+    bar.ver.title = data.update ? `v${data.update} is available` : "";
+  }
   roomEl.hidden = window.innerWidth <= 720 || sessions.length === 0;
   paintCounts(sessions);
   paintList(sessions);
