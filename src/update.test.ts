@@ -11,7 +11,10 @@ import path from 'node:path'
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-test-'))
 
 
-import { compare, newestTag } from './update.ts'
+import { available, check, compare, newestTag } from './update.ts'
+
+const cache = () => path.join(process.env.GUILDHALL_CONFIG_DIR!, 'update.json')
+const seed = (latest: string, ageMs: number) => fs.writeFileSync(cache(), JSON.stringify({ at: Date.now() - ageMs, latest }))
 
 test('versions compare by number, not by string', () => {
 	// "0.2.10" < "0.2.9" alphabetically, which is the classic way to miss an update
@@ -37,4 +40,19 @@ test('nothing to report is a valid answer', () => {
 	// worth interrupting someone over
 	assert.equal(newestTag(''), '')
 	assert.equal(newestTag('abc\trefs/heads/main'), '')
+})
+
+test('a cached answer is reported even once it has gone stale', async () => {
+	// The regression: the cache both answered and suppressed the lookup, and only
+	// answered while fresh. So a day-old cache reported nothing AND skipped the
+	// network, and in a repo that ships several versions an afternoon the arrow
+	// never appeared at all. Staleness may gate the lookup; it must not gate the
+	// answer, because "something newer exists" does not stop being true.
+	seed('99.0.0', 26 * 60 * 60 * 1000)
+	const latest = await new Promise<string | null>((resolve) => {
+		check((v) => resolve(v), '/nonexistent-so-the-network-half-cannot-answer')
+		setTimeout(() => resolve(null), 2000)
+	})
+	assert.equal(latest, '99.0.0', 'a stale cache holding a newer version was not reported')
+	assert.equal(available(), '99.0.0')
 })
