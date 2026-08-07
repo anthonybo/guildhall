@@ -127,6 +127,34 @@ Unlike the room, the guard does not exit when no sessions are live — a machine
 with nothing running now is exactly the one that will have something running in
 ten minutes.
 
+## Seeing it from another machine
+
+`s` starts a small read-only web server so your other computers and your phone
+can watch the same room. It is **off by default** and the choice is remembered.
+
+```
+guildhall --serve          # or press s while it is running
+```
+
+The browser runs the same office — same planner, same seating, same behaviour —
+against a JSON feed, so it cannot drift from the terminal. On a phone the room is
+hidden and the list carries everything; the office at 100 columns is a smear on a
+5-inch screen, and "what is the status" is the question a phone is asking.
+
+It answers on your local network and on any VPN interface. Binding to `0.0.0.0`
+already covers a Tailscale address, so LAN today and a tailnet later is the same
+server with nothing to change. It is never on the public internet.
+
+Access needs a passcode, kept in `~/.config/guildhall/token` and printed as part
+of the URL. The token is swapped for a cookie on first load so it does not linger
+in browser history. **Anyone who reaches it can read session titles, the last
+thing each session said, filenames being edited and commands that were run** —
+which is the reason it is off unless you ask for it.
+
+Nothing it serves can change anything. There is no endpoint that writes, on this
+machine or in any session, so the worst case of leaving it on is disclosure, not
+damage.
+
 ## Requirements
 
 - Node 20+

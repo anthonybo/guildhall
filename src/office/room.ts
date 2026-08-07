@@ -7,7 +7,7 @@
  * frames in someone else's chair.
  */
 import { ROOFS, type RGB } from '../theme.ts'
-import { RANK, type Session } from '../data.ts'
+import { RANK, type Session } from '../data/types.ts'
 import type { PropKind } from '../props.ts'
 import {
 	TILE,

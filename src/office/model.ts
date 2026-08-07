@@ -6,7 +6,7 @@
  * tuned without scrolling past the machinery that uses them.
  */
 import type { Facing, Pose } from '../characters.ts'
-import type { Session } from '../data.ts'
+import type { Session } from '../data/types.ts'
 import type { PropKind } from '../props.ts'
 
 /** 4px tiles: a tile is TILE/2 terminal rows, so TILE must stay even or image

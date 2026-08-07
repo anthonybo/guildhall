@@ -10,12 +10,7 @@
  * scale properly against the desks — the earlier creature tiles were square,
  * had no transparency, and had no notion of facing.
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { decodePNG, type Image, type RGB } from './png.ts'
-
-const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../assets/characters')
+import type { Image, RGB } from './png.ts'
 
 export const FRAME_W = 16
 export const FRAME_H = 32
@@ -46,17 +41,9 @@ export function setSheets(imgs: Image[]) {
 	cache.clear()
 }
 
-export function loadSheets() {
-	if (sheets.length) return sheets.length
-	const files = fs
-		.readdirSync(DIR)
-		.filter((f) => /^char_\d+\.png$/.test(f))
-		.sort()
-	for (const f of files) sheets.push(decodePNG(path.join(DIR, f)))
-	return sheets.length
-}
-
-export const paletteCount = () => (sheets.length ? sheets.length : loadSheets())
+/** How many sheets are loaded. Six is the shipped count, and assignLooks needs a
+ *  sensible answer even before they arrive so identities stay stable. */
+export const paletteCount = () => sheets.length || 6
 
 /** Pull one frame out of a sheet as a grid of pixels, transparent where alpha is low. */
 function extract(img: Image, rowIdx: number, frame: number, flip: boolean): Grid {
@@ -183,8 +170,12 @@ function pinBadge(g: Grid, colour: RGB): Grid {
 	return { w: g.w, h: g.h, grid }
 }
 
+const BLANK: Grid = { w: FRAME_W, h: FRAME_H, grid: Array.from({ length: FRAME_H }, () => new Array(FRAME_W).fill(null)) }
+
 export function frameOf(palette: number, hueShift: number, facing: Facing, pose: Pose, step: number, badge?: RGB): Grid {
-	loadSheets()
+	// nothing to draw until sheets are supplied — node loads them from disk, the
+	// browser fetches and decodes them, and neither path belongs in here
+	if (!sheets.length) return BLANK
 	const key = `${palette}:${hueShift}:${facing}:${pose}:${step}:${badge?.join('') ?? ''}`
 	const hit = cache.get(key)
 	if (hit) return hit

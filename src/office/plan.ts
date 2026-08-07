@@ -11,7 +11,7 @@
  * desk above leaves the monitor row clear over their head, which is the only
  * arrangement that shows both the worker's back and their screen.
  */
-import { ROOFS, type RGB } from '../theme.ts'
+import { projectColours, type RGB } from '../theme.ts'
 import { PROP_SIZE, type PropKind } from '../props.ts'
 import { DROP_ORDER, FACILITIES, MAX_RUN, TILE, type Dir, type Kind, type Pod, type Spot } from './model.ts'
 
@@ -60,8 +60,7 @@ export function planRoom(cols: number, rows: number, projects: { name: string; s
 		hiddenCount: 0,
 		dropped: [],
 	}
-	// colour by index over a sorted list: a hash collides long before it runs out
-	;[...new Set(projects.map((p) => p.name))].sort().forEach((name, i) => room.zoneColor.set(name, ROOFS[i % ROOFS.length]))
+	room.zoneColor = projectColours(projects.map((p) => p.name))
 
 	// Row 1 is a gutter carrying each front-row occupant's head and status label,
 	// so nothing may ever be placed there.

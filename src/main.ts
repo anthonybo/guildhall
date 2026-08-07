@@ -29,6 +29,7 @@ import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, shrink } from './characters.ts'
+import { loadSheets } from './sheets.ts'
 import { badge, monitor } from './screens.ts'
 import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
@@ -596,6 +597,7 @@ function guard() {
 }
 
 function main() {
+	loadSheets()
 	sessions = collect()
 	if (GUARD) return guard()
 	if (!sessions.length) {

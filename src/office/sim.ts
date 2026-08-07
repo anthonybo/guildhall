@@ -6,7 +6,7 @@
  * system — its idle agents wander to random floor tiles — but an office where
  * nothing happens away from the desks reads as broken rather than calm.
  */
-import type { Session } from '../data.ts'
+import type { Session } from '../data/types.ts'
 import {
 	CHAT_RADIUS,
 	DONE_BUBBLE_SEC,

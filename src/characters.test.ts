@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { frameOf } from './characters.ts'
 import { TIERS } from './theme.ts'
+import { loadSheets } from './sheets.ts'
+
+// frameOf no longer reads the disk itself, so the sheets have to be supplied —
+// that split is what lets the browser share this module
+loadSheets()
 
 test('the level badge is pinned on the shirt, never floating beside it', () => {
 	for (const pose of ['typing', 'walk', 'reading'] as const) {

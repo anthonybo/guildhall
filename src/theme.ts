@@ -7,7 +7,7 @@
  * only ever used for a gauge track, where shape carries the meaning, because
  * ANSI index 8 has no contrast guarantee across themes.
  */
-import type { State } from './data.ts'
+import type { State } from './data/types.ts'
 
 export type RGB = [number, number, number]
 
@@ -137,6 +137,21 @@ export const ROOFS: RGB[] = [
 	[236, 120, 176],
 	[196, 152, 116],
 ]
+
+/**
+ * A project's colour, assigned by index over a sorted list.
+ *
+ * Shared so the room's carpet, its nameplate and its row in the table or the web
+ * list cannot drift apart — the whole point is that spotting a character upstairs
+ * and finding its row is a colour match. By index rather than by hashing, because
+ * a hash collides long before twelve hues run out, which is how several projects
+ * once ended up sharing one.
+ */
+export function projectColours(names: Iterable<string>) {
+	const out = new Map<string, RGB>()
+	;[...new Set(names)].sort().forEach((name, i) => out.set(name, ROOFS[i % ROOFS.length]))
+	return out
+}
 
 /* ── ansi ── */
 export const R = '\x1b[0m'

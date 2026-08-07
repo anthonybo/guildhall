@@ -5,7 +5,7 @@
  */
 import { Canvas } from '../canvas.ts'
 import { Office } from '../office.ts'
-import type { Session, State } from '../data.ts'
+import type { Session, State } from '../data/types.ts'
 
 /** Seeded LCG so every behavioural test is reproducible. */
 export const seeded = (seed = 12345) => {
