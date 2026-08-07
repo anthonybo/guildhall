@@ -40,6 +40,7 @@ import { BUILD } from './version.ts'
 import * as cfgStore from './config.ts'
 import { addresses, createServer } from './serve.ts'
 import { passcode, setPasscode } from './auth.ts'
+import * as update from './update.ts'
 
 /**
  * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
@@ -657,6 +658,8 @@ function main() {
 		OUT.write(prev.join('\n') + '\n')
 		return
 	}
+	// asked once in the background; the header picks it up whenever it arrives
+	update.check(() => draw())
 	syncServe()
 	alt = true
 	OUT.write('\x1b[?1049h\x1b[?25l' + (IMAGES ? WATCH_ON : ''))
