@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { holders, shouldHold } from './awake.ts'
-import { awakeBadge } from './table.ts'
+import { awakeBadge, footer } from './table.ts'
 import type { Session, State } from './data.ts'
 
 const s = (proj: string, state: State) => ({ proj, state }) as Session
@@ -35,9 +35,12 @@ test('the three awake states are told apart by more than colour', () => {
 	const off = strip(awakeBadge({ armed: false, holding: false }))
 
 	assert.equal(new Set([held, idle, off]).size, 3, 'two states read identically without colour')
-	assert.match(held, /ON/)
-	assert.match(idle, /ON/)
-	assert.match(off, /OFF/)
+	// each must name the CONDITION, not just a switch position: "awake ON" invited
+	// the reading that the machine would never sleep at all
+	assert.match(held, /holding awake/)
+	assert.match(idle, /when working/, 'armed state must say sleep is conditional')
+	assert.match(idle, /may sleep/, 'armed state must admit the machine can sleep now')
+	assert.match(off, /sleeps normally/)
 	// and each carries a distinct glyph
 	assert.equal(new Set([held[0], idle[0], off[0]]).size, 3, 'glyphs collide')
 })
@@ -54,4 +57,25 @@ test('every awake colour is a measured-contrast palette value', () => {
 		assert.doesNotMatch(badge, /38;2;110;118;129/, 'used the faint chrome colour for a status')
 		assert.match(badge, /\x1b\[38;2;\d+;\d+;\d+m/, 'no colour at all')
 	}
+})
+
+test('the footer names the action, never the current state', () => {
+	// `a awake on` read as a claim that awake was already on, when it meant "press
+	// this to turn it on" — so the hint said the opposite of the truth
+	const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+	const whenOn = strip(footer(120, 0, false, 'split', { armed: true, holding: false }))
+	const whenOff = strip(footer(120, 0, false, 'split', { armed: false, holding: false }))
+
+	assert.match(whenOn, /a ◐ allow sleep/, 'armed should offer to allow sleep')
+	assert.match(whenOff, /a ○ keep awake/, 'disarmed should offer to keep awake')
+	// the hint must never assert a state, which is what caused the confusion
+	assert.doesNotMatch(whenOn, /awake on|awake off/)
+	assert.doesNotMatch(whenOff, /awake on|awake off/)
+})
+
+test('the footer carries the state colour, since that is where the key is', () => {
+	const holding = footer(120, 0, false, 'split', { armed: true, holding: true })
+	const off = footer(120, 0, false, 'split', { armed: false, holding: false })
+	assert.match(holding, /38;2;95;175;95/, 'holding is not green in the footer')
+	assert.match(off, /38;2;215;175;95/, 'off is not amber in the footer')
 })

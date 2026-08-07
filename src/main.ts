@@ -286,7 +286,7 @@ function draw() {
 		[
 			T.summary(sessions, cols, awakeState),
 			...body.slice(0, rows),
-			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState.armed),
+			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState),
 		],
 		images,
 	)

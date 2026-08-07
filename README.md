@@ -61,9 +61,24 @@ at level 37 and a year at 85. See `src/data/score.ts`.
 
 While any session is mid-task, guildhall holds a power assertion
 (`caffeinate -ims`) so a long build is not lost to a sleeping laptop. It lets go
-when the last one stops. Display sleep is left alone — a dark screen does not
-interrupt a build. Sessions *waiting on you* deliberately do not qualify, or the
-machine would never sleep again.
+when the last one stops.
+
+It is **conditional, not a permanent hold**. Enabled means "do not sleep while
+something is working", not "never sleep" — with nothing running, your machine
+sleeps on its normal schedule. The header says which of the three you are in:
+
+| | |
+| --- | --- |
+| `● holding awake · work in progress` | something is working, sleep blocked |
+| `◐ awake when working · idle, may sleep` | enabled, nothing running, free to sleep |
+| `○ sleeps normally · never held` | disabled |
+
+Two limits: the **display still sleeps** — a dark screen does not interrupt a
+build, so only system sleep is blocked — and **closing the lid still sleeps the
+machine**, which no power assertion can override.
+
+Sessions *waiting on you* deliberately do not qualify. Holding the machine open
+for a session that is waiting on a human would mean never sleeping again.
 
 Press `a` to arm or disarm it at any time; disarming releases the assertion
 immediately. The header shows which of the three states you are in — holding,
