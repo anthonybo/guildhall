@@ -1,6 +1,6 @@
 {
 	"name": "guildhall",
-	"version": "0.2.26",
+	"version": "0.2.27",
 	"private": true,
 	"type": "module",
 	"description": "A pixel town of every live Claude Code session, in the terminal",
