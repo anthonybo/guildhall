@@ -333,7 +333,7 @@ function draw() {
 				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
-		office.overlay(cv, placed, selectedId ?? undefined, labels)
+		office.overlay(cv, placed, selectedId ?? undefined, labels, cfg.labels === 'vertical')
 		townLines = cv.render()
 		// furniture first, then monitors, then people on top of both
 		if (IMAGES) images = drawProps() + drawMonitors() + drawImages(placed)
@@ -541,6 +541,12 @@ function onKey(b: Buffer) {
 		prev = []
 		eraseDisplay()
 		layout()
+	} else if (k === 'v') {
+		// the room re-reads this every frame, so nothing needs re-planning
+		cfg.labels = cfg.labels === 'vertical' ? 'horizontal' : 'vertical'
+		cfgStore.save(cfg)
+		prev = []
+		eraseDisplay()
 	} else if (k === 'l') {
 		labels = !labels
 	} else if (k === 's') {

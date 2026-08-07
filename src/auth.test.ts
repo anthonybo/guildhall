@@ -97,3 +97,19 @@ test('changing the passcode signs every device out', () => {
 	assert.equal(valid(id), false, 'an old session survived the change')
 	assert.equal(passcode(), '7391')
 })
+
+test('a session survives the server restarting', () => {
+	// Sessions were kept in memory, so every restart signed every device out and
+	// the phone was back at the passcode — not because anything expired, but
+	// because the server had forgotten. A signed cookie has nothing to forget.
+	const id = issue()
+	assert.equal(valid(id), true)
+
+	// a "restart" is a fresh module with the same config directory, which is
+	// exactly what a new process sees
+	return import(`./auth.ts?restart=${Math.random()}`).then((fresh: typeof import('./auth.ts')) => {
+		assert.equal(fresh.valid(id), true, 'a restart signed everyone out')
+		assert.equal(fresh.valid(id.slice(0, -1) + 'x'), false, 'a tampered signature was accepted')
+		assert.equal(fresh.valid('nodot'), false)
+	})
+})

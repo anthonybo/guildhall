@@ -168,8 +168,63 @@ export class Office extends SimBase {
 		return id ? (this.spots.get(id)?.posture ?? 'stand') : 'stand'
 	}
 
-	/** Project nameplates and per-character status labels. */
-	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
+	/**
+	 * Project nameplates and per-character status labels.
+	 *
+	 * `vertical` runs the name down the column beside the pod instead of along the
+	 * aisle beneath it. A horizontal plate is as wide as the name, which is what
+	 * forced every long project to truncate and what made neighbouring plates fight
+	 * over the same row; a vertical one costs one column and as many rows as the
+	 * band already has, so the room reads as columns of desks rather than a wall of
+	 * labels.
+	 */
+	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true, vertical = false) {
+		if (!vertical) {
+			this.horizontalPlates(cv)
+			return this.labels(cv, placed, selected, showAll)
+		}
+		// Vertical plates go on LAST. They share a column with the status badges,
+		// and a badge landing mid-name turns "orchard" into "or▲hard" — whereas a
+		// waiting session already carries a "?" placard beside its desk as an image,
+		// so the name is the thing worth protecting.
+		const out = this.labels(cv, placed, selected, showAll)
+		this.verticalPlates(cv)
+		return out
+	}
+
+	/**
+	 * One character per row, in the gap column left of the pod.
+	 *
+	 * The band is eight rows tall, so eight characters fit without touching the
+	 * neighbouring pod at all — which means no claim tracking, no measuring toward
+	 * the next plate, and no possibility of two names colliding.
+	 */
+	private verticalPlates(cv: Canvas) {
+		const named = new Set<string>()
+		for (const pod of this.pods) {
+			if (named.has(pod.proj)) continue
+			named.add(pod.proj)
+			const col = pod.c0 * TILE - 1
+			if (col < 0) continue
+			// Exactly as tall as the workstation it names — monitor, worktop, seat —
+			// and no taller. Running into the aisle made the plate longer than the
+			// desk it belongs to, so it read as a stripe on the floor rather than as
+			// a label attached to something.
+			const top = Math.floor((pod.monitorRow * TILE) / 2)
+			const bottom = Math.floor(((pod.seatRow + 1) * TILE) / 2)
+			const rows = Math.max(0, Math.min(cv.rows, bottom) - top)
+			if (rows < 3) continue
+			const text = cut(pod.proj, rows)
+			const colour = this.zoneColor.get(pod.proj) ?? ROOFS[0]
+			// centred against the desk, so a short name sits level with the monitor
+			const start = top + Math.floor((rows - text.length) / 2)
+			// bold: one glyph per row is spaced by the line height, and at regular
+			// weight that reads as scattered dots rather than as a word
+			for (let i = 0; i < text.length; i++) cv.text(col, start + i, text[i], C.ink, colour, true)
+		}
+	}
+
+	private horizontalPlates(cv: Canvas) {
 		const named = new Set<string>()
 		// Cells a nameplate already occupies, per row. Plates are drawn widest-pod
 		// first rather than left to right, and they are allowed to spill past their
@@ -213,6 +268,10 @@ export class Office extends SimBase {
 			cv.text(startCol, plateRow, text, C.ink, this.zoneColor.get(pod.proj) ?? ROOFS[0])
 			claimed.set(plateRow, [...here, [startCol, startCol + text.length]])
 		}
+	}
+
+	/** Per-character status labels, which are the same either way. */
+	private labels(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
 		// Characters are images as well, so their extents have to block text just
 		// like furniture does, or a head gets drawn over a label.
 		for (const p of placed) {

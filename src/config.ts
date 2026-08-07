@@ -21,9 +21,15 @@ export type Config = {
 	/** 0.0.0.0 answers on the LAN and on any VPN interface; 127.0.0.1 is local
 	 *  only, which is what you want when reaching it through a tunnel. */
 	host: string
+	/** how a project's name sits by its desks: down the side, or along the aisle */
+	labels: 'vertical' | 'horizontal'
 }
 
-const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0' }
+// Horizontal until the vertical plate is drawn as an image rather than as text.
+// A terminal cell is about twice as tall as it is wide, so one glyph per row
+// spaces a six-letter name over twelve letter-widths — unreadable, and not
+// something a different font can fix.
+const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'horizontal' }
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
@@ -36,6 +42,7 @@ export function load(): Config {
 			serve: typeof raw.serve === 'boolean' ? raw.serve : DEFAULTS.serve,
 			port: Number.isInteger(raw.port) && raw.port! > 0 && raw.port! < 65536 ? raw.port! : DEFAULTS.port,
 			host: typeof raw.host === 'string' && raw.host ? raw.host : DEFAULTS.host,
+			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
 		}
 	} catch {
 		return { ...DEFAULTS }

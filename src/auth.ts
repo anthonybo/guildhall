@@ -83,7 +83,7 @@ export function setPasscode(code: string): SetResult {
 	} catch {
 		return { ok: false, why: 'could not write the file' }
 	}
-	sessions.clear()
+	rotateSessions()
 	byAddress.clear()
 	return { ok: true }
 }
@@ -96,17 +96,57 @@ const equal = (a: string, b: string) => {
 
 /* ── sessions ── */
 
-/** Issued on a correct code. A long random value, so the code itself is never
- *  stored in a browser and a stolen cookie can be revoked by restarting. */
-const sessions = new Set<string>()
+/**
+ * Sessions are signed, not stored.
+ *
+ * Keeping issued ids in memory meant every restart signed every device out — the
+ * phone was back at the passcode because the server had simply forgotten it, and
+ * a tool you restart while developing it is a tool that logs you out constantly.
+ * A cookie now carries its own proof: a random value plus an HMAC of it, checked
+ * against a key that persists. No server-side list to lose.
+ *
+ * Revocation still works, and is still exactly one thing: rotating the key
+ * invalidates every cookie at once, which is what changing the passcode does.
+ */
+const keyFile = () => path.join(dir(), 'session.key')
 
-export function issue() {
-	const id = crypto.randomBytes(24).toString('base64url')
-	sessions.add(id)
-	return id
+function secret(): Buffer {
+	try {
+		const raw = fs.readFileSync(keyFile())
+		if (raw.length >= 32) return raw
+	} catch {}
+	const key = crypto.randomBytes(32)
+	try {
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(keyFile(), key, { mode: 0o600 })
+	} catch {}
+	return key
 }
 
-export const valid = (id: string | undefined) => !!id && sessions.has(id)
+const sign = (nonce: string) => crypto.createHmac('sha256', secret()).update(nonce).digest('base64url')
+
+export function issue() {
+	const nonce = crypto.randomBytes(18).toString('base64url')
+	return `${nonce}.${sign(nonce)}`
+}
+
+export function valid(id: string | undefined) {
+	if (!id) return false
+	const dot = id.lastIndexOf('.')
+	if (dot <= 0) return false
+	const nonce = id.slice(0, dot)
+	const given = Buffer.from(id.slice(dot + 1))
+	const want = Buffer.from(sign(nonce))
+	return given.length === want.length && crypto.timingSafeEqual(given, want)
+}
+
+/** Sign every device out by making every existing signature unverifiable. */
+function rotateSessions() {
+	try {
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(keyFile(), crypto.randomBytes(32), { mode: 0o600 })
+	} catch {}
+}
 
 /* ── throttle ── */
 
