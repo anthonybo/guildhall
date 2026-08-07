@@ -17,13 +17,23 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-const DIR = path.join(os.homedir(), '.config', 'guildhall')
-const FILE = path.join(DIR, 'passcode')
+/**
+ * Where settings live — resolved on every call, never captured at import.
+ *
+ * GUILDHALL_CONFIG_DIR exists so the tests can point somewhere disposable. They
+ * could not before, and the suite wrote a passcode into the real config: running
+ * `npm test` silently reset whatever code had been chosen, which looked from the
+ * outside like the setting refusing to stick. Reading it lazily is the point —
+ * an ESM import is hoisted, so a constant computed at module load is fixed before
+ * a test file gets the chance to set anything.
+ */
+const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
+const file = () => path.join(dir(), 'passcode')
 
 /** Read the passcode, creating one the first time. Four digits, evenly drawn. */
 export function passcode(): string {
 	try {
-		const existing = fs.readFileSync(FILE, 'utf8').trim()
+		const existing = fs.readFileSync(file(), 'utf8').trim()
 		if (/^\d{4}$/.test(existing)) return existing
 	} catch {}
 	// rejection sampling: `% 10000` over a 16-bit draw would make low codes commoner
@@ -33,13 +43,13 @@ export function passcode(): string {
 	} while (n >= 60000)
 	const code = String(n % 10000).padStart(4, '0')
 	try {
-		fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })
-		fs.writeFileSync(FILE, code + '\n', { mode: 0o600 })
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(file(), code + '\n', { mode: 0o600 })
 	} catch {}
 	return code
 }
 
-export const passcodePath = () => FILE
+export const passcodePath = () => file()
 
 /**
  * Codes common enough that trying them first beats searching.
@@ -68,8 +78,8 @@ export function setPasscode(code: string): SetResult {
 	if (!/^\d{4}$/.test(code)) return { ok: false, why: 'four digits, nothing else' }
 	if (WEAK.has(code)) return { ok: false, why: 'too common — a guesser tries that one first' }
 	try {
-		fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })
-		fs.writeFileSync(FILE, code + '\n', { mode: 0o600 })
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(file(), code + '\n', { mode: 0o600 })
 	} catch {
 		return { ok: false, why: 'could not write the file' }
 	}

@@ -25,12 +25,13 @@ export type Config = {
 
 const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0' }
 
-const DIR = path.join(os.homedir(), '.config', 'guildhall')
-const FILE = path.join(DIR, 'config.json')
+/** Resolved per call so tests can redirect it; see the note in auth.ts. */
+const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
+const file = () => path.join(dir(), 'config.json')
 
 export function load(): Config {
 	try {
-		const raw = JSON.parse(fs.readFileSync(FILE, 'utf8')) as Partial<Config>
+		const raw = JSON.parse(fs.readFileSync(file(), 'utf8')) as Partial<Config>
 		return {
 			serve: typeof raw.serve === 'boolean' ? raw.serve : DEFAULTS.serve,
 			port: Number.isInteger(raw.port) && raw.port! > 0 && raw.port! < 65536 ? raw.port! : DEFAULTS.port,
@@ -43,12 +44,12 @@ export function load(): Config {
 
 export function save(cfg: Config) {
 	try {
-		fs.mkdirSync(DIR, { recursive: true, mode: 0o700 })
-		fs.writeFileSync(FILE, JSON.stringify(cfg, null, '\t') + '\n', { mode: 0o600 })
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(file(), JSON.stringify(cfg, null, '\t') + '\n', { mode: 0o600 })
 		return true
 	} catch {
 		return false
 	}
 }
 
-export const configPath = () => FILE
+export const configPath = () => file()

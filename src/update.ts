@@ -17,7 +17,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { VERSION } from './version.ts'
 
-const CACHE = path.join(os.homedir(), '.config', 'guildhall', 'update.json')
+/** Resolved per call so tests can redirect it; see the note in auth.ts. */
+const cacheFile = () => path.join(process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall'), 'update.json')
 /** Once a day is plenty for a tool you rebuild by hand. */
 const EVERY = 24 * 60 * 60 * 1000
 
@@ -53,7 +54,7 @@ type Cache = { at: number; latest: string }
 
 function readCache(): Cache | null {
 	try {
-		const c = JSON.parse(fs.readFileSync(CACHE, 'utf8')) as Cache
+		const c = JSON.parse(fs.readFileSync(cacheFile(), 'utf8')) as Cache
 		if (typeof c.at === 'number' && typeof c.latest === 'string') return c
 	} catch {}
 	return null
@@ -61,8 +62,8 @@ function readCache(): Cache | null {
 
 function writeCache(latest: string) {
 	try {
-		fs.mkdirSync(path.dirname(CACHE), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(CACHE, JSON.stringify({ at: Date.now(), latest }), { mode: 0o600 })
+		fs.mkdirSync(path.dirname(cacheFile()), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(cacheFile(), JSON.stringify({ at: Date.now(), latest }), { mode: 0o600 })
 	} catch {}
 }
 
