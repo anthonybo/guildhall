@@ -10,14 +10,16 @@
 	"scripts": {
 		"start": "npm run --silent build && node dist/main.mjs",
 		"build": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error",
-		"release": "npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
+		"release": "npm run --silent docs && git add -A docs && (git diff --cached --quiet || git commit -m \"Refresh the documentation images\") && npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"check": "npm run check:types && npm test",
+		"check": "npm run check:types && npm test && npm run check:docs",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",
-		"format": "prettier --write ."
+		"format": "prettier --write .",
+		"docs": "sh tools/make-docs-images.sh",
+		"check:docs": "sh tools/check-docs-images.sh"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

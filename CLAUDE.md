@@ -23,6 +23,13 @@ two features, which made it useless as a signal. Then bumping it by hand left
 **Bump on anything user-facing.** A new flag, a changed key, different wording on
 screen, a behaviour change. Not for refactors or comment edits.
 
+The release regenerates `docs/` first and commits any change, so the README
+picture can never lag the program. `npm run check` fails if the committed images
+no longer match what the code renders — they are byte-for-byte deterministic, so
+a difference always means somebody changed the look and did not run `npm run
+docs`. The images deliberately carry no version or commit stamp; otherwise every
+commit would churn them and bury the one change that mattered.
+
 ## Committing
 
 - Commit as you go, one scoped change per commit. Say *why* in the body, not just
