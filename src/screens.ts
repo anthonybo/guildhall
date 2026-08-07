@@ -115,7 +115,6 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	return g
 }
 
-const STAR = '\u2605'
 const badges = new Map<string, Grid>()
 
 /**

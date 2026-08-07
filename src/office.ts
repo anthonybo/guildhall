@@ -168,7 +168,7 @@ export class Office extends SimBase {
 	}
 
 	/** Project nameplates and per-character status labels. */
-	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true, sessions: Session[] = []) {
+	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true) {
 		const named = new Set<string>()
 		for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
 			if (named.has(pod.proj)) continue

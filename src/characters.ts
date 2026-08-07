@@ -19,7 +19,6 @@ const DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../asset
 
 export const FRAME_W = 16
 export const FRAME_H = 32
-const FRAMES_PER_ROW = 7
 const ROWS = ['down', 'up', 'right'] as const
 
 export type Facing = 'down' | 'up' | 'right' | 'left'

@@ -6,9 +6,6 @@
  * and never launches or modifies one. The only thing it writes is a cmux
  * "focus this tab" request, and only when you press enter.
  */
-import fs from 'node:fs'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
@@ -28,14 +25,13 @@ import {
 import { collect, needsAttention, order, type Session } from './data.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
-import { frameOf, loadSheets, shrink } from './characters.ts'
+import { frameOf, shrink } from './characters.ts'
 import { badge, monitor } from './screens.ts'
 import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 import * as awake from './awake.ts'
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CMUX = '/Applications/cmux.app/Contents/Resources/bin/cmux'
 const ONCE = process.argv.includes('--once')
 const BENCH = process.argv.includes('--bench')
@@ -214,7 +210,7 @@ function draw() {
 				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
-		office.overlay(cv, placed, selectedId ?? undefined, labels, list)
+		office.overlay(cv, placed, selectedId ?? undefined, labels)
 		townLines = cv.render()
 		// furniture first, then monitors, then people on top of both
 		if (IMAGES) images = drawProps() + drawMonitors() + drawImages(placed)
