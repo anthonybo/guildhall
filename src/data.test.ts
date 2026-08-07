@@ -25,12 +25,14 @@ test('a session that ended on a question is reported as needing you', () => {
 })
 
 test('the level curve separates the top instead of saturating', () => {
-	// 2n^2: still superlinear, but ranks stay apart across the range real sessions
-	// occupy instead of piling up above the knee the way the old n^3 curve did
-	assert.equal(xpForLevel(2), 8)
-	assert.equal(xpForLevel(10), 200)
-	assert.equal(xpForLevel(50), 5000)
-	assert.equal(levelFor(5000), 50)
+	// anchored to measured accumulation (~572 xp/day for the heaviest session), not
+	// to a snapshot: a month of that rate is 37, a year is 85, and the cap needs
+	// about eighteen months. See xpForLevel.
+	const RATE = 572
+	assert.equal(levelFor(RATE * 30), 37, 'a month of heavy work')
+	assert.equal(levelFor(RATE * 365), 85, 'a year of heavy work')
+	assert.ok(levelFor(RATE * 365) < 99, 'a year of work must not cap the scale')
+	assert.equal(xpForLevel(3), 9)
 	assert.equal(levelFor(1_000_000), 99, 'the badge only has room for two digits')
 	assert.equal(levelFor(0), 1)
 	// and the weights favour change made over turns spent

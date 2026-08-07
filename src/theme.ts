@@ -83,19 +83,24 @@ export const C = {
 /** Level tiers, coloured like ranks. The chip on a character is one cell, so the
  *  colour does the work and the digit only refines it. */
 /**
- * Eight tiers spread across the real range. The curve is open-ended, so a ladder
- * that topped out at 9 painted every serious session the same colour — which is
- * exactly the saturation the n^3 curve was chosen to avoid.
+ * A geometric ladder: each tier is roughly 2.4x the work of the one below, which
+ * on a cube-root curve is an even step in level. Spacing them evenly in *levels*
+ * instead would make the low tiers unreachably fast and the high ones static.
+ *
+ * Ten tiers, because a ladder that ran out at level 9 painted every serious
+ * session the same colour — the exact failure this is here to avoid.
  */
 export const TIERS: { min: number; color: RGB; name: string }[] = [
 	{ min: 1, color: [150, 158, 185], name: 'new' },
 	{ min: 5, color: [130, 190, 140], name: 'steady' },
-	{ min: 12, color: [110, 200, 200], name: 'seasoned' },
-	{ min: 20, color: [110, 180, 250], name: 'skilled' },
-	{ min: 28, color: [160, 150, 250], name: 'veteran' },
-	{ min: 38, color: [210, 140, 235], name: 'expert' },
-	{ min: 50, color: [255, 170, 110], name: 'elder' },
-	{ min: 65, color: [255, 210, 90], name: 'legend' },
+	{ min: 8, color: [110, 200, 190], name: 'seasoned' },
+	{ min: 11, color: [110, 200, 240], name: 'skilled' },
+	{ min: 15, color: [120, 170, 250], name: 'veteran' },
+	{ min: 20, color: [165, 150, 250], name: 'expert' },
+	{ min: 27, color: [215, 140, 235], name: 'elder' },
+	{ min: 37, color: [250, 150, 160], name: 'master' },
+	{ min: 50, color: [255, 180, 100], name: 'legend' },
+	{ min: 68, color: [255, 225, 130], name: 'mythic' },
 ]
 export const tierOf = (level: number) => TIERS.filter((t) => level >= t.min).pop() ?? TIERS[0]
 /** The number, always. The old star capped the scale at 9 and made every serious
