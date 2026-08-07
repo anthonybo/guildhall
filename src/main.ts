@@ -40,7 +40,23 @@ const IMAGES = supportsImages() && !ONCE && !BENCH
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */
 const imageIds = new Map<string, number>()
+/** ids we have already sent the pixels for. Cleared to force a re-transmit; the
+ *  id itself never changes, so the terminal replaces an image rather than
+ *  accumulating thousands and evicting the ones still in use. */
+const sent = new Set<number>()
 let nextId = 1000
+
+/** Get this key's stable id, and whether its pixels still need sending. */
+function idFor(key: string) {
+	let id = imageIds.get(key)
+	if (!id) {
+		id = nextId++
+		imageIds.set(key, id)
+	}
+	const fresh = !sent.has(id)
+	sent.add(id)
+	return { id, fresh }
+}
 function ensureTransmitted(p: Placed, pre: string[]) {
 	const key = `${p.s.palette}:${p.s.hueShift}:${p.facing}:${p.pose}:${p.step}:${p.s.level}`
 	const known = imageIds.get(key)
@@ -234,11 +250,8 @@ function drawProps() {
 	let out = ''
 	let pid = 200
 	for (const pr of office.props) {
-		const key = `prop:${pr.kind}`
-		let id = imageIds.get(key)
-		if (!id) {
-			id = nextId++
-			imageIds.set(key, id)
+		const { id, fresh } = idFor(`prop:${pr.kind}`)
+		if (fresh) {
 			const up = upscale(prop(pr.kind).grid, 2)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
@@ -255,22 +268,16 @@ function drawMonitors() {
 	let out = ''
 	let pid = 500
 	for (const m of office.monitors) {
-		const key = `mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}:${m.kind}`
-		let id = imageIds.get(key)
-		if (!id) {
-			id = nextId++
-			imageIds.set(key, id)
+		const { id, fresh } = idFor(`mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}:${m.kind}`)
+		if (fresh) {
 			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2)
 	}
 	for (const b of office.badges) {
-		const key = b.asking ? 'badge:ask' : `badge:${b.level}`
-		let id = imageIds.get(key)
-		if (!id) {
-			id = nextId++
-			imageIds.set(key, id)
+		const { id, fresh } = idFor(b.asking ? 'badge:ask' : `badge:${b.level}`)
+		if (fresh) {
 			const up = upscale(badge(b.level, b.asking ? LOOK.needs.color : tierOf(b.level).color, b.asking ? '?' : '').grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
@@ -322,8 +329,10 @@ function start() {
 	// re-transmits and the room heals itself.
 	timers.push(
 		setInterval(() => {
-			imageIds.clear()
-		}, 8000),
+			// forget only that the pixels were sent; the ids stay stable so the
+			// terminal replaces each image instead of accumulating new ones
+			sent.clear()
+		}, 5000),
 	)
 	timers.push(
 		setInterval(() => {
@@ -377,6 +386,7 @@ function main() {
 			resizeTimer = null
 			OUT.write(clearAll())
 			imageIds.clear()
+			sent.clear()
 			prev = []
 			OUT.write('\x1b[2J')
 			start()
