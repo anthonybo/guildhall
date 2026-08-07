@@ -80,6 +80,15 @@ export class Canvas {
 			}
 	}
 
+	/** The text cell at a position, if one was written there.
+	 *
+	 *  Needed by the documentation renderer, which composites the pixel layer as a
+	 *  raster and re-draws these as real glyphs on top — a nameplate flattened into
+	 *  half blocks is unreadable at any size. */
+	cellAt(col: number, row: number): Cell | null {
+		return this.overlay[row]?.[col] ?? null
+	}
+
 	text(col: number, row: number, s: string, f: RGB | null, b: RGB | null) {
 		if (row < 0 || row >= this.rows) return
 		for (const [i, ch] of [...s].entries()) {
