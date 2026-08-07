@@ -547,6 +547,28 @@ export class Office {
 		for (const spot of this.spots.values()) if (spot.taken && !this.chars.has(spot.taken)) spot.taken = null
 		for (const ch of this.chars.values()) if (ch.seatId && !this.spots.has(ch.seatId)) ch.seatId = null
 
+		// Re-assert ownership of seats that are already held.
+		//
+		// A re-plan (any resize — including the one a cmux workspace switch causes)
+		// clears every spot and rebuilds the desks under the same ids, d0..dn. So a
+		// seated character still names a seat that exists and the guard above does
+		// not fire, yet the freshly built spot has no owner and nothing below
+		// re-claims it: `newcomers` only considers characters with no seat at all.
+		// Every desk then stays unowned, and since a monitor takes `lit` from its
+		// owner and a badge takes the level from it, the screens go dark and the
+		// badges disappear outright — while the characters, which live in
+		// `this.chars` and are never touched by planning, carry on animating.
+		// Sorted so that if two ever name the same seat the winner is stable.
+		for (const ch of [...this.chars.values()].sort((a, b) => a.id.localeCompare(b.id))) {
+			if (!ch.seatId) continue
+			const spot = this.spots.get(ch.seatId)
+			if (!spot || spot.kind !== 'desk' || (spot.taken && spot.taken !== ch.id)) {
+				ch.seatId = null // the seat is gone or somebody else holds it
+				continue
+			}
+			spot.taken = ch.id
+		}
+
 		const desks = [...this.spots.values()].filter((s) => s.kind === 'desk').sort((a, b) => a.row - b.row || a.col - b.col)
 		const newcomers = sessions
 			.filter((s) => !this.chars.has(s.id) || !this.chars.get(s.id)!.seatId)

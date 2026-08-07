@@ -466,3 +466,53 @@ test('the rally only starts once both players have arrived', () => {
 	}
 	assert.equal(walkingWithBall, 0, 'the ball was drawn before both players arrived')
 })
+
+test('a re-plan keeps every desk claimed, so screens and badges survive', () => {
+	// Switching cmux workspaces resizes the terminal, which re-plans the room.
+	// plan() clears every spot and rebuilds desks under the SAME ids (d0..dn), so
+	// a character still names a seat that exists and the stale-seat guard never
+	// fires. Nothing then re-claimed the new spots, leaving every desk unowned:
+	// monitors derive `lit` from the owner and badges derive the level from it, so
+	// the screens went dark and the badges vanished entirely — while the characters,
+	// which live in this.chars and are untouched by planning, kept animating.
+	const list = [
+		session('a', 'alpha', 'working'),
+		session('b', 'beta', 'working'),
+		session('c', 'gamma', 'parked'),
+	]
+	const cv = new Canvas(120, 80)
+	const office = new Office(seeded())
+	office.fit(cv.w, cv.h, list)
+	office.assign(list)
+	office.draw(cv, list)
+
+	const badgesBefore = office.badges.length
+	const litBefore = office.monitors.filter((m) => m.lit).length
+	assert.ok(badgesBefore > 0, 'no badges even before the re-plan')
+	assert.ok(litBefore > 0, 'no lit screens even before the re-plan')
+
+	// the resize a workspace switch produces
+	const cv2 = new Canvas(120, 78)
+	office.fit(cv2.w, cv2.h, list)
+	office.assign(list)
+	office.draw(cv2, list)
+
+	assert.equal(office.badges.length, badgesBefore, 'badges disappeared after a re-plan')
+	assert.equal(office.monitors.filter((m) => m.lit).length, litBefore, 'screens went dark after a re-plan')
+	const claimed = [...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken).length
+	assert.equal(claimed, list.length, 'desks were left unowned after a re-plan')
+})
+
+test('a re-plan never lets two characters hold one desk', () => {
+	const list = [session('a', 'alpha', 'working'), session('b', 'beta', 'parked')]
+	const cv = new Canvas(120, 80)
+	const office = new Office(seeded())
+	office.fit(cv.w, cv.h, list)
+	office.assign(list)
+	// re-plan, then admit a newcomer — it must not be handed an occupied desk
+	office.fit(new Canvas(120, 78).w, 78, list)
+	const grown = [...list, session('c', 'gamma', 'parked')]
+	office.assign(grown)
+	const owners = [...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken).map((s) => s.taken)
+	assert.equal(new Set(owners).size, owners.length, 'one session claimed two desks')
+})

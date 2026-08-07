@@ -49,6 +49,12 @@ const imageIds = new Map<string, number>()
 const sent = new Set<number>()
 let nextId = 1000
 
+/** One placement per frame goes out un-silenced so the terminal can report a
+ *  missing image. It has to be whichever is drawn first, not a particular class:
+ *  hanging it off the first monitor meant no sentinel at all in a room with none. */
+let sentinelUsed = false
+const loudOnce = () => (sentinelUsed ? false : ((sentinelUsed = true), true))
+
 /** Get this key's stable id, and whether its pixels still need sending. */
 function idFor(key: string) {
 	let id = imageIds.get(key)
@@ -90,6 +96,7 @@ function eraseDisplay() {
 /* ── screen ── */
 const OUT = process.stdout
 let prev: string[] = []
+let hadImages = false
 let alt = false
 let quiet = false // --bench exercises the frame path without writing to the screen
 
@@ -99,7 +106,11 @@ function paint(lines: string[], images: string) {
 		return
 	}
 	let buf = SYNC_START
-	if (images) buf += clearPlacements()
+	// Also clear on the frame that stops drawing images — switching to the
+	// full-screen table used to leave every sprite pinned above the text, since
+	// nothing emitted a delete once `images` went empty.
+	if (images || hadImages) buf += clearPlacements()
+	hadImages = !!images
 	for (let i = 0; i < lines.length; i++) if (lines[i] !== prev[i]) buf += `${cursorTo(i + 1, 1)}\x1b[2K${lines[i]}`
 	prev = lines
 	buf += images + SYNC_END
@@ -191,6 +202,7 @@ function draw() {
 	const list = visible()
 	let townLines: string[] = []
 	let images = ''
+	sentinelUsed = false
 	if (townRows > 0) {
 		const placed = office.draw(cv, list)
 		if (!IMAGES)
@@ -272,7 +284,7 @@ function drawProps() {
 		}
 		const size = PROP_SIZE[pr.kind]
 		// furniture behind, workstations above it, people above everything
-		out += cursorTo((pr.y >> 1) + 2, pr.x + 1) + place(id, size.w * TILE, (size.h * TILE) / 2, pid++, 1)
+		out += cursorTo((pr.y >> 1) + 2, pr.x + 1) + place(id, size.w * TILE, (size.h * TILE) / 2, pid++, 1, loudOnce())
 	}
 	return pre.join('') + out
 }
@@ -290,7 +302,7 @@ function drawMonitors() {
 		}
 		// the first workstation is the sentinel; if the store was wiped it answers
 		// ENOENT and the reader below re-arms every transmit
-		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2, pid === 501)
+		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2, loudOnce())
 	}
 	for (const b of office.badges) {
 		const { id, fresh } = idFor(b.asking ? 'badge:ask' : `badge:${b.level}`)
