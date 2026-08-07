@@ -84,19 +84,31 @@ export function detail(s: Session | undefined, total: number) {
 	]
 }
 
+/**
+ * The keep-awake state, in three states rather than two.
+ *
+ * "Armed but nobody working" and "switched off" are different facts with the same
+ * consequence right now, and conflating them means you cannot tell a disabled
+ * feature from a quiet room. Each state carries three redundant signals — colour,
+ * glyph and wording — so it survives a colour-blind reader or a mono terminal,
+ * and every colour is one of the measured-contrast values rather than a dim grey.
+ *
+ * OFF is amber, not grey: it is the state in which you can lose an overnight
+ * build, which is worth noticing rather than hiding.
+ */
+export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolean }) {
+	if (holding) return `${fg(C.fillOk)}●${fg(C.label)} awake ${bold}ON${R}${fg(C.fillOk)} · holding${R}`
+	if (armed) return `${fg(C.screenEdit)}◐${fg(C.label)} awake ${bold}ON${R}${fg(C.screenEdit)} · idle${R}`
+	return `${fg(C.fillWarn)}○${fg(C.label)} awake ${bold}OFF${R}${fg(C.fillWarn)} · may sleep${R}`
+}
+
 export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
 	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
-	// Three states, not two: holding right now, armed but nobody working, and off.
-	// "Armed" has to be visible or turning it off looks identical to nobody working.
-	const hold = awake.holding
-		? `  ${fg(C.gold)}☕${fg(C.label)} sleep held${R}`
-		: awake.armed
-			? `  ${fg(C.faint)}☕ awake armed${R}`
-			: `  ${fg(C.faint)}○ sleep allowed${R}`
+	const hold = `  ${awakeBadge(awake)}`
 	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}v${VERSION}${R}  ${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
 	return clip(left, total)
 }
@@ -107,7 +119,8 @@ export function footer(total: number, hidden: number, faultsOnly: boolean, mode:
 		'⏎ jump to tab',
 		`f ${faultsOnly ? 'all' : 'faults'}`,
 		`tab ${mode}`,
-		`a ${awakeArmed ? 'let sleep' : 'keep awake'}`,
+		// what the key DOES, not what the state is — the header already says the state
+		`a awake ${awakeArmed ? 'off' : 'on'}`,
 		'r redraw',
 		'q quit',
 	]
