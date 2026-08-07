@@ -266,9 +266,12 @@ function addTalkArea(room: Room, socialBands: number[]) {
 /** So the room reads as an office rather than a grid of desks. */
 function addDecor(room: Room, socialBands: number[]) {
 	if (room.cols <= 14) return
-	room.props.push({ kind: 'plant', x: 1 * TILE, y: 1 * TILE })
+	// Not tile 1 on the top band: that is the strip the leftmost pod's nameplate
+	// needs, and decor must not sit on the one thing in the room that identifies
+	// a desk. The corner opposite is free either way.
+	room.props.push({ kind: 'plant', x: 1 * TILE, y: (room.rows - 3) * TILE })
 	room.props.push({ kind: 'plant', x: (room.cols - 2) * TILE, y: 1 * TILE })
-	room.grid[1][1] = 'solid'
+	room.grid[room.rows - 3][1] = 'solid'
 	room.grid[1][room.cols - 2] = 'solid'
 	room.props.push({ kind: 'whiteboard', x: 3 * TILE, y: 0 })
 	room.props.push({ kind: 'shelf', x: (room.cols - 4) * TILE, y: 0 })
