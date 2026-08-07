@@ -2,10 +2,19 @@
 
 Every live Claude Code session as a pixel office, in your terminal.
 
+<img src="docs/room.svg" alt="A terminal showing a pixel-art office: two rows of desks with lit and dark monitors, characters seated at some and standing around a kitchen and ping-pong table below, each project's desks on a coloured carpet. Underneath, a table listing ten sessions with tab number, level, project name in its carpet colour, status, what it is doing, a context gauge and how long it has been idle." width="100%">
+
 Sessions that are working sit at their desks with a lit screen. Sessions waiting
 on you get a placard. Everyone else walks around, gets coffee, plays ping-pong.
 Below the room, a table with the detail: what each session is doing, how much
-context it has left, and how long it has been ignored.
+context it has left, and how long it has been ignored. A project's colour is the
+same in both halves, so a character you notice upstairs is one colour-match away
+from its row.
+
+The office above is drawn with half blocks because that is what an SVG can carry.
+In a terminal that speaks the kitty graphics protocol — Ghostty, kitty, WezTerm —
+the characters and workstations are real sprites at font resolution. Everything
+else looks exactly like this.
 
 It is **read-only**. It watches the sessions you already run — in cmux or
 anywhere else — and never starts, stops, or moves one. The only thing it writes
@@ -30,7 +39,14 @@ npm start
 | `q` | quit |
 
 `--no-awake` starts with the sleep hold off. `--once` prints a single frame and
-exits.
+exits. `--demo` runs against a fictional office, which is handy for seeing what
+this looks like before you have anything running.
+
+It reflows rather than truncating. Identity is never the thing that goes: the
+context gauge yields first, then the project name narrows, so a row always tells
+you *which* session it is.
+
+<img src="docs/narrow.svg" alt="The same office and table rendered at 72 columns: fewer desks per row, the context gauge dropped, project names shortened, but every session still listed with its tab number, level, name and status." width="70%">
 
 ## What it reads
 
@@ -138,6 +154,13 @@ src/
 
 `npm test` runs the suite; `npm run check` adds the type check. `npm run dev`
 runs from source without the build step.
+
+## Documentation images
+
+`sh tools/make-docs-images.sh` regenerates everything in `docs/`. They are drawn
+from the fictional office in `src/demo.ts` and rendered to SVG, so they are
+reproducible, weigh a few KB, stay crisp at any zoom, and contain nobody's real
+project names or half-finished sentences. Regenerate them when the layout changes.
 
 ## Versioning
 

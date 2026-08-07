@@ -24,7 +24,8 @@ import {
 	transmit,
 	upscale,
 } from './kitty.ts'
-import { collect, needsAttention, order, type Session } from './data.ts'
+import { collect as collectReal, needsAttention, order, type Session } from './data.ts'
+import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, shrink } from './characters.ts'
@@ -80,10 +81,17 @@ const BENCH = process.argv.includes('--bench')
  * dashboard. This mode is what you leave running (or hand to a LaunchAgent).
  */
 const GUARD = process.argv.includes('--guard')
+/** A fictional office, for documentation and for looking at this with nothing
+ *  running. Never touches the real registry. */
+const DEMO = process.argv.includes('--demo')
+const collect = () => (DEMO ? demoSessions() : collectReal())
 const IMAGES = supportsImages() && !ONCE && !BENCH && !GUARD
 // observing should not change the machine's behaviour unless asked, but holding
 // sleep off while a build runs is the common case, so it is on unless refused
-awake.configure(!process.argv.includes('--no-awake') && !ONCE && !BENCH)
+// --once and --bench never hold anything; --demo arms it purely so the
+// documentation image shows the state you actually run in, and the demo never
+// reaches sync() to spawn anything
+awake.configure(!process.argv.includes('--no-awake') && !BENCH && (!ONCE || DEMO))
 
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */
@@ -220,10 +228,22 @@ function moveSelection(delta: number) {
 	selectedId = list[Math.min(list.length - 1, Math.max(0, i + delta))].id
 }
 
+/**
+ * Terminal size, or what the caller says it is.
+ *
+ * `OUT.columns` is undefined whenever stdout is not a TTY — piped into a file, a
+ * renderer, or a pager — and silently falling back to 90x44 meant a piped run
+ * ignored the size it was asked for. COLUMNS/LINES are the conventional way to
+ * say it, and honouring them is what makes the documentation images
+ * reproducible at a chosen width.
+ */
+const sizeOf = (tty: number | undefined, env: string | undefined, fallback: number) =>
+	tty ?? (Number(env) > 0 ? Number(env) : fallback)
+
 /** Recompute geometry and re-place creatures. Safe to call as often as you like. */
 function layout() {
-	const cols = Math.max(46, (OUT.columns ?? 90) - 1)
-	const rows = Math.max(14, (OUT.rows ?? 44) - 2)
+	const cols = Math.max(46, sizeOf(OUT.columns, process.env.COLUMNS, 90) - 1)
+	const rows = Math.max(14, sizeOf(OUT.rows, process.env.LINES, 44) - 2)
 	const list = visible()
 	if (!selectedId || !list.some((s) => s.id === selectedId)) selectedId = order(list)[0]?.id ?? null
 
@@ -516,9 +536,14 @@ function main() {
 		return
 	}
 	if (ONCE) {
+		// A one-shot dump has no reason to address the cursor, and every reason not
+		// to: piped into a file or a renderer it arrives as one enormous line, since
+		// the row breaks were `ESC[n;1H` rather than newlines. Render, then print
+		// what the frame would have contained.
+		quiet = true
 		layout()
 		draw()
-		OUT.write('\n')
+		OUT.write(prev.join('\n') + '\n')
 		return
 	}
 	alt = true
