@@ -43,6 +43,8 @@ const SEAT_REST_MIN = 20
 const SEAT_REST_MAX = 60
 const DONE_BUBBLE_SEC = 8
 const CHAT_RADIUS = 10
+/** how long a screen stays lit after its session pauses between turns */
+const SCREEN_HOLD = 25_000
 const MAX_RUN = 6 // widest desk pod before a project spills into a second one
 
 type Kind = 'void' | 'floor' | 'wall' | 'desk' | 'solid'
@@ -1039,7 +1041,10 @@ export class Office {
 			const s = byId.get(sp.taken)
 			if (s) levels.set(`${sp.col},${sp.row}`, s.level)
 			if (s && s.state === 'needs') asking.add(`${sp.col},${sp.row}`)
-			if (s && this.atDesk(s)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
+			// A session is only 'busy' while it is literally generating, so the screen
+			// blinked off in every pause between turns. Hold the light briefly after,
+			// which is what a machine someone is working at actually looks like.
+			if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
