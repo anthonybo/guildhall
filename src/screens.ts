@@ -140,8 +140,20 @@ export function badge(level: number, tier: RGB, face = ''): Grid {
 	box(2, 2, 12, 13, EDGE)
 	box(3, 3, 10, 3, tier)
 	box(3, 6, 10, 8, CARD)
-	const glyph = DIGITS[face] ?? DIGITS[level < 10 ? String(level) : STAR] ?? DIGITS['0']
-	glyph.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(6 + x, 8 + y, [40, 42, 54])))
+	const INK: RGB = [40, 42, 54]
+	if (face) {
+		const glyph = DIGITS[face] ?? DIGITS['0']
+		glyph.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(6 + x, 8 + y, INK)))
+	} else {
+		// two digits fit: the card is ten pixels wide inside, a digit is three, so
+		// 3+1+3 leaves a margin. Levels are open-ended now and mostly two digits.
+		const text = String(Math.max(1, Math.min(99, level)))
+		const startX = text.length > 1 ? 4 : 6
+		;[...text].forEach((ch, i) => {
+			const glyph = DIGITS[ch] ?? DIGITS['0']
+			glyph.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(startX + i * 4 + x, 8 + y, INK)))
+		})
+	}
 	const g: Grid = { w: 16, h: 16, grid }
 	badges.set(key, g)
 	return g
