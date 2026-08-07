@@ -23,7 +23,7 @@
     --color-line: #302c40;
     --color-label: #d0d0d0;
     --color-muted: #8a8a8a;
-    --color-faint: #6e7681;
+    --color-faint: #818892;
     --color-gold: #ffd65c;
     --color-hot: #ff5f5f;
     --color-ok: #5faf5f;
@@ -593,11 +593,20 @@
   .whitespace-nowrap {
     white-space: nowrap;
   }
+  .text-\(--dim\) {
+    color: var(--dim);
+  }
+  .text-\(--hot\) {
+    color: var(--hot);
+  }
+  .text-\(--ink\) {
+    color: var(--ink);
+  }
   .text-\(--proj\) {
     color: var(--proj);
   }
-  .text-\(--state\) {
-    color: var(--state);
+  .text-\(--soft\) {
+    color: var(--soft);
   }
   .text-\[\#1a1c28\] {
     color: #1a1c28;

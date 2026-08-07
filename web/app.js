@@ -137,21 +137,60 @@ function order(list) {
   });
 }
 
+// src/contrast.ts
+var lin = (c) => c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
+var luminance = ([r, g, b]) => 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+function contrast(a, b) {
+  const [hi, lo] = luminance(a) > luminance(b) ? [luminance(a), luminance(b)] : [luminance(b), luminance(a)];
+  return (hi + 0.05) / (lo + 0.05);
+}
+var mix = (a, p, b) => [0, 1, 2].map((i) => Math.round(a[i] * p + b[i] * (1 - p)));
+var WHITE = [255, 255, 255];
+var BLACK = [0, 0, 0];
+function readable(fg, bg, target = 4.5) {
+  if (contrast(fg, bg) >= target) return fg;
+  const toward = luminance(bg) < 0.5 ? WHITE : BLACK;
+  if (contrast(toward, bg) < target) return toward;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 12; i++) {
+    const m = (lo + hi) / 2;
+    if (contrast(mix(toward, m, fg), bg) >= target) hi = m;
+    else lo = m;
+  }
+  return mix(toward, hi, fg);
+}
+
 // web/list.ts
 var WEIGHT = {
-  error: "26%",
-  needs: "22%",
-  working: "16%",
-  shell: "16%",
-  review: "11%",
-  done: "7%",
-  parked: "3%"
+  error: 0.26,
+  needs: 0.22,
+  working: 0.16,
+  shell: 0.16,
+  review: 0.11,
+  done: 0.07,
+  parked: 0.03
 };
+var tintOf = (state) => `${(WEIGHT[state] ?? 0.1) * 100}%`;
+var BG = [25, 23, 34];
+var PANEL = [34, 31, 46];
+var FAINT = [129, 136, 146];
+var MUTED = [138, 138, 138];
+var cardOf = (state) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, PANEL);
+var bandOf = (state) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, BG);
 var BANDS = [
   { key: "error", label: "failed", has: (s) => s.state === "error" },
   { key: "needs", label: "needs you", has: (s) => s.state === "needs" },
-  { key: "live", label: "working", has: (s) => s.state === "working" || s.state === "shell" },
-  { key: "review", label: "finished, unread", has: (s) => s.state === "review" },
+  {
+    key: "live",
+    label: "working",
+    has: (s) => s.state === "working" || s.state === "shell"
+  },
+  {
+    key: "review",
+    label: "finished, unread",
+    has: (s) => s.state === "review"
+  },
   { key: "done", label: "your turn", has: (s) => s.state === "done" },
   { key: "parked", label: "parked", has: (s) => s.state === "parked" }
 ];
@@ -172,7 +211,10 @@ function details(s) {
     ["folder", s.cwd],
     ["level", `${s.level} ${tierOf(s.level).name} \xB7 ${tokens(s.xp)} xp`],
     ["turns", String(s.turns)],
-    ["context", s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"],
+    [
+      "context",
+      s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"
+    ],
     ["idle", ago(s.stale)],
     ...s.tab ? [["tab", `\u2318${s.tab}`]] : [],
     ...s.waitingFor ? [["waiting on", s.waitingFor]] : [],
@@ -180,10 +222,10 @@ function details(s) {
   ];
   for (const [k, v] of rows) {
     const dt = document.createElement("dt");
-    dt.className = "text-faint";
+    dt.className = "text-(--dim)";
     dt.textContent = k;
     const dd = document.createElement("dd");
-    dd.className = "m-0 text-muted [overflow-wrap:anywhere]";
+    dd.className = "m-0 text-(--soft) [overflow-wrap:anywhere]";
     dd.textContent = v;
     dl.append(dt, dd);
   }
@@ -199,9 +241,14 @@ function paintList(list) {
     const members = sorted.filter(band2.has);
     if (!members.length) continue;
     const head = document.createElement("li");
-    head.className = "band band-rule tint-page sticky top-12 z-[1] mt-3.5 mb-px flex items-center gap-2.5 rounded border-l-5 border-(--state) px-2.5 py-1.5 text-[0.76rem] font-bold tracking-[0.14em] text-(--state) uppercase first:mt-0";
-    head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
-    head.style.setProperty("--tint", WEIGHT[band2.key] ?? "10%");
+    head.className = "band band-rule tint-page sticky top-12 z-[1] mt-3.5 mb-px flex items-center gap-2.5 rounded border-l-5 border-(--state) px-2.5 py-1.5 text-[0.76rem] font-bold tracking-[0.14em] text-(--ink) uppercase first:mt-0";
+    const key = members[0].state;
+    head.style.setProperty("--state", rgb(LOOK[key].color));
+    head.style.setProperty(
+      "--ink",
+      rgb(readable(LOOK[key].color, bandOf(key)))
+    );
+    head.style.setProperty("--tint", tintOf(band2.key));
     head.innerHTML = `<span></span><span class="rounded-full bg-(--state) px-1.5 py-px font-bold text-[#1a1c28]"></span>`;
     head.children[0].textContent = band2.label;
     head.children[1].textContent = String(members.length);
@@ -222,20 +269,28 @@ function paintList(list) {
       busy ? "sweep" : ""
     ].join(" ");
     if (busy) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
+    const card = cardOf(s.state);
     li.style.setProperty("--state", rgb(look.color));
-    li.style.setProperty("--tint", WEIGHT[s.state] ?? "10%");
+    li.style.setProperty("--ink", rgb(readable(look.color, card)));
+    li.style.setProperty("--hot", rgb(readable([255, 95, 95], card)));
+    li.style.setProperty("--dim", rgb(readable(FAINT, card)));
+    li.style.setProperty("--soft", rgb(readable(MUTED, card, 5.5)));
+    li.style.setProperty("--tint", tintOf(s.state));
     li.style.setProperty("--tier", rgb(tierOf(s.level).color));
-    li.style.setProperty("--proj", rgb(hues.get(s.proj) ?? look.color));
+    li.style.setProperty(
+      "--proj",
+      rgb(readable(hues.get(s.proj) ?? look.color, card))
+    );
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
 			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
 			<span class="proj [grid-area:proj] truncate font-bold text-(--proj) after:ml-2 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90"></span>
-			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-faint">
-				<span class="text-(--state)">${look.glyph} ${look.label}</span>
-				${s.ctxUsed ? `<span class="tabular-nums${pct > 90 ? " text-hot" : ""}">${pct}%</span>` : ""}
+			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
+				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
+				${s.ctxUsed ? `<span class="tabular-nums${pct > 90 ? " text-(--hot)" : ""}">${pct}%</span>` : ""}
 				<span>${ago(s.stale)}</span>
 			</span>
-			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-muted"}"></span>`;
+			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
     li.tabIndex = 0;

@@ -24,7 +24,12 @@
 	--color-line: #302c40;
 	--color-label: #d0d0d0;
 	--color-muted: #8a8a8a;
-	--color-faint: #6e7681;
+	/* Was #6e7681, which measured 3.85 against the page and 4.10 against the
+	   panel — under the 4.5 floor in both, so the footer, the version and the
+	   settings help text were all quietly below it. This is the smallest lift
+	   that clears the panel, which is the lighter of the two. On a tinted card
+	   the list computes its own value; see `readable` in src/contrast.ts. */
+	--color-faint: #818892;
 	--color-gold: #ffd65c;
 	--color-hot: #ff5f5f;
 	--color-ok: #5faf5f;
