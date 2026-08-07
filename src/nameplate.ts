@@ -216,24 +216,29 @@ function word(f: Font, s: string) {
 }
 
 /** Rotated nameplate: the word reads bottom-to-top in a wpx x hpx image. */
-export function plate(f: Font, s: string, wpx: number, hpx: number, bg: RGB, ink: RGB, border?: RGB): Grid {
+export function plate(f: Font, s: string, wpx: number, hpx: number, bg: RGB, ink: RGB, border?: RGB, scale = 1): Grid {
 	const grid: (RGB | null)[][] = Array.from({ length: hpx }, () => new Array<RGB | null>(wpx).fill(bg))
 	if (border) {
 		for (let x = 0; x < wpx; x++) { grid[0][x] = border; grid[hpx - 1][x] = border }
 		for (let y = 0; y < hpx; y++) { grid[y][0] = border; grid[y][wpx - 1] = border }
 	}
 	const m = word(f, s)
-	// rotate CCW: source (x,y) -> dest (y, W-1-x); text runs up the image
-	const dw = m.h
-	const dh = m.w
+	// rotate CCW: source (x,y) -> dest (y, W-1-x); text runs up the image.
+	// `scale` enlarges each source pixel into a square block, so the word grows
+	// with the terminal's font instead of staying a hairline in a large plate.
+	const dw = m.h * scale
+	const dh = m.w * scale
 	const ox = Math.floor((wpx - dw) / 2)
 	const oy = Math.floor((hpx - dh) / 2)
 	for (let y = 0; y < m.h; y++)
 		for (let x = 0; x < m.w; x++) {
 			if (!m.px[y][x]) continue
-			const dx = ox + y
-			const dy = oy + (m.w - 1 - x)
-			if (dx >= 0 && dy >= 0 && dx < wpx && dy < hpx) grid[dy][dx] = ink
+			for (let j = 0; j < scale; j++)
+				for (let i = 0; i < scale; i++) {
+					const dx = ox + y * scale + j
+					const dy = oy + (m.w - 1 - x) * scale + i
+					if (dx >= 0 && dy >= 0 && dx < wpx && dy < hpx) grid[dy][dx] = ink
+				}
 		}
 	return { w: wpx, h: hpx, grid }
 }
@@ -259,17 +264,41 @@ function band(f: Font) {
  * the whole name along it — or the smallest, if nothing does, with the name cut
  * to length. Following RimWorld's rule, a plate too small to read is not drawn.
  */
+/**
+ * Font, text, and how many times to enlarge each pixel.
+ *
+ * The scale is the part that was missing. A plate is authored at the box's real
+ * size, and that box grows with the terminal's font — so on a large font the
+ * strip was wide and tall while the glyphs stayed 6x13 actual pixels, leaving a
+ * thin hairline word floating in a big coloured bar. Scaling is by whole numbers
+ * only, so a pixel font stays a pixel font instead of turning to mush.
+ */
 export function choose(text: string, wpx: number, hpx: number) {
 	// +3, not +2: a keyline each side and at least one pixel of margin. The
 	// smallest font's band is exactly 8px, which "fits" a one-column strip with
 	// nothing to spare — and at that size it is a grey smear rather than a word,
 	// so an exact fit has to count as no fit.
-	const fits = (f: Font) => band(f) + 3 <= wpx
-	for (const f of LADDER) {
-		if (fits(f) && text.length * f.w <= hpx) return { font: f, text }
+	// Pick by what ends up on screen, not by which font is nominally largest. In a
+	// 24px strip, 6x13 fits once (an 11px band) while 5x8 fits twice (14px) — and
+	// the doubled smaller font is the more readable of the two. Ties go to the
+	// larger font, which has the better letterforms at equal height.
+	const best = (f: Font, s: string) => {
+		const across = Math.floor((wpx - 3) / band(f))
+		const along = Math.floor(hpx / (s.length * f.w))
+		return Math.min(across, along)
 	}
+	// Largest font that fits wins, and then it is scaled as far as the strip
+	// allows. Choosing purely by resulting height picked a doubled 4x6 over a
+	// native 6x13 for one extra pixel — trading real letterforms for blocky ones,
+	// which is the wrong way round at this size.
+	for (const f of LADDER) {
+		const scale = best(f, text)
+		if (scale >= 1) return { font: f, text, scale }
+	}
+	// Nothing fits whole. Take the smallest font and cut the name to what the
+	// strip holds at 1:1, rather than drawing something unreadable.
 	const f = LADDER[LADDER.length - 1]
-	if (!fits(f)) return null // no honest way to render this; draw nothing
+	if (band(f) + 3 > wpx) return null
 	const room = Math.floor(hpx / f.w)
-	return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + '.' : text }
+	return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + '.' : text, scale: 1 }
 }
