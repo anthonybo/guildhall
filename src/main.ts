@@ -27,7 +27,7 @@ import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, loadSheets, shrink } from './characters.ts'
 import { badge, monitor } from './screens.ts'
-import { tierOf } from './theme.ts'
+import { LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 
@@ -177,7 +177,8 @@ function draw() {
 				cv.blit(pr.x, pr.y, shrink(prop(pr.kind), size.w * TILE, size.h * TILE))
 			}
 			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed, m.kind), CHAR_W, CHAR_W))
-			for (const b of office.badges) cv.blit(b.x, b.y, shrink(badge(b.level, tierOf(b.level).color), TILE, TILE))
+			for (const b of office.badges)
+				cv.blit(b.x, b.y, shrink(badge(b.level, b.asking ? LOOK.needs.color : tierOf(b.level).color, b.asking ? '?' : ''), TILE, TILE))
 		}
 	}
 
@@ -265,12 +266,12 @@ function drawMonitors() {
 		out += cursorTo((m.y >> 1) + 2, m.x + 1) + place(id, MON_COLS, MON_ROWS, pid++, 2)
 	}
 	for (const b of office.badges) {
-		const key = `badge:${b.level}`
+		const key = b.asking ? 'badge:ask' : `badge:${b.level}`
 		let id = imageIds.get(key)
 		if (!id) {
 			id = nextId++
 			imageIds.set(key, id)
-			const up = upscale(badge(b.level, tierOf(b.level).color).grid, 3)
+			const up = upscale(badge(b.level, b.asking ? LOOK.needs.color : tierOf(b.level).color, b.asking ? '?' : '').grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		out += cursorTo((b.y >> 1) + 2, b.x + 1) + place(id, TILE, TILE / 2, pid++, 2)
