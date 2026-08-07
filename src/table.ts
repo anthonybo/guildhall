@@ -124,14 +124,21 @@ export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolea
 	return `${fg(C.fillWarn)}○${fg(C.label)} ${bold}sleeps normally${R}${fg(C.fillWarn)} · never held${R}`
 }
 
-export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }) {
+/**
+ * `build` is overridable so the documentation image can leave it out. Baking the
+ * commit hash into a screenshot means the file changes on every single commit,
+ * which buries a real appearance change in noise — the picture should move when
+ * the app looks different, not when anything at all happens.
+ */
+export function summary(list: Session[], total: number, awake: { armed: boolean; holding: boolean }, build = BUILD) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
 	const pills = (['error', 'needs', 'working', 'shell', 'review', 'done', 'parked'] as const)
 		.filter((k) => counts[k])
 		.map((k) => `${fg(LOOK[k].color)}${LOOK[k].glyph}${fg(C.label)} ${counts[k]} ${LOOK[k].label}${R}`)
 	const hold = `  ${awakeBadge(awake)}`
-	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${fg(C.faint)}v${BUILD}${R}  ${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
+	const stamp = build ? `${fg(C.faint)}v${build}${R}  ` : ''
+	const left = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}  ${pills.join('  ')}${hold}`
 	return clip(left, total)
 }
 

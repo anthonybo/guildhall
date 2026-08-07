@@ -160,7 +160,10 @@ runs from source without the build step.
 
 ## Documentation images
 
-`sh tools/make-docs-images.sh` regenerates everything in `docs/`. They are drawn
+`npm run docs` regenerates everything in `docs/`, and `npm run release` does it
+for you — so the picture cannot lag the program. `npm run check` fails if the
+committed images no longer match what the code renders; they are byte-for-byte
+deterministic, so any difference means the look changed and nobody regenerated. They are drawn
 from the fictional office in `src/demo.ts`, so they are reproducible and contain
 nobody's real project names or half-finished sentences.
 
