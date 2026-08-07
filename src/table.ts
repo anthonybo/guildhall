@@ -99,6 +99,7 @@ export function footer(total: number, hidden: number, faultsOnly: boolean, mode:
 		'⏎ jump to tab',
 		`f ${faultsOnly ? 'all' : 'faults'}`,
 		`tab ${mode}`,
+		'r redraw',
 		'q quit',
 	]
 	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
