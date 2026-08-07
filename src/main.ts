@@ -59,17 +59,29 @@ function idFor(key: string) {
 }
 function ensureTransmitted(p: Placed, pre: string[]) {
 	const key = `${p.s.palette}:${p.s.hueShift}:${p.facing}:${p.pose}:${p.step}:${p.s.level}`
-	const known = imageIds.get(key)
-	if (known) return known
+	// via idFor, so a cleared `sent` re-sends the pixels. Returning early on a known
+	// id meant characters were transmitted exactly once per process: when the
+	// terminal dropped its image store, furniture healed on the next sweep and the
+	// sprites stayed dangling ids forever, which is the bug you kept seeing.
+	const { id, fresh } = idFor(key)
+	if (!fresh) return id
 	const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 	// nearest-neighbour 4x so the terminal has real pixels to scale from
 	// 2x, not 4x: a 4x source made the terminal DOWNSCALE into the placement box,
 	// which is a fractional resample and the reason sprites looked mushy
 	const up = upscale(g.grid, 2)
-	const id = nextId++
-	imageIds.set(key, id)
 	pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 	return id
+}
+
+/** Erase the display — and remember that it took the images with it.
+ *
+ *  Ghostty's ED handler calls kitty_images.delete(.{ .all = true }), which frees
+ *  the pixel data and not merely the placements. (kitty itself does not.) So every
+ *  clear has to re-arm the transmit set or the next frame places dangling ids. */
+function eraseDisplay() {
+	OUT.write('\x1b[2J')
+	sent.clear()
 }
 
 /* ── screen ── */
@@ -302,7 +314,7 @@ function onKey(b: Buffer) {
 	} else if (k === '\t') {
 		mode = mode === 'split' ? 'town' : mode === 'town' ? 'table' : 'split'
 		prev = []
-		OUT.write('\x1b[2J')
+		eraseDisplay()
 		layout()
 	} else if (k === 'f') {
 		faultsOnly = !faultsOnly
@@ -315,7 +327,7 @@ function onKey(b: Buffer) {
 		imageIds.clear()
 		sent.clear()
 		prev = []
-		OUT.write('\x1b[2J')
+		eraseDisplay()
 		layout()
 	} else if (k === 'l') {
 		labels = !labels
@@ -329,7 +341,7 @@ function start() {
 	for (const t of timers) clearInterval(t)
 	timers = []
 	prev = []
-	OUT.write('\x1b[2J')
+	eraseDisplay()
 	layout()
 	draw()
 	timers.push(setInterval(animate, 110))
@@ -377,7 +389,8 @@ function main() {
 		return
 	}
 	alt = true
-	OUT.write('\x1b[?1049h\x1b[?25l\x1b[2J')
+	OUT.write('\x1b[?1049h\x1b[?25l')
+	eraseDisplay()
 	if (process.stdin.isTTY) {
 		process.stdin.setRawMode(true)
 		process.stdin.resume()
@@ -398,7 +411,7 @@ function main() {
 			imageIds.clear()
 			sent.clear()
 			prev = []
-			OUT.write('\x1b[2J')
+			eraseDisplay()
 			start()
 		}, 80)
 	})
