@@ -101,7 +101,12 @@ function read(file: string): Digest {
 		if (e.type === 'user' && !e.toolUseResult) d.asked = false
 		// turn_duration carries the running message count; an API error or a failed
 		// stop is the only failure signal the transcript exposes
-		if (e.type === 'system' && e.subtype === 'turn_duration' && typeof e.messageCount === 'number') d.turns = e.messageCount
+		if (e.type === 'system' && e.subtype === 'turn_duration') {
+			if (typeof e.messageCount === 'number') d.turns = e.messageCount
+			// how many agents this session still has out, which is the difference
+			// between "thinking" and "supervising four things at once"
+			if (typeof e.pendingBackgroundAgentCount === 'number') d.pending = e.pendingBackgroundAgentCount
+		}
 		if (e.isApiErrorMessage === true || (e.type === 'system' && /fail|error/i.test(String(e.subtype ?? '')))) d.failed = true
 		else if (e.type === 'assistant' || e.type === 'user') d.failed = false
 		if (e.type === 'ai-title' && e.aiTitle) d.title = e.aiTitle

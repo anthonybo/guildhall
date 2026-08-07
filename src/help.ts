@@ -130,6 +130,7 @@ function body(share?: ShareInfo): (string | Line)[] {
 		'',
 		{ text: 'KEYS', kind: 'head' },
 		key('↑ ↓', 'move the selection'),
+		key('→ ←', 'open a row for detail, or close it'),
 		key('⏎', "jump to that session's cmux tab"),
 		key('f', 'show only what needs you'),
 		key('l', 'all labels, or only the ones that need you'),

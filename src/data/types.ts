@@ -42,6 +42,8 @@ export type Session = {
 	level: number
 	/** raw score behind `level`, kept so progress within a rank is visible */
 	xp: number
+	/** subagents out and dispatched, in words, when there are any */
+	agents?: string
 }
 
 /** What one poll of a transcript yields, before it becomes a `Session`. */
@@ -58,6 +60,8 @@ export type Digest = {
 	lastTs?: number
 	subProj?: string
 	turns?: number
+	/** subagents still running, from turn_duration's own count */
+	pending?: number
 	failed?: boolean
 	asked?: boolean
 }

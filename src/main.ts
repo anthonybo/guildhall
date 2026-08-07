@@ -252,6 +252,8 @@ let pin: string | null = null
 /** what happened last time it was changed, shown until the panel closes */
 let pinNote = ''
 let selectedId: string | null = null
+/** table rows opened with →, so their detail shows under them */
+const expanded = new Set<string>()
 let sessions: Session[] = []
 let timers: NodeJS.Timeout[] = []
 
@@ -351,11 +353,18 @@ function draw() {
 	const body: string[] = [...townLines]
 	if (tableRows > 0) {
 		// the room's own project colours, so a row and its carpet upstairs match
-		const rowsOut = T.rows(list, cols, selectedId ?? undefined, (p) => office.colourOf(p))
+		const rowsOut = T.rows(list, cols, selectedId ?? undefined, (p) => office.colourOf(p), expanded)
 		const sel = rowsOut.find((r) => r.s.id === selectedId)?.s
 		const det = T.detail(sel, cols)
 		body.push(T.header(cols))
-		for (const r of rowsOut.slice(0, Math.max(0, tableRows - 3))) body.push(r.line)
+		// an expanded row brings its detail with it, and the whole thing still has to
+		// fit the space the table was given
+		const budget = Math.max(0, tableRows - 3)
+		for (const r of rowsOut) {
+			if (body.length - 1 >= budget) break
+			body.push(r.line)
+			for (const e of r.extra ?? []) if (body.length - 1 < budget) body.push(e)
+		}
 		while (body.length < townRows + tableRows - 2) body.push('')
 		body.push(...det)
 	}
@@ -520,6 +529,13 @@ function onKey(b: Buffer) {
 	}
 	if (k === '\x1b[A') moveSelection(-1)
 	else if (k === '\x1b[B') moveSelection(1)
+	else if (k === '\x1b[C') {
+		// → opens the selected row, ← closes it. Arrows because the hand is already
+		// there choosing a row, and nothing else in the table uses left or right.
+		if (selectedId) expanded.add(selectedId)
+	} else if (k === '\x1b[D') {
+		if (selectedId) expanded.delete(selectedId)
+	}
 	else if (k === '\r' || k === '\n') {
 		const s = sessions.find((x) => x.id === selectedId)
 		if (s?.tab) jump(s.tab)

@@ -12,7 +12,31 @@ import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
-export type Row = { s: Session; line: string }
+export type Row = { s: Session; line: string; extra?: string[] }
+
+/**
+ * The rest of what is known about a session, indented under its row.
+ *
+ * The table's flex column shows one truncated sentence, which answers "is this
+ * moving" but not "what is it actually doing". This is the answer to the second
+ * question, and it names the things the one-liner cannot fit — where it is
+ * working, whether it has agents out, what it is waiting on.
+ */
+export function expansion(s: Session, total: number): string[] {
+	const pairs: [string, string][] = [
+		['doing', s.doing || '—'],
+		['title', s.title || '—'],
+		['folder', s.cwd],
+		['level', `${s.level} ${tierOf(s.level).name} · ${tokens(s.xp)} xp · ${s.turns} turns`],
+		['context', s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : 'nothing yet'],
+	]
+	if (s.agents) pairs.splice(1, 0, ['agents', s.agents])
+	if (s.waitingFor) pairs.splice(1, 0, ['waiting on', s.waitingFor])
+	if (s.last && s.last !== s.doing) pairs.push(['last said', s.last])
+
+	const w = Math.max(...pairs.map(([k]) => k.length))
+	return pairs.map(([k, v]) => clip(`      ${fg(C.faint)}${padR(k, w)}${R}  ${fg(C.muted)}${cut(v, Math.max(10, total - w - 10))}${R}`, total))
+}
 
 const GUTTER = 2
 const W_TAB = 4
@@ -61,7 +85,7 @@ export function header(total: number) {
  * colour, and scanning the table for a project becomes a colour match rather than
  * reading ten near-identical grey words.
  */
-export function rows(list: Session[], total: number, selected?: string, colourOf?: (proj: string) => RGB): Row[] {
+export function rows(list: Session[], total: number, selected?: string, colourOf?: (proj: string) => RGB, open?: Set<string>): Row[] {
 	const { proj: wProj, showCtx, flex } = tableWidths(total)
 	return order(list).map((s) => {
 		const look = LOOK[s.state]
@@ -76,7 +100,7 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 			: `${fg(C.faint)}${padR('', W_CTX)}${R}`
 		const cells = [
 			gutter,
-			`${fg(C.faint)}${padL(s.tab ? `⌘${s.tab}` : '·', W_TAB)}${R}`,
+			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : '·'}`, W_TAB)}${R}`,
 			// level is identity, so it sits beside the tab rather than with the status
 			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
 			// the project's own colour from the room, and bold — this is the column you
@@ -88,7 +112,11 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 			`${fg(C.faint)}${padL(ago(s.stale), W_IDLE)}${R}`,
 		].filter((c) => c !== '')
 		const line = cells.join(' ')
-		return { s, line: sel ? `${bg(C.selBg)}${padR(clip(line, total), total)}${R}` : clip(line, total) }
+		return {
+			s,
+			line: sel ? `${bg(C.selBg)}${padR(clip(line, total), total)}${R}` : clip(line, total),
+			extra: open?.has(s.id) ? expansion(s, total) : undefined,
+		}
 	})
 }
 

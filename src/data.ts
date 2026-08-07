@@ -46,6 +46,20 @@ function projectName(cwd: string, d: Digest) {
 	return CONTAINER.test(base) && d.subProj ? d.subProj : base
 }
 
+/**
+ * Subagents, in words.
+ *
+ * "sent out an agent" in the doing column says one went out; it does not say
+ * whether four are still running. Worth spelling out, because a session with
+ * agents out looks idle from the outside while being the busiest thing here.
+ */
+function agentsLine(d: Digest) {
+	const out = d.pending ?? 0
+	const total = d.subs ?? 0
+	if (out > 0) return `${out} running now${total ? ` · ${total} dispatched in all` : ''}`
+	return total ? `${total} dispatched` : undefined
+}
+
 /** Context consumed this turn. Cache reads count — they occupy the window too. */
 function contextUsed(d: Digest) {
 	const u = d.usage
@@ -105,6 +119,7 @@ export function collect(): Session[] {
 			unread: !!tab?.unread,
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			turns: d.turns ?? 0,
+			agents: agentsLine(d),
 			level: levelFor(xp),
 			xp: Math.round(xp),
 			palette: looks.get(s.sessionId)?.palette ?? 0,
