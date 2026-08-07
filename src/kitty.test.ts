@@ -72,3 +72,23 @@ test('focus-in triggers a re-send and focus-out does not', () => {
 	assert.equal(out.lost, false, 'focus-out should not force a re-send')
 	assert.equal(out.keys, '', 'focus-out leaked into the key handler')
 })
+
+test('a lone Escape is delivered at once, not held for the next key', () => {
+	// Holding it meant Escape never arrived until something else was pressed, and
+	// the held byte then prefixed that key: ESC followed by `?` reached the handler
+	// as one unrecognised two-byte string, so both were swallowed. That is why the
+	// help panel appeared to need two presses to open and two to close.
+	const a = demux(E)
+	assert.equal(a.keys, E, 'Escape was swallowed')
+	assert.equal(a.rest, '', 'Escape was held back')
+
+	const b = demux(a.rest + '?')
+	assert.equal(b.keys, '?', 'the following key was corrupted by a held Escape')
+})
+
+test('holding a genuine partial sequence still works', () => {
+	// the fix must not cost us the thing the buffer is for
+	assert.equal(demux(`${E}[`).rest, `${E}[`)
+	assert.equal(demux(`${E}[1`).rest, `${E}[1`)
+	assert.equal(demux(`${E}[A`).keys, `${E}[A`, 'a complete arrow was held')
+})
