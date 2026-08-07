@@ -115,7 +115,14 @@ export function detail(s: Session | undefined, total: number) {
  * OFF is amber, not grey: it is the state in which you can lose an overnight
  * build, which is worth noticing rather than hiding.
  */
-export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolean }) {
+export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolean }, compact = false) {
+	if (compact) {
+		// glyph and one word. The full sentence is a luxury of a wide terminal; the
+		// state itself still reads, and the panel spells it out.
+		if (holding) return `${fg(C.fillOk)}● ${bold}awake${R}`
+		if (armed) return `${fg(C.screenEdit)}◐ awake${R}`
+		return `${fg(C.fillWarn)}○ sleeps${R}`
+	}
 	// The rule, not the switch position. "awake ON" invited the reading that the
 	// machine would never sleep, when what it actually promises is narrower: sleep
 	// is blocked WHILE something is working, and released the moment it stops.
@@ -141,9 +148,10 @@ export type Share = { on: boolean; port: number; error?: string }
  * machine is currently answering on the network — and saying "off" on every other
  * frame would train the eye to ignore the place the warning appears.
  */
-function shareBadge(share?: Share) {
-	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${fg(C.muted)} · ${share.error}${R}`
+function shareBadge(share?: Share, compact = false) {
+	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${compact ? '' : `${fg(C.muted)} · ${share.error}`}${R}`
 	if (!share?.on) return ''
+	if (compact) return `  ${fg(C.screenAgent)}◉ :${share.port}${R}`
 	return `  ${fg(C.screenAgent)}◉ ${bold}sharing${R}${fg(C.screenAgent)} · :${share.port}${R}`
 }
 
@@ -167,10 +175,25 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 			? `${fg(C.screenAgent)}⇡ v${build}${R}  `
 			: `${fg(C.faint)}v${build}${R}  `
 		: ''
-	const right = `${awakeBadge(awake)}${shareBadge(share)}`
 	const head = `${bold}${fg(C.gold)} GUILDHALL ${R}${stamp}${fg(C.faint)}${list.length} sessions${R}`
+
+	/**
+	 * The badges shrink before they shove.
+	 *
+	 * Making the right half win was correct — an open network listener must not be
+	 * the first thing a narrow terminal drops — but taken absolutely it ate the
+	 * whole header: two full-sentence badges are ~56 columns, so on a split pane
+	 * there was no room left and the name and version vanished entirely. Try the
+	 * full pair, then abbreviated, then drop the awake badge, which is the one a
+	 * glance can most afford to lose. Identity is never a candidate.
+	 */
+	const MIN_HEAD = width(head)
+	let right = `${awakeBadge(awake)}${shareBadge(share)}`
+	if (total - width(right) - 2 < MIN_HEAD) right = `${awakeBadge(awake, true)}${shareBadge(share, true)}`
+	if (total - width(right) - 2 < MIN_HEAD) right = shareBadge(share, true).trimStart()
+
 	const room = total - width(right) - 2
-	if (room < 20) return clip(right.trimStart(), total)
+	if (room < 16) return clip(head, total)
 
 	// Drop whole pills rather than slicing one in half. Character-clipping left a
 	// bare glyph with no count attached — a mark that means nothing and reads as a
