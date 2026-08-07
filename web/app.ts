@@ -390,6 +390,8 @@ function paintCounts(list: Session[]) {
 				// header grew to three lines of half-phrases.
 				const word = document.createElement('i')
 				word.textContent = ` ${LOOK[k].label}`
+				// the same phrase the header shows, for a pointer that hovers the glyph
+				el.title = `${counts[k]} ${LOOK[k].label}`
 				el.append(n, word)
 				return el
 			}),
