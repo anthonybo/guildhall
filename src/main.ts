@@ -272,7 +272,8 @@ function draw() {
 
 	const body: string[] = [...townLines]
 	if (tableRows > 0) {
-		const rowsOut = T.rows(list, cols, selectedId ?? undefined)
+		// the room's own project colours, so a row and its carpet upstairs match
+		const rowsOut = T.rows(list, cols, selectedId ?? undefined, (p) => office.colourOf(p))
 		const sel = rowsOut.find((r) => r.s.id === selectedId)?.s
 		const det = T.detail(sel, cols)
 		body.push(T.header(cols))

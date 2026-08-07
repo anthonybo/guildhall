@@ -7,7 +7,7 @@
  * transmits its ragged edge in both directions, which is what makes a terminal
  * table look "all over the place".
  */
-import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width } from './theme.ts'
+import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width, type RGB } from './theme.ts'
 import { BUILD } from './version.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
 
@@ -21,31 +21,47 @@ const W_CTX = 12
 const W_IDLE = 4
 const W_LVL = 2
 
+/**
+ * Identity is never dropped.
+ *
+ * The project column used to disappear below 84 columns, which left a row
+ * identified only by a tab number — you could read what a session was doing but
+ * not which one it was, and the table has one job. It narrows instead, and the
+ * context gauge is what goes when there is genuinely no room: a bar you cannot
+ * read is worth less than knowing whose row you are looking at.
+ */
 export function tableWidths(total: number) {
-	// drop the project column on narrow terminals rather than starving the flex one
-	const showProj = total >= 84
-	const fixed = GUTTER + W_TAB + W_LVL + (showProj ? W_PROJ : 0) + W_STATE + W_CTX + W_IDLE
-	const gaps = showProj ? 7 : 6
-	return { showProj, flex: Math.max(12, total - fixed - gaps) }
+	const proj = total >= 84 ? W_PROJ : total >= 62 ? 9 : 7
+	const showCtx = total >= 70
+	const fixed = GUTTER + W_TAB + W_LVL + proj + W_STATE + (showCtx ? W_CTX : 0) + W_IDLE
+	const gaps = showCtx ? 7 : 6
+	return { proj, showCtx, flex: Math.max(10, total - fixed - gaps) }
 }
 
 export function header(total: number) {
-	const { showProj, flex } = tableWidths(total)
+	const { proj, showCtx, flex } = tableWidths(total)
 	const cells = [
 		' '.repeat(GUTTER),
 		padL('TAB', W_TAB),
 		padL('LV', W_LVL),
-		showProj ? padR('PROJECT', W_PROJ) : '',
+		padR('PROJECT', proj),
 		padR('STATUS', W_STATE),
 		padR('DOING NOW', flex),
-		padR('CONTEXT', W_CTX),
+		showCtx ? padR('CONTEXT', W_CTX) : '',
 		padL('IDLE', W_IDLE),
 	].filter((c) => c !== '')
 	return `${fg(C.faint)}${cells.join(' ')}${R}`
 }
 
-export function rows(list: Session[], total: number, selected?: string): Row[] {
-	const { showProj, flex } = tableWidths(total)
+/**
+ * `colourOf` is the room's own project colour — the same hue as that project's
+ * carpet and nameplate upstairs. Sharing it makes the two halves of the screen one
+ * view: a character you notice in the office has a row down here in the same
+ * colour, and scanning the table for a project becomes a colour match rather than
+ * reading ten near-identical grey words.
+ */
+export function rows(list: Session[], total: number, selected?: string, colourOf?: (proj: string) => RGB): Row[] {
+	const { proj: wProj, showCtx, flex } = tableWidths(total)
 	return order(list).map((s) => {
 		const look = LOOK[s.state]
 		const attention = needsAttention(s)
@@ -62,10 +78,12 @@ export function rows(list: Session[], total: number, selected?: string): Row[] {
 			`${fg(C.faint)}${padL(s.tab ? `⌘${s.tab}` : '·', W_TAB)}${R}`,
 			// level is identity, so it sits beside the tab rather than with the status
 			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
-			showProj ? `${fg(C.muted)}${padR(cut(s.proj, W_PROJ), W_PROJ)}${R}` : '',
+			// the project's own colour from the room, and bold — this is the column you
+			// scan down, so it has to win against the sentence beside it
+			`${bold}${fg(colourOf?.(s.proj) ?? C.label)}${padR(cut(s.proj, wProj), wProj)}${R}`,
 			`${fg(look.color)}${padR(`${look.glyph} ${look.label}`, W_STATE)}${R}`,
 			`${fg(s.state === 'parked' ? C.muted : C.label)}${padR(cut(s.doing || '—', flex), flex)}${R}`,
-			padR(ctx, W_CTX),
+			showCtx ? padR(ctx, W_CTX) : '',
 			`${fg(C.faint)}${padL(ago(s.stale), W_IDLE)}${R}`,
 		].filter((c) => c !== '')
 		const line = cells.join(' ')
