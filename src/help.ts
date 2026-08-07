@@ -1,0 +1,120 @@
+/**
+ * The help overlay.
+ *
+ * Everything on screen is a glyph or a colour standing in for a sentence, which
+ * is only legible once somebody has told you the sentence. This is that telling.
+ *
+ * It answers the questions actually asked of this app rather than restating the
+ * key bindings: what "awake" promises (and does not), why a session can read
+ * `working` when nothing is on screen, and what a level counts.
+ */
+import { C, LOOK, R, bold, clip, fg, tierOf, width } from './theme.ts'
+import type { State } from './data.ts'
+
+const PAD = 2
+
+type Line = { text: string; kind?: 'title' | 'head' | 'dim' }
+
+/** Colour a leading glyph, so the legend shows the mark you actually see. */
+function stateLine(state: State, meaning: string) {
+	const look = LOOK[state]
+	return `${fg(look.color)}${look.glyph} ${look.label.padEnd(10)}${R}${fg(C.muted)}${meaning}${R}`
+}
+
+function body(): (string | Line)[] {
+	const tier = (n: number) => `${fg(tierOf(n).color)}${tierOf(n).name}${R}`
+	return [
+		{ text: 'guildhall', kind: 'title' },
+		{ text: 'Every live Claude Code session as a room you can glance at.', kind: 'dim' },
+		'',
+		{ text: 'STATUS — whose turn it is', kind: 'head' },
+		stateLine('working', 'generating right now; leave it alone'),
+		stateLine('shell', 'a command it started is still running'),
+		stateLine('needs', 'blocked on you — a permission prompt or a question'),
+		stateLine('review', 'finished, and you have not looked at the tab yet'),
+		stateLine('done', 'finished recently'),
+		stateLine('parked', 'idle for a while; nothing is waiting'),
+		stateLine('error', 'the last turn failed'),
+		`${fg(C.muted)}Derived from the registry and the transcript together, not copied${R}`,
+		`${fg(C.muted)}from Claude Code's own flag — that one says ${bold}busy${R}${fg(C.muted)} forever if a${R}`,
+		`${fg(C.muted)}session dies mid-turn, and ${bold}idle${R}${fg(C.muted)} when it asked you a question.${R}`,
+		'',
+		{ text: 'KEEPING THE MACHINE AWAKE', kind: 'head' },
+		`${fg(C.fillOk)}● holding awake${R}       ${fg(C.muted)}something is working; sleep is blocked${R}`,
+		`${fg(C.screenEdit)}◐ awake when working${R}  ${fg(C.muted)}enabled, nothing running, free to sleep${R}`,
+		`${fg(C.fillWarn)}○ sleeps normally${R}     ${fg(C.muted)}switched off${R}`,
+		`${fg(C.muted)}It is conditional. Enabled means "do not sleep ${bold}while something${R}`,
+		`${fg(C.muted)}${bold}is working${R}${fg(C.muted)}", not "never sleep". Two limits: the display still${R}`,
+		`${fg(C.muted)}sleeps, and closing the lid still sleeps the machine.${R}`,
+		`${fg(C.muted)}Sessions waiting on ${bold}you${R}${fg(C.muted)} do not count, or it would never sleep.${R}`,
+		'',
+		{ text: 'LEVEL — work done, not time spent', kind: 'head' },
+		`${fg(C.muted)}25 x commits  +  3 x file edits  +  15 x subagents  +  minutes worked${R}`,
+		`${fg(C.muted)}Minutes come from turn durations, so a session left open all${R}`,
+		`${fg(C.muted)}night earns nothing. A day of hard work is about 11, a month 37,${R}`,
+		`${fg(C.muted)}a year 85.  ${tier(3)} → ${tier(8)} → ${tier(15)} → ${tier(27)} → ${tier(50)}${R}`,
+		'',
+		{ text: 'THE ROOM', kind: 'head' },
+		`${fg(C.muted)}Working sessions sit at their desk with a lit screen; the tint${R}`,
+		`${fg(C.muted)}says what kind of tool is running. Everyone else walks around,${R}`,
+		`${fg(C.muted)}talks, or goes to the kitchen. A ${bold}?${R}${fg(C.muted)} beside a desk means that${R}`,
+		`${fg(C.muted)}session is waiting on an answer. A project's colour is the same${R}`,
+		`${fg(C.muted)}on its carpet, its nameplate and its row in the table.${R}`,
+		'',
+		{ text: 'KEYS', kind: 'head' },
+		key('↑ ↓', 'move the selection'),
+		key('⏎', "jump to that session's cmux tab"),
+		key('f', 'show only what needs you'),
+		key('l', 'all labels, or only the ones that need you'),
+		key('a', 'keep the machine awake, or let it sleep'),
+		key('tab', 'room / split / table'),
+		key('r', 'force a redraw'),
+		key('?', 'close this'),
+		key('q', 'quit'),
+		'',
+		{ text: 'Read-only. It never starts, stops or moves a session.', kind: 'dim' },
+	]
+}
+
+const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg(C.muted)}${meaning}${R}`
+
+/**
+ * Render the panel as full-width lines, centred in the given box.
+ *
+ * Returned as complete screen rows rather than a floating window: the room is
+ * drawn with half blocks and images, and a partial overlay would leave sprites
+ * showing through the gaps. The caller suppresses the image layer entirely while
+ * this is open, since kitty images always draw above text.
+ */
+export function panel(cols: number, rows: number): string[] {
+	const items = body()
+	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
+	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
+	const boxW = Math.min(cols - 2, Math.max(46, inner))
+	const left = Math.max(0, Math.floor((cols - boxW) / 2))
+	const pad = ' '.repeat(left)
+
+	const out: string[] = []
+	const edge = `${fg(C.rule)}${'─'.repeat(boxW)}${R}`
+	out.push(pad + edge)
+	for (const item of items) {
+		const line = typeof item === 'string' ? item : format(item)
+		out.push(pad + ' '.repeat(PAD) + line)
+	}
+	out.push(pad + edge)
+
+	// centre vertically, so it reads as a panel rather than a wall of text
+	const top = Math.max(0, Math.floor((rows - out.length) / 2))
+	const filled = [...Array.from({ length: top }, () => ''), ...out]
+	while (filled.length < rows) filled.push('')
+	return filled.slice(0, rows).map((l) => clip(l, cols))
+}
+
+function format(l: Line) {
+	if (l.kind === 'title') return `${bold}${fg(C.gold)}${l.text}${R}`
+	if (l.kind === 'head') return `${bold}${fg(C.label)}${l.text}${R}`
+	if (l.kind === 'dim') return `${fg(C.faint)}${l.text}${R}`
+	return l.text
+}
+
+const stripLine = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')

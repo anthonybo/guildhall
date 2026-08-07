@@ -34,6 +34,7 @@ npm start
 | `l` | all labels, or only the ones that need you |
 | `a` | keep the machine awake, or let it sleep |
 | `tab` | cycle room / split / table |
+| `?` | what everything on screen means |
 | `r` | force a redraw |
 | `q` | quit |
 
@@ -46,6 +47,9 @@ context gauge yields first, then the project name narrows, so a row always tells
 you *which* session it is.
 
 <img src="docs/narrow.svg" alt="The same office at 72 columns: desks pack into more rows, the context gauge is dropped and project names shorten, but every session is still listed with its tab number, level, name and status." width="70%">
+
+Press `?` for a panel explaining every status, what the sleep hold does and does
+not promise, what a level counts, and how to read the room. Any key closes it.
 
 ## What it reads
 
