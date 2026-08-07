@@ -275,12 +275,14 @@ function digestInner(file: string, statSize: number) {
 	}
 	const d: Digest = {}
 	const seen = new Map<string, number>()
-	const CONTAINERS = /(?:^|\/)(projects|repos|src|code|dev|work|git)\/([^/\s"'`;:]+)/g
+	// only real container directories, and only a directory name — 'src' matches
+	// inside every repository, which is how "data.ts" and "null" became projects
+	const CONTAINERS = /(?:^|\/)(projects|repos|workspace)\/([^/\s"'`;:.]+)(?=\/|$)/g
 	const note = (v: unknown) => {
 		if (typeof v !== 'string') return
 		for (const m of v.matchAll(CONTAINERS)) {
 			const name = m[2]
-			if (!name || name.startsWith('.') || name.includes('*')) continue
+			if (!name || name.startsWith('.') || name.includes('*') || name === 'null' || name === 'undefined') continue
 			seen.set(name, (seen.get(name) ?? 0) + 1)
 		}
 	}
@@ -546,7 +548,7 @@ export function collect(): Session[] {
 		// its name, which tells you nothing when eight of nine share it. Fall back to
 		// the directory its own tool calls keep touching.
 		const base = path.basename(s.cwd)
-		const container = /^(projects|repos|src|code|dev|work|git)$/.test(base)
+		const container = /^(projects|repos|workspace)$/.test(base)
 		const proj = container && d.subProj ? d.subProj : base
 		const tab = tabInfo
 		return {

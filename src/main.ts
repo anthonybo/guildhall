@@ -316,6 +316,15 @@ function start() {
 	layout()
 	draw()
 	timers.push(setInterval(animate, 110))
+	// A terminal drops the images it holds when its surface is hidden — a cmux tab
+	// switch, or the window moving to another display — and unlike a resize there
+	// is no event for it. Periodically forget the ids so the next frame
+	// re-transmits and the room heals itself.
+	timers.push(
+		setInterval(() => {
+			imageIds.clear()
+		}, 8000),
+	)
 	timers.push(
 		setInterval(() => {
 			sessions = collect()
