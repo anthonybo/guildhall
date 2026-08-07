@@ -38,6 +38,7 @@ const DIGITS: Record<string, string[]> = {
 	'7': ['111', '001', '010', '010', '010'],
 	'8': ['111', '101', '111', '101', '111'],
 	'9': ['111', '101', '111', '001', '111'],
+	'?': ['111', '001', '011', '000', '010'],
 	'★': ['101', '111', '010', '111', '101'],
 }
 
@@ -122,8 +123,8 @@ const badges = new Map<string, Grid>()
  * than on it: a seated occupant covers the desk surface, and a badge you cannot
  * see while someone is working is the wrong way round.
  */
-export function badge(level: number, tier: RGB): Grid {
-	const key = level + ':' + tier.join('')
+export function badge(level: number, tier: RGB, face = ''): Grid {
+	const key = level + ':' + tier.join('') + ':' + face
 	const hit = badges.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: 16 }, () => new Array<RGB | null>(16).fill(null))
@@ -139,8 +140,8 @@ export function badge(level: number, tier: RGB): Grid {
 	box(2, 2, 12, 13, EDGE)
 	box(3, 3, 10, 3, tier)
 	box(3, 6, 10, 8, CARD)
-	const face = DIGITS[level < 10 ? String(level) : STAR] ?? DIGITS['0']
-	face.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(6 + x, 8 + y, [40, 42, 54])))
+	const glyph = DIGITS[face] ?? DIGITS[level < 10 ? String(level) : STAR] ?? DIGITS['0']
+	glyph.forEach((r, y) => [...r].forEach((c, x) => c === '1' && put(6 + x, 8 + y, [40, 42, 54])))
 	const g: Grid = { w: 16, h: 16, grid }
 	badges.set(key, g)
 	return g

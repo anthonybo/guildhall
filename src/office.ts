@@ -172,7 +172,7 @@ export class Office {
 	/** where to place a monitor image this frame, and whether it is lit */
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
 	/** level badges, in the gap column beside each occupied desk */
-	badges: { x: number; y: number; level: number }[] = []
+	badges: { x: number; y: number; level: number; asking: boolean }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
@@ -1033,10 +1033,12 @@ export class Office {
 		this.badges = []
 		const lit = new Map<string, Session['toolKind']>()
 		const levels = new Map<string, number>()
+		const asking = new Set<string>()
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
 			const s = byId.get(sp.taken)
 			if (s) levels.set(`${sp.col},${sp.row}`, s.level)
+			if (s && s.state === 'needs') asking.add(`${sp.col},${sp.row}`)
 			if (s && this.atDesk(s)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
@@ -1054,8 +1056,14 @@ export class Office {
 				// beside the desk, in the gap column, where nobody sits
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
 				if (lvl) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl })
+					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false })
 					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
+				}
+				// a session waiting on an answer gets a placard beside its desk, since
+				// the registry never reports a plain question as "waiting"
+				if (asking.has(`${c},${pod.seatRow}`)) {
+					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true })
+					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 				}
 			}
 		for (const pr of this.props) {

@@ -197,6 +197,7 @@ function digest(file: string) {
 			if (!Number.isNaN(t) && (!d.lastTs || t > d.lastTs)) d.lastTs = t
 		}
 		note(e.cwd)
+		if (e.type === 'user' && !e.toolUseResult) d.asked = false
 		// turn_duration carries the running message count; an API error or a failed
 		// stop is the only failure signal the transcript exposes
 		if (e.type === 'system' && e.subtype === 'turn_duration' && typeof e.messageCount === 'number') d.turns = e.messageCount
@@ -211,8 +212,15 @@ function digest(file: string) {
 					if (b.type === 'tool_use') {
 						d.tool = b.name
 						d.toolInput = b.input
+						// a session that opened a question dialog is waiting on you even
+						// though the registry still calls it idle
+						d.asked = b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'
 						for (const v of Object.values(b.input ?? {})) note(v)
-					} else if (b.type === 'text' && b.text.trim()) d.text = b.text.trim()
+					} else if (b.type === 'text' && b.text.trim()) {
+						d.text = b.text.trim()
+						// or ended its turn on a question, which the registry never reports
+						d.asked = /\?\s*$/.test((d.text ?? '').replace(/[)*_`'"\]]+$/, '').trim())
+					}
 				}
 		}
 	}
@@ -221,7 +229,7 @@ function digest(file: string) {
 	return d
 }
 
-type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean }
+type Digest = { title?: string; usage?: any; tool?: string; toolInput?: any; text?: string; lastTs?: number; subProj?: string; turns?: number; failed?: boolean; asked?: boolean }
 
 /** Which cmux tab a session is sitting in, so we can offer to jump there. */
 function cmuxMap() {
@@ -316,7 +324,7 @@ const SHORT: Record<string, (i: any) => string> = {
 }
 
 function shortText(d: Digest, state: State, waitingFor?: string) {
-	if (state === 'needs') return waitingFor === 'permission prompt' ? 'Needs approval' : 'Waiting for input'
+	if (state === 'needs') return waitingFor === 'permission prompt' ? 'Needs approval' : 'Answer needed'
 	if (state !== 'working' && state !== 'shell') return ''
 	if (!d.tool) return 'Thinking'
 	if (d.tool.startsWith('mcp__')) return cut(d.tool.split('__').slice(-1)[0], 20)
@@ -346,7 +354,8 @@ const SAY: Record<string, (i: any) => string | null> = {
 }
 
 function doingText(d: Digest, state: State, waitingFor?: string) {
-	if (state === 'needs') return waitingFor ?? 'needs you'
+	// repeating the status here wastes the widest column; show the question itself
+	if (state === 'needs') return waitingFor ?? (d.asked ? firstSentence(d.text) || 'asked you something' : 'needs you')
 	if (state === 'working' || state === 'shell') {
 		if (!d.tool) return 'thinking…'
 		if (d.tool.startsWith('mcp__')) return cut(d.tool.split('__').slice(1).join(' '), 28)
@@ -391,6 +400,8 @@ export function collect(): Session[] {
 			? 'error'
 			: raw === 'waiting'
 				? 'needs'
+				: d.asked && raw !== 'busy'
+					? 'needs'
 				: raw === 'busy' && !quiet
 					? 'working'
 					: raw === 'shell' && !quiet
@@ -420,7 +431,7 @@ export function collect(): Session[] {
 			proj,
 			cwd: s.cwd,
 			state,
-			waitingFor: s.waitingFor,
+			waitingFor: s.waitingFor ?? (d.asked ? 'answer a question' : undefined),
 			stale,
 			title: d.title || (s.nameSource === 'derived' ? '' : (s.name ?? '')) || proj,
 			doing: doingText(d, state, s.waitingFor),
