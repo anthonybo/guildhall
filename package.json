@@ -11,7 +11,9 @@
 		"start": "npm run --silent build && node dist/main.mjs",
 		"build": "npm run --silent build:cli && npm run --silent build:web",
 		"build:cli": "esbuild src/main.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/main.mjs --log-level=error",
-		"build:web": "esbuild web/app.ts --bundle --format=esm --target=es2022 --outfile=web/app.js --log-level=error",
+		"build:web": "npm run --silent build:js && npm run --silent build:css",
+		"build:js": "esbuild web/app.ts --bundle --format=esm --target=es2022 --outfile=web/app.js --log-level=error",
+		"build:css": "tailwindcss -i web/src.css -o web/app.css",
 		"release": "npm run --silent docs && npm run --silent build:web && git add -A docs web/app.js && (git diff --cached --quiet || git commit -m \"Refresh the generated documentation images and browser bundle\") && npm run check && npm version ${npm_config_level:-patch} -m \"Release v%s\" && git push --follow-tags",
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
@@ -30,10 +32,12 @@
 		"string-width": "^8.1.0"
 	},
 	"devDependencies": {
+		"@tailwindcss/cli": "^4.3.3",
 		"@types/node": "^26.1.2",
 		"@types/react": "^19.2.17",
-		"prettier": "^3.4.2",
 		"esbuild": "^0.25.0",
+		"prettier": "^3.4.2",
+		"tailwindcss": "^4.3.3",
 		"tsx": "^4.23.1",
 		"typescript": "^6.0.3"
 	}

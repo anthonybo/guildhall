@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fail if web/app.js no longer matches what src/ and web/app.ts compile to.
+# Fail if web/app.js or web/app.css no longer matches what the sources compile to.
 #
 # The bundle is a tracked build artifact, so it can disagree with the source it
 # was built from — and when it does, the browser draws a different program than
@@ -14,11 +14,11 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-before=$(shasum web/app.js 2>/dev/null || echo none)
+before=$(shasum web/app.js web/app.css 2>/dev/null || echo none)
 npm run --silent build:web
-after=$(shasum web/app.js)
+after=$(shasum web/app.js web/app.css)
 
 if [ "$before" != "$after" ]; then
-	echo "web/app.js was stale — rebuilt it for you. Commit the change." >&2
+	echo "web/app.js or web/app.css was stale — rebuilt it for you. Commit the change." >&2
 	exit 1
 fi

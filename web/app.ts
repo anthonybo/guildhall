@@ -28,6 +28,25 @@ let live = false
 
 /* ── the header ── */
 
+/**
+ * The connection state: a coloured dot and a word.
+ *
+ * A real element rather than a `::before` on a class. The dot needs its own
+ * colour and its own size at the width where the word is dropped, and two
+ * utilities on a span say that more plainly than a pseudo-element driven by a
+ * class the JS has to remember to set.
+ */
+function setLink(state: 'live' | 'offline') {
+	const dot = document.createElement('span')
+	dot.className = `text-[0.9rem]/none ${state === 'live' ? 'text-ok' : 'text-hot'}`
+	dot.textContent = state === 'live' ? '●' : '○'
+	const word = document.createElement('span')
+	// the word goes on a phone; the dot is the reading and it stays
+	word.className = 'max-[560px]:hidden'
+	word.textContent = state
+	bar.link.replaceChildren(dot, word)
+}
+
 function paintCounts(list: Session[]) {
 	const counts: Record<string, number> = {}
 	for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1
@@ -37,13 +56,19 @@ function paintCounts(list: Session[]) {
 			.map((k) => {
 				const el = document.createElement('span')
 				el.style.color = rgb(LOOK[k].color)
+				// a count is one unbreakable phrase: "1 working" splitting across lines
+				// turned the header into three rows of half-sentences on a phone
+				el.className = 'whitespace-nowrap'
 				el.textContent = `${LOOK[k].glyph} `
-				const n = document.createElement('b')
+				const n = document.createElement('span')
+				n.className = 'text-label'
 				n.textContent = String(counts[k])
-				// The word is its own element so a narrow screen can style it apart. As
-				// one string, "1 working" wrapped between the number and the word and
-				// the header grew to three lines of half-phrases.
-				const word = document.createElement('i')
+				// The word is its own element so a narrow screen could style it apart.
+				// It stays at every width: a bare ▲ or ◆ is unreadable to anyone who
+				// has not memorised a legend, and the count is worth nothing if you
+				// cannot tell what it counts.
+				const word = document.createElement('span')
+				word.className = 'text-label'
 				word.textContent = ` ${LOOK[k].label}`
 				// the same phrase, for a pointer that hovers the glyph
 				el.title = `${counts[k]} ${LOOK[k].label}`
@@ -156,8 +181,7 @@ function connect() {
 		es = new EventSource('/api/stream')
 		es.onopen = () => {
 			live = true
-			bar.link.className = 'link live'
-			bar.link.textContent = 'live'
+			setLink('live')
 			freshness()
 		}
 		es.onmessage = (e) => {
@@ -166,8 +190,7 @@ function connect() {
 		}
 		es.onerror = () => {
 			live = false
-			bar.link.className = 'link down'
-			bar.link.textContent = 'offline'
+			setLink('offline')
 			es?.close()
 			es = null
 			freshness()

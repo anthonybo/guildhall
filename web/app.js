@@ -166,7 +166,7 @@ function mountList(list, empty) {
 }
 function details(s) {
   const dl = document.createElement("dl");
-  dl.className = "detail";
+  dl.className = "[grid-area:detail] mt-2.5 grid [grid-template-columns:max-content_1fr] gap-x-3.5 gap-y-1 border-t border-line pt-2.5 text-[0.82rem]";
   const rows = [
     ["title", s.title || "\u2014"],
     ["folder", s.cwd],
@@ -180,8 +180,10 @@ function details(s) {
   ];
   for (const [k, v] of rows) {
     const dt = document.createElement("dt");
+    dt.className = "text-faint";
     dt.textContent = k;
     const dd = document.createElement("dd");
+    dd.className = "m-0 text-muted [overflow-wrap:anywhere]";
     dd.textContent = v;
     dl.append(dt, dd);
   }
@@ -197,12 +199,12 @@ function paintList(list) {
     const members = sorted.filter(band2.has);
     if (!members.length) continue;
     const head = document.createElement("li");
-    head.className = "band";
+    head.className = "band band-rule tint-page sticky top-12 z-[1] mt-3.5 mb-px flex items-center gap-2.5 rounded border-l-5 border-(--state) px-2.5 py-1.5 text-[0.76rem] font-bold tracking-[0.14em] text-(--state) uppercase first:mt-0";
     head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
     head.style.setProperty("--tint", WEIGHT[band2.key] ?? "10%");
-    head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
-    head.querySelector(".band-name").textContent = band2.label;
-    head.querySelector(".band-n").textContent = String(members.length);
+    head.innerHTML = `<span></span><span class="rounded-full bg-(--state) px-1.5 py-px font-bold text-[#1a1c28]"></span>`;
+    head.children[0].textContent = band2.label;
+    head.children[1].textContent = String(members.length);
     nodes.push(head);
     nodes.push(...members.map(row));
   }
@@ -211,7 +213,14 @@ function paintList(list) {
     const look = LOOK[s.state];
     const li = document.createElement("li");
     const busy = s.state === "working" || s.state === "shell";
-    li.className = "row" + (needsAttention(s) ? " attn" : "") + (busy ? " live" : "");
+    const attn = needsAttention(s);
+    li.className = [
+      "row group grid cursor-pointer gap-x-2.5 gap-y-0.5 rounded-md border border-l-5 border-(--state) p-2.5 tint-panel",
+      '[grid-template-columns:auto_1fr_auto] [grid-template-areas:"lv_proj_meta""lv_doing_doing""detail_detail_detail"]',
+      "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--state)",
+      attn ? "attn" : "border-state-soft",
+      busy ? "sweep" : ""
+    ].join(" ");
     if (busy) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
     li.style.setProperty("--state", rgb(look.color));
     li.style.setProperty("--tint", WEIGHT[s.state] ?? "10%");
@@ -219,14 +228,14 @@ function paintList(list) {
     li.style.setProperty("--proj", rgb(hues.get(s.proj) ?? look.color));
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
-			<span class="lv">${s.level}</span>
-			<span class="proj"></span>
-			<span class="meta">
-				<span class="state">${look.glyph} ${look.label}</span>
-				${s.ctxUsed ? `<span class="ctx${pct > 90 ? " hot" : ""}">${pct}%</span>` : ""}
+			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
+			<span class="proj [grid-area:proj] truncate font-bold text-(--proj) after:ml-2 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90"></span>
+			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-faint">
+				<span class="text-(--state)">${look.glyph} ${look.label}</span>
+				${s.ctxUsed ? `<span class="tabular-nums${pct > 90 ? " text-hot" : ""}">${pct}%</span>` : ""}
 				<span>${ago(s.stale)}</span>
 			</span>
-			<span class="doing"></span>`;
+			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-muted"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
     li.tabIndex = 0;
@@ -2285,19 +2294,19 @@ var settings = read();
 function mountSettings(button, panel, onChange) {
   for (const s of SETTINGS) {
     const group = document.createElement("div");
-    group.className = "set";
+    group.className = "not-first:mt-4 not-first:border-t not-first:border-line not-first:pt-4";
     const name = document.createElement("span");
-    name.className = "set-label";
+    name.className = "mb-1.5 block text-[0.82rem] text-label";
     name.id = `set-${s.key}`;
     name.textContent = s.label;
     const choices = document.createElement("div");
-    choices.className = "choices";
+    choices.className = "flex flex-wrap gap-1.5";
     choices.setAttribute("role", "radiogroup");
     choices.setAttribute("aria-labelledby", name.id);
     for (const o of s.options) {
       const b = document.createElement("button");
       b.type = "button";
-      b.className = "choice";
+      b.className = "flex-1 basis-32 cursor-pointer rounded border border-line bg-bg px-2 py-1.5 text-[0.78rem] text-muted hover:border-faint hover:text-label focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-checked:border-gold aria-checked:bg-gold aria-checked:text-bg";
       b.setAttribute("role", "radio");
       b.textContent = o.label;
       const sync = () => b.setAttribute("aria-checked", String(settings[s.key] === o.value));
@@ -2309,26 +2318,26 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY, JSON.stringify(settings));
         } catch {
         }
-        for (const el of choices.querySelectorAll(".choice")) el.setAttribute("aria-checked", "false");
+        for (const el of choices.querySelectorAll("[role=radio]")) el.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
       choices.append(b);
     }
     const help = document.createElement("p");
-    help.className = "set-help";
+    help.className = "mt-1.5 mb-0 text-[0.72rem]/[1.4] text-faint";
     help.textContent = s.help;
     group.append(name, choices, help);
     panel.append(group);
   }
   const note = document.createElement("p");
-  note.className = "set-note";
+  note.className = "mt-3.5 mb-0 border-t border-line pt-3 text-[0.72rem]/[1.4] text-faint";
   note.textContent = "Saved in this browser only. The terminal keeps its own settings.";
   panel.append(note);
   const open = (want) => {
     panel.hidden = !want;
     button.setAttribute("aria-expanded", String(want));
-    if (want) panel.querySelector(".choice")?.focus();
+    if (want) panel.querySelector("[role=radio]")?.focus();
     else button.focus();
   };
   button.addEventListener("click", (e) => {
@@ -2499,6 +2508,15 @@ var offlineEl = $("#offline");
 var sessions2 = [];
 var seenAt = 0;
 var live = false;
+function setLink(state) {
+  const dot = document.createElement("span");
+  dot.className = `text-[0.9rem]/none ${state === "live" ? "text-ok" : "text-hot"}`;
+  dot.textContent = state === "live" ? "\u25CF" : "\u25CB";
+  const word2 = document.createElement("span");
+  word2.className = "max-[560px]:hidden";
+  word2.textContent = state;
+  bar.link.replaceChildren(dot, word2);
+}
 function paintCounts(list) {
   const counts = {};
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
@@ -2506,10 +2524,13 @@ function paintCounts(list) {
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
       const el = document.createElement("span");
       el.style.color = rgb(LOOK[k].color);
+      el.className = "whitespace-nowrap";
       el.textContent = `${LOOK[k].glyph} `;
-      const n = document.createElement("b");
+      const n = document.createElement("span");
+      n.className = "text-label";
       n.textContent = String(counts[k]);
-      const word2 = document.createElement("i");
+      const word2 = document.createElement("span");
+      word2.className = "text-label";
       word2.textContent = ` ${LOOK[k].label}`;
       el.title = `${counts[k]} ${LOOK[k].label}`;
       el.append(n, word2);
@@ -2570,8 +2591,7 @@ function connect() {
     es = new EventSource("/api/stream");
     es.onopen = () => {
       live = true;
-      bar.link.className = "link live";
-      bar.link.textContent = "live";
+      setLink("live");
       freshness();
     };
     es.onmessage = (e) => {
@@ -2580,8 +2600,7 @@ function connect() {
     };
     es.onerror = () => {
       live = false;
-      bar.link.className = "link down";
-      bar.link.textContent = "offline";
+      setLink("offline");
       es?.close();
       es = null;
       freshness();

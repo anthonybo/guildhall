@@ -67,7 +67,7 @@ export function mountList(list: HTMLElement, empty: HTMLElement) {
 /** The rest of what is known about a session, shown when its row is opened. */
 function details(s: Session) {
 	const dl = document.createElement('dl')
-	dl.className = 'detail'
+	dl.className = '[grid-area:detail] mt-2.5 grid [grid-template-columns:max-content_1fr] gap-x-3.5 gap-y-1 border-t border-line pt-2.5 text-[0.82rem]'
 	const rows: [string, string][] = [
 		['title', s.title || '—'],
 		['folder', s.cwd],
@@ -81,8 +81,11 @@ function details(s: Session) {
 	]
 	for (const [k, v] of rows) {
 		const dt = document.createElement('dt')
+		dt.className = 'text-faint'
 		dt.textContent = k
 		const dd = document.createElement('dd')
+		// anywhere, not normal: a path or a sentence must wrap rather than widen the card
+		dd.className = 'm-0 text-muted [overflow-wrap:anywhere]'
 		dd.textContent = v // never innerHTML: this is the session's own prose
 		dl.append(dt, dd)
 	}
@@ -102,12 +105,18 @@ export function paintList(list: Session[]) {
 		const members = sorted.filter(band.has)
 		if (!members.length) continue
 		const head = document.createElement('li')
-		head.className = 'band'
+		// Sticky, so while scrolling a long parked list you never lose track of
+		// which band you are in — the answer to "is anything live" must survive
+		// being halfway down the page. The solid left bar and the washed background
+		// are what make the section boundary legible from across a desk rather than
+		// only once you are reading it.
+		head.className =
+			'band band-rule tint-page sticky top-12 z-[1] mt-3.5 mb-px flex items-center gap-2.5 rounded border-l-5 border-(--state) px-2.5 py-1.5 text-[0.76rem] font-bold tracking-[0.14em] text-(--state) uppercase first:mt-0'
 		head.style.setProperty('--state', rgb(LOOK[members[0].state].color))
 		head.style.setProperty('--tint', WEIGHT[band.key] ?? '10%')
-		head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`
-		head.querySelector('.band-name')!.textContent = band.label
-		head.querySelector('.band-n')!.textContent = String(members.length)
+		head.innerHTML = `<span></span><span class="rounded-full bg-(--state) px-1.5 py-px font-bold text-[#1a1c28]"></span>`
+		head.children[0].textContent = band.label
+		head.children[1].textContent = String(members.length)
 		nodes.push(head)
 		nodes.push(...members.map(row))
 	}
@@ -117,7 +126,19 @@ export function paintList(list: Session[]) {
 		const look = LOOK[s.state]
 		const li = document.createElement('li')
 		const busy = s.state === 'working' || s.state === 'shell'
-		li.className = 'row' + (needsAttention(s) ? ' attn' : '') + (busy ? ' live' : '')
+		const attn = needsAttention(s)
+		// Tinted by state at the weight its band deserves, not merely spined: a
+		// spine identified the state only once you were already reading the row,
+		// and the whole card carrying the colour is what makes a section readable
+		// from across the room. Anything genuinely waiting on you also takes the
+		// full outline rather than the softened one.
+		li.className = [
+			'row group grid cursor-pointer gap-x-2.5 gap-y-0.5 rounded-md border border-l-5 border-(--state) p-2.5 tint-panel',
+			'[grid-template-columns:auto_1fr_auto] [grid-template-areas:"lv_proj_meta""lv_doing_doing""detail_detail_detail"]',
+			'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--state)',
+			attn ? 'attn' : 'border-state-soft',
+			busy ? 'sweep' : '',
+		].join(' ')
 		// Anchor the sweep to the wall clock. paintList() replaces every row on each
 		// feed message, and a fresh element restarts its animation — so without this
 		// the bar visibly jumped back to the start every two seconds, which reads as
@@ -131,15 +152,18 @@ export function paintList(list: Session[]) {
 		// the project's own colour, the same hue as its carpet in the room
 		li.style.setProperty('--proj', rgb(hues.get(s.proj) ?? look.color))
 		const pct = s.ctxLimit ? Math.round((s.ctxUsed / s.ctxLimit) * 100) : 0
+		// `proj` carries a chevron that rotates when the row opens, so it is obvious
+		// there is more behind it. `doing` brightens on an attn row because that is
+		// the line you are being asked to read.
 		li.innerHTML = `
-			<span class="lv">${s.level}</span>
-			<span class="proj"></span>
-			<span class="meta">
-				<span class="state">${look.glyph} ${look.label}</span>
-				${s.ctxUsed ? `<span class="ctx${pct > 90 ? ' hot' : ''}">${pct}%</span>` : ''}
+			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
+			<span class="proj [grid-area:proj] truncate font-bold text-(--proj) after:ml-2 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['›'] group-[.open]:after:rotate-90"></span>
+			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-faint">
+				<span class="text-(--state)">${look.glyph} ${look.label}</span>
+				${s.ctxUsed ? `<span class="tabular-nums${pct > 90 ? ' text-hot' : ''}">${pct}%</span>` : ''}
 				<span>${ago(s.stale)}</span>
 			</span>
-			<span class="doing"></span>`
+			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? 'text-label' : 'text-muted'}"></span>`
 		// textContent, never innerHTML: this is a session's own prose and file names,
 		// and it must never be able to become markup
 		li.querySelector('.proj')!.textContent = s.proj
@@ -152,6 +176,7 @@ export function paintList(list: Session[]) {
 		const open = opened.has(s.id)
 		li.setAttribute('aria-expanded', String(open))
 		if (open) {
+			// turns the chevron; `open` is only a hook for that one rule
 			li.classList.add('open')
 			li.append(details(s))
 		}

@@ -11,45 +11,76 @@
 		<meta name="apple-mobile-web-app-capable" content="yes" />
 		<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 		<title>guildhall</title>
-		<!-- app.css is the shell — palette, header, settings, room frame. list.css is
-		     the session list, which is the whole app on a phone. Split because one
-		     file had reached the repo's 500-line ceiling, and they change for
-		     different reasons. Order matters: list.css overrides the reduced-motion
-		     rule app.css sets globally. -->
+		<!-- Generated from web/src.css by `npm run build`. Never edit it. -->
 		<link rel="stylesheet" href="/app.css" />
-		<link rel="stylesheet" href="/list.css" />
 	</head>
-	<body>
-		<header id="bar">
-			<span class="brand">GUILDHALL</span>
+	<!-- the insets keep the page clear of the notch and the home indicator -->
+	<body
+		class="m-0 bg-bg font-mono text-[15px] leading-[1.45] text-label [-webkit-text-size-adjust:100%] pt-[env(safe-area-inset-top)] pr-[env(safe-area-inset-right)] pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)]"
+	>
+		<!-- Wraps under 560px so the counts can take a row of their own: six of them
+		     cannot share a line with the wordmark, the version and the connection
+		     dot on a phone, and squeezing them onto one wrapped the header into
+		     three ragged rows. -->
+		<header
+			id="bar"
+			class="sticky top-0 z-[2] flex flex-wrap items-center gap-2 border-b border-line bg-bg/92 px-3.5 py-2.5 backdrop-blur-[8px] min-[560px]:flex-nowrap min-[560px]:gap-3"
+		>
+			<span class="font-bold tracking-[0.06em] text-gold">GUILDHALL</span>
 			<!-- version sits with the name, as it does in the terminal, so a tab left
 			     open for a week is as obviously stale here as it is there -->
-			<span id="ver" class="ver"></span>
-			<span id="counts" class="counts"></span>
-			<span id="link" class="link" title="connection"></span>
+			<span id="ver" class="text-[0.78rem] whitespace-nowrap text-faint"></span>
+			<!-- order-3/basis-full below 560px is what gives the counts their own row -->
+			<span id="counts" class="order-3 flex min-w-0 basis-full flex-wrap gap-x-3.5 gap-y-1 text-[0.8rem] text-muted min-[560px]:order-none min-[560px]:basis-auto min-[560px]:gap-3 min-[560px]:text-[0.82rem]"></span>
+			<span id="link" class="ml-auto flex items-center gap-1.5 text-xs whitespace-nowrap text-faint" title="connection"></span>
 			<!-- The panel is built from the spec in settings.ts rather than written
 			     out here, so adding an option never means editing two files. -->
-			<button id="gear" class="gear" type="button" aria-expanded="false" aria-controls="settings" title="Settings">⚙</button>
-			<div id="settings" class="settings" role="dialog" aria-label="Settings" hidden></div>
+			<button
+				id="gear"
+				class="cursor-pointer rounded border-0 bg-transparent px-0.5 py-px text-base/none text-faint hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:text-gold"
+				type="button"
+				aria-expanded="false"
+				aria-controls="settings"
+				title="Settings"
+			>
+				⚙
+			</button>
+			<div
+				id="settings"
+				class="absolute top-[calc(100%+0.4rem)] right-3.5 z-[3] w-[min(21rem,calc(100vw-1.8rem))] rounded-lg border border-line bg-panel p-3.5 shadow-[0_10px_30px_rgb(0_0_0/45%)]"
+				role="dialog"
+				aria-label="Settings"
+				hidden
+			></div>
 		</header>
 
 		<!-- Shown when the feed has stopped. The numbers below it are real but old,
 		     and a dashboard that cannot say which is worse than one that says
 		     nothing — so it names the age and the likely reason. -->
-		<p id="offline" class="offline" hidden></p>
+		<p
+			id="offline"
+			class="m-0 border-b border-[color-mix(in_srgb,var(--color-gold)_35%,var(--color-line))] bg-[color-mix(in_srgb,var(--color-gold)_12%,var(--color-bg))] px-3.5 py-2.5 text-[0.78rem]/[1.45] text-gold"
+			hidden
+		></p>
 
 		<!-- The room only appears where there is room for it. On a phone the office
 		     at 100 columns is illegible, and the list is the answer to "what is the
-		     status", which is the question the phone is being asked. -->
-		<main id="room" hidden><canvas id="canvas"></canvas></main>
+		     status", which is the question the phone is being asked. Hidden outright
+		     below 720px rather than shrunk. -->
+		<main id="room" class="px-3.5 pt-3.5 max-[720px]:hidden!" hidden>
+			<!-- The canvas is drawn at device resolution and the upscale happens inside
+			     it, with smoothing off, so the pixels stay hard AND the labels stay
+			     type. Letting CSS do the scaling stretched the glyphs along with the art. -->
+			<canvas id="canvas" class="block w-full rounded-md border border-line"></canvas>
+		</main>
 
-		<ul id="list" class="list"></ul>
+		<ul id="list" class="list m-0 grid list-none gap-2 px-3.5 pt-2.5"></ul>
 
-		<p id="empty" class="empty" hidden>No live sessions.</p>
+		<p id="empty" class="px-3.5 py-8 text-center text-faint" hidden>No live sessions.</p>
 
-		<footer id="foot">
+		<footer id="foot" class="mt-3.5 flex gap-3 border-t border-line px-3.5 py-4 text-[0.78rem] text-faint">
 			<span id="stamp"></span>
-			<span class="ro">read-only</span>
+			<span class="ml-auto">read-only</span>
 		</footer>
 
 		<script type="module" src="/app.js"></script>
