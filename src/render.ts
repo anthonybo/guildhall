@@ -75,33 +75,38 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 		}
 	}
 
-	// one canvas pixel is one column wide and half a row tall
+	// One canvas pixel is one column wide and half a row tall, so a y in canvas
+	// pixels scales by sy/2 — never by sx. They agree only while sy === 2*sx, which
+	// both callers happen to pass; using sx on y drifts a row per eight tiles the
+	// moment anyone renders at a real terminal's cell aspect.
+	const py = sy / 2
 	for (let y = 0; y < cv.h; y++) {
 		for (let x = 0; x < cv.w; x++) {
 			const c = cv.get(x, y)
-			if (c) put(x * sx, y * (sy / 2), sx, sy / 2, c)
+			if (c) put(x * sx, y * py, sx, py, c)
 		}
 	}
 	for (const pr of scene.props) {
 		const size = PROP_SIZE[pr.kind]
-		stamp(prop(pr.kind), pr.x * sx, pr.y * sx, size.w * TILE * sx, ((size.h * TILE) / 2) * sy)
+		stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py)
 	}
 	for (const m of scene.monitors) {
-		stamp(monitor(m.lit, frame, m.seed, m.kind), m.x * sx, m.y * sx, MON_COLS * sx, MON_ROWS * sy)
+		stamp(monitor(m.lit, frame, m.seed, m.kind), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy)
 	}
-	// Nameplates. Authored at the box size like everything else here; the caller
-	// picks sx/sy large enough for the font's ink band to fit across two columns.
+	// Nameplates. Authored at the box size like everything else here, so `choose`
+	// sees the real pixels and picks a font and scale that suit them — a caller
+	// passing a small sx/sy gets a smaller font, not a clipped word.
 	for (const p of scene.plates) {
 		const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy)
-		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy)
+		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy)
 	}
 	for (const b of scene.badges) {
 		const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color
-		stamp(badge(b.level, tint, b.asking ? '?' : ''), b.x * sx, b.y * sx, TILE * sx, (TILE / 2) * sy)
+		stamp(badge(b.level, tint, b.asking ? '?' : ''), b.x * sx, b.y * py, TILE * sx, TILE * py)
 	}
 	for (const p of placed) {
 		const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
-		stamp(g, p.x * sx, p.y * sx, CHAR_W * sx, (CHAR_H / 2) * sy)
+		stamp(g, p.x * sx, p.y * py, CHAR_W * sx, CHAR_H * py)
 	}
 	return { rgba, w, h }
 }
