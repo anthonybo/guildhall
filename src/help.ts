@@ -134,7 +134,7 @@ function body(share?: ShareInfo): (string | Line)[] {
 		key('⏎', "jump to that session's cmux tab"),
 		key('f', 'show only what needs you'),
 		key('l', 'all labels, or only the ones that need you'),
-		key('v', 'project names down the side, or along the aisle'),
+		key('v', 'project names beside the desk, or under it'),
 		key('a', 'keep the machine awake, or let it sleep'),
 		key('s', 'share to your network, or stop sharing'),
 		key('p', 'set a new passcode (while this is open)'),

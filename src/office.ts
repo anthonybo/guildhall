@@ -24,13 +24,16 @@ import { cut } from './data/describe.ts'
 import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'
-import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, SCREEN_HOLD, SIT_SINK, TILE, type Character, type Placed } from './office/model.ts'
+import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, SCREEN_HOLD, SIT_SINK, TILE, type Character, type Placed } from './office/model.ts'
 import { SimBase } from './office/sim.ts'
 
 export { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, SIT_SINK, TILE } from './office/model.ts'
 export type { Character, Dir, Placed } from './office/model.ts'
 
 export class Office extends SimBase {
+	/** whether nameplates are drawn as rotated images beside each pod */
+	vertical = false
+
 	draw(cv: Canvas, sessions: Session[]): Placed[] {
 		const byId = new Map(sessions.map((s) => [s.id, s]))
 		cv.clear(C.floorDark)
@@ -75,6 +78,7 @@ export class Office extends SimBase {
 		}
 		this.monitors = []
 		this.badges = []
+		this.plates = []
 		const lit = new Map<string, Session['toolKind']>()
 		const levels = new Map<string, number>()
 		const asking = new Set<string>()
@@ -113,6 +117,20 @@ export class Office extends SimBase {
 					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 				}
 			}
+		// Nameplates, as images beside each pod. `block` is what keeps the status
+		// labels off them — the same mechanism furniture already uses — which is why
+		// this no longer needs the "draw plates last" ordering hack.
+		if (this.vertical) {
+			const named = new Set<string>()
+			for (const pod of this.pods) {
+				if (named.has(pod.proj)) continue
+				const x = pod.c0 * TILE - PLATE_COLS
+				if (x < 0) continue
+				named.add(pod.proj)
+				this.plates.push({ x, y: pod.monitorRow * TILE, proj: pod.proj, colour: this.zoneColor.get(pod.proj) ?? ROOFS[0] })
+				block(x, pod.monitorRow * TILE, PLATE_COLS, PLATE_ROWS)
+			}
+		}
 		for (const pr of this.props) {
 			const size = PROP_SIZE[pr.kind]
 			block(pr.x, pr.y, size.w * TILE, (size.h * TILE) / 2)
@@ -179,49 +197,9 @@ export class Office extends SimBase {
 	 * labels.
 	 */
 	overlay(cv: Canvas, placed: Placed[], selected?: string, showAll = true, vertical = false) {
-		if (!vertical) {
-			this.horizontalPlates(cv)
-			return this.labels(cv, placed, selected, showAll)
-		}
-		// Vertical plates go on LAST. They share a column with the status badges,
-		// and a badge landing mid-name turns "orchard" into "or▲hard" — whereas a
-		// waiting session already carries a "?" placard beside its desk as an image,
-		// so the name is the thing worth protecting.
-		const out = this.labels(cv, placed, selected, showAll)
-		this.verticalPlates(cv)
-		return out
-	}
-
-	/**
-	 * One character per row, in the gap column left of the pod.
-	 *
-	 * The band is eight rows tall, so eight characters fit without touching the
-	 * neighbouring pod at all — which means no claim tracking, no measuring toward
-	 * the next plate, and no possibility of two names colliding.
-	 */
-	private verticalPlates(cv: Canvas) {
-		const named = new Set<string>()
-		for (const pod of this.pods) {
-			if (named.has(pod.proj)) continue
-			named.add(pod.proj)
-			const col = pod.c0 * TILE - 1
-			if (col < 0) continue
-			// Exactly as tall as the workstation it names — monitor, worktop, seat —
-			// and no taller. Running into the aisle made the plate longer than the
-			// desk it belongs to, so it read as a stripe on the floor rather than as
-			// a label attached to something.
-			const top = Math.floor((pod.monitorRow * TILE) / 2)
-			const bottom = Math.floor(((pod.seatRow + 1) * TILE) / 2)
-			const rows = Math.max(0, Math.min(cv.rows, bottom) - top)
-			if (rows < 3) continue
-			const text = cut(pod.proj, rows)
-			const colour = this.zoneColor.get(pod.proj) ?? ROOFS[0]
-			// centred against the desk, so a short name sits level with the monitor
-			const start = top + Math.floor((rows - text.length) / 2)
-			// bold: one glyph per row is spaced by the line height, and at regular
-			// weight that reads as scattered dots rather than as a word
-			for (let i = 0; i < text.length; i++) cv.text(col, start + i, text[i], C.ink, colour, true)
-		}
+		// Vertical plates are images now, emitted by draw(); nothing to write here.
+		if (!vertical) this.horizontalPlates(cv)
+		return this.labels(cv, placed, selected, showAll)
 	}
 
 	private horizontalPlates(cv: Canvas) {

@@ -25,11 +25,9 @@ export type Config = {
 	labels: 'vertical' | 'horizontal'
 }
 
-// Horizontal until the vertical plate is drawn as an image rather than as text.
-// A terminal cell is about twice as tall as it is wide, so one glyph per row
-// spaces a six-letter name over twelve letter-widths — unreadable, and not
-// something a different font can fix.
-const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'horizontal' }
+// Vertical needs the graphics protocol, since the plate is a rotated image; on a
+// terminal without it the room falls back to horizontal on its own.
+const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical' }
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')

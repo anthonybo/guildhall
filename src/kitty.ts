@@ -96,7 +96,8 @@ export function supportsImages() {
  * images go missing, and neither raises SIGWINCH. 2033 fires on the first and
  * 2048 on the second, which turns a guess on a timer into an actual event.
  */
-export const WATCH_ON = '\x1b[?2033h\x1b[?2048h\x1b[?1004h'
+/** `CSI 16 t` asks for the cell size; see CELL_REPORT below for why we want it. */
+export const WATCH_ON = '\x1b[?2033h\x1b[?2048h\x1b[?1004h\x1b[16t'
 export const WATCH_OFF = '\x1b[?2033l\x1b[?2048l\x1b[?1004l'
 
 /**
@@ -113,7 +114,33 @@ export const BECAME_VISIBLE = /\x1b\[\?999;1n/
 export const FOCUS_IN = /\x1b\[I/
 /** Consumed so it never reaches the key handler, but not a reason to re-send. */
 export const FOCUS_OUT = /\x1b\[O/
-export const SIZE_REPORT = /\x1b\[48;\d+;\d+;\d+;\d+t/
+export const SIZE_REPORT = /\x1b\[48;(\d+);(\d+);(\d+);(\d+)t/
+
+/**
+ * The size of one cell, in real pixels.
+ *
+ * Needed because a nameplate has to be authored at exactly the size the terminal
+ * will draw it: kitty and Ghostty bilinear-filter images, so anything authored
+ * larger gets averaged on the way down and 1px strokes wash out to grey. Two
+ * sources, both already reaching us — the in-band size report (mode 2048) carries
+ * rows, cols and the pixel size of the whole surface, and `CSI 16 t` asks for the
+ * cell directly.
+ */
+export const CELL_REPORT = /\x1b\[6;(\d+);(\d+)t/
+
+/** A typical monospace cell, used until the terminal says otherwise. */
+export const DEFAULT_CELL = { w: 8, h: 17 }
+
+/** Read a cell size out of either report, or null if the text is neither. */
+export function cellFrom(s: string) {
+	const c = CELL_REPORT.exec(s)
+	if (c) return { w: Number(c[2]), h: Number(c[1]) }
+	const m = /\x1b\[48;(\d+);(\d+);(\d+);(\d+)t/.exec(s)
+	if (!m) return null
+	const [rows, cols, hpx, wpx] = [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])]
+	if (!rows || !cols || !hpx || !wpx) return null
+	return { w: Math.round(wpx / cols), h: Math.round(hpx / rows) }
+}
 /** A placement naming an image the terminal no longer holds. Only ever seen when
  *  the command was not silenced with q=2. */
 export const IMAGE_GONE = /\x1b_G[^\x1b]*;ENOENT[^\x1b]*\x1b\\/
@@ -178,7 +205,7 @@ export function demux(input: string) {
 			s = s.slice(0, m.index) + s.slice(m.index + m[0].length)
 		}
 	}
-	for (const re of [IMAGE_GONE, BECAME_VISIBLE, SIZE_REPORT, FOCUS_IN]) {
+	for (const re of [IMAGE_GONE, BECAME_VISIBLE, SIZE_REPORT, CELL_REPORT, FOCUS_IN]) {
 		for (;;) {
 			const m = re.exec(s)
 			if (!m) break

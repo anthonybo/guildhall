@@ -28,6 +28,8 @@ export class RoomBase {
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
+	/** project nameplates, drawn rotated as images beside each pod */
+	plates: { x: number; y: number; proj: string; colour: RGB }[] = []
 	/** level badges, in the gap column beside each occupied desk */
 	badges: { x: number; y: number; level: number; asking: boolean }[] = []
 	/** static furniture image placements, in canvas pixels */

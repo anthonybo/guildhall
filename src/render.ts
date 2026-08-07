@@ -15,10 +15,15 @@ import { frameOf } from './characters.ts'
 import { badge, monitor } from './screens.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import { LOOK, tierOf, type RGB } from './theme.ts'
-import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, TILE, type Placed } from './office/model.ts'
+import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, TILE, type Placed } from './office/model.ts'
+import { choose, plate } from './nameplate.ts'
+
+const INK: RGB = [32, 34, 46]
+const NIGHT: RGB = [26, 28, 40]
 
 /** What the compositor needs from an Office, so tests can pass a plain object. */
 export type Scene = {
+	plates: { x: number; y: number; proj: string; colour: RGB }[]
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any }[]
 	badges: { x: number; y: number; level: number; asking: boolean }[]
 	props: { kind: keyof typeof PROP_SIZE; x: number; y: number }[]
@@ -83,6 +88,12 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 	}
 	for (const m of scene.monitors) {
 		stamp(monitor(m.lit, frame, m.seed, m.kind), m.x * sx, m.y * sx, MON_COLS * sx, MON_ROWS * sy)
+	}
+	// Nameplates. Authored at the box size like everything else here; the caller
+	// picks sx/sy large enough for the font's ink band to fit across two columns.
+	for (const p of scene.plates) {
+		const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy)
+		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy)
 	}
 	for (const b of scene.badges) {
 		const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color

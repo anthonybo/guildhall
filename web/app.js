@@ -416,6 +416,8 @@ var CHAR_W = TILE;
 var CHAR_H = TILE * 2;
 var MON_COLS = TILE;
 var MON_ROWS = TILE / 2 + 2;
+var PLATE_COLS = 2;
+var PLATE_ROWS = 3 * (TILE / 2);
 var SIT_SINK = Math.round(CHAR_H * 6 / 32);
 var WALK_TILES_PER_SEC = 3;
 var TYPE_FRAME_SEC = 0.3;
@@ -515,8 +517,8 @@ function planRoom(cols, rows, projects) {
   room.zoneColor = projectColours(projects.map((p) => p.name));
   const bandRows = [];
   for (let r = 1; r + 3 < rows - 1; r += 4) bandRows.push(r);
-  const band = seatProjects(room, projects, bandRows);
-  const socialBands = addFacilities(room, bandRows, band);
+  const band2 = seatProjects(room, projects, bandRows);
+  const socialBands = addFacilities(room, bandRows, band2);
   addTalkArea(room, socialBands);
   addDecor(room, socialBands);
   for (let r = 0; r < rows; r++)
@@ -533,11 +535,11 @@ function seatProjects(room, projects, bandRows) {
       left -= take;
     }
   }
-  let band = 0;
+  let band2 = 0;
   let n = 0;
   for (let i = 0; i < wishlist.length; ) {
-    if (band >= bandRows.length) break;
-    const monitorRow = bandRows[band];
+    if (band2 >= bandRows.length) break;
+    const monitorRow = bandRows[band2];
     const deskRow = monitorRow + 1;
     const seatRow = monitorRow + 2;
     let lo = 2;
@@ -569,7 +571,7 @@ function seatProjects(room, projects, bandRows) {
       lo = c1 + 3;
       i++;
     }
-    band++;
+    band2++;
   }
   for (const w of wishlist) {
     const seated = room.pods.filter((p) => p.proj === w.proj).reduce((a, p) => a + (p.c1 - p.c0 + 1), 0);
@@ -578,7 +580,7 @@ function seatProjects(room, projects, bandRows) {
   }
   room.dropped = [];
   room.workBottom = room.pods.length ? Math.max(...room.pods.map((p) => p.seatRow)) + 1 : 1;
-  return band;
+  return band2;
 }
 function addFacilities(room, bandRows, firstFree) {
   const below = room.workBottom + 2;
@@ -711,6 +713,8 @@ var RoomBase = class {
   dropped = [];
   /** where to place a monitor image this frame, and whether it is lit */
   monitors = [];
+  /** project nameplates, drawn rotated as images beside each pod */
+  plates = [];
   /** level badges, in the gap column beside each occupied desk */
   badges = [];
   /** static furniture image placements, in canvas pixels */
@@ -1286,6 +1290,8 @@ var SimBase = class extends RoomBase {
 
 // src/office.ts
 var Office = class extends SimBase {
+  /** whether nameplates are drawn as rotated images beside each pod */
+  vertical = false;
   draw(cv2, sessions2) {
     const byId = new Map(sessions2.map((s) => [s.id, s]));
     cv2.clear(C.floorDark);
@@ -1329,6 +1335,7 @@ var Office = class extends SimBase {
     };
     this.monitors = [];
     this.badges = [];
+    this.plates = [];
     const lit = /* @__PURE__ */ new Map();
     const levels = /* @__PURE__ */ new Map();
     const asking = /* @__PURE__ */ new Set();
@@ -1359,6 +1366,17 @@ var Office = class extends SimBase {
           block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2);
         }
       }
+    if (this.vertical) {
+      const named = /* @__PURE__ */ new Set();
+      for (const pod of this.pods) {
+        if (named.has(pod.proj)) continue;
+        const x = pod.c0 * TILE - PLATE_COLS;
+        if (x < 0) continue;
+        named.add(pod.proj);
+        this.plates.push({ x, y: pod.monitorRow * TILE, proj: pod.proj, colour: this.zoneColor.get(pod.proj) ?? ROOFS[0] });
+        block(x, pod.monitorRow * TILE, PLATE_COLS, PLATE_ROWS);
+      }
+    }
     for (const pr of this.props) {
       const size = PROP_SIZE[pr.kind];
       block(pr.x, pr.y, size.w * TILE, size.h * TILE / 2);
@@ -1413,37 +1431,8 @@ var Office = class extends SimBase {
    * labels.
    */
   overlay(cv2, placed, selected, showAll = true, vertical = false) {
-    if (!vertical) {
-      this.horizontalPlates(cv2);
-      return this.labels(cv2, placed, selected, showAll);
-    }
-    const out = this.labels(cv2, placed, selected, showAll);
-    this.verticalPlates(cv2);
-    return out;
-  }
-  /**
-   * One character per row, in the gap column left of the pod.
-   *
-   * The band is eight rows tall, so eight characters fit without touching the
-   * neighbouring pod at all — which means no claim tracking, no measuring toward
-   * the next plate, and no possibility of two names colliding.
-   */
-  verticalPlates(cv2) {
-    const named = /* @__PURE__ */ new Set();
-    for (const pod of this.pods) {
-      if (named.has(pod.proj)) continue;
-      named.add(pod.proj);
-      const col = pod.c0 * TILE - 1;
-      if (col < 0) continue;
-      const top = Math.floor(pod.monitorRow * TILE / 2);
-      const bottom = Math.floor((pod.seatRow + 1) * TILE / 2);
-      const rows = Math.max(0, Math.min(cv2.rows, bottom) - top);
-      if (rows < 3) continue;
-      const text = cut(pod.proj, rows);
-      const colour = this.zoneColor.get(pod.proj) ?? ROOFS[0];
-      const start = top + Math.floor((rows - text.length) / 2);
-      for (let i = 0; i < text.length; i++) cv2.text(col, start + i, text[i], C.ink, colour, true);
-    }
+    if (!vertical) this.horizontalPlates(cv2);
+    return this.labels(cv2, placed, selected, showAll);
   }
   horizontalPlates(cv2) {
     const named = /* @__PURE__ */ new Set();
@@ -1452,9 +1441,9 @@ var Office = class extends SimBase {
     for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
       if (named.has(pod.proj)) continue;
       named.add(pod.proj);
-      const band = this.pods.filter((p) => p.deskRow === pod.deskRow);
-      const rightOf = band.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0);
-      const leftOf = band.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1);
+      const band2 = this.pods.filter((p) => p.deskRow === pod.deskRow);
+      const rightOf = band2.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0);
+      const leftOf = band2.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1);
       const plateRow = Math.min(cv2.rows - 1, Math.floor((pod.seatRow + 1) * TILE / 2));
       const here = blocks(plateRow);
       const left0 = pod.c0 * TILE;
@@ -1729,16 +1718,16 @@ function badge(level, tier, face = "") {
   box(2, 2, 12, 13, EDGE);
   box(3, 3, 10, 3, tier);
   box(3, 6, 10, 8, CARD);
-  const INK = [40, 42, 54];
+  const INK2 = [40, 42, 54];
   if (face) {
     const glyph = DIGITS[face] ?? DIGITS["0"];
-    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK)));
+    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK2)));
   } else {
     const text = String(Math.max(1, Math.min(99, level)));
     const startX = text.length > 1 ? 4 : 6;
     [...text].forEach((ch, i) => {
       const glyph = DIGITS[ch] ?? DIGITS["0"];
-      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK)));
+      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK2)));
     });
   }
   const g = { w: 16, h: 16, grid };
@@ -1746,7 +1735,237 @@ function badge(level, tier, face = "") {
   return g;
 }
 
+// src/nameplate.ts
+var F6x13 = { w: 6, h: 13, g: {
+  a: "00000000001c021e22261a0000",
+  b: "00002020203c222222223c0000",
+  c: "00000000001c222020221c0000",
+  d: "00000202021e222222221e0000",
+  e: "00000000001c223e20221c0000",
+  f: "00000c1210103c101010100000",
+  g: "00000000001c2222221e02221c",
+  h: "00002020202c32222222220000",
+  i: "000000080018080808081c0000",
+  j: "00000004000c04040404242418",
+  k: "00002020202428302824220000",
+  l: "000018080808080808081c0000",
+  m: "0000000000342a2a2a2a220000",
+  n: "00000000002c32222222220000",
+  o: "00000000001c222222221c0000",
+  p: "00000000003c2222223c202020",
+  q: "00000000001e2222221e020202",
+  r: "00000000002c32202020200000",
+  s: "00000000001c221804221c0000",
+  t: "00000010103c101010120c0000",
+  u: "000000000022222222261a0000",
+  v: "00000000002222221414080000",
+  w: "000000000022222a2a2a140000",
+  x: "00000000002214080814220000",
+  y: "0000000000222222261a02221c",
+  z: "00000000003e040810203e0000",
+  0: "00000814222222222214080000",
+  1: "000008182808080808083e0000",
+  2: "00001c222202040810203e0000",
+  3: "00003e0204081c0202221c0000",
+  4: "000004040c1414243e04040000",
+  5: "00003e20202c320202221c0000",
+  6: "00001c2220203c2222221c0000",
+  7: "00003e02040408081010100000",
+  8: "00001c2222221c2222221c0000",
+  9: "00001c2222221e0202221c0000",
+  "-": "0000000000003e000000000000",
+  "_": "00000000000000000000003e00",
+  ".": "000000000000000000081c0800"
+} };
+var F6x10 = { w: 6, h: 10, g: {
+  a: "0000001c021e221e0000",
+  b: "0020202c3222322c0000",
+  c: "0000001c2220221c0000",
+  d: "0002021a2622261a0000",
+  e: "0000001c223e201c0000",
+  f: "000c12103c1010100000",
+  g: "0000001e22221e02221c",
+  h: "0020202c322222220000",
+  i: "000800180808081c0000",
+  j: "0002000602020212120c",
+  k: "00202022243824220000",
+  l: "001808080808081c0000",
+  m: "000000342a2a2a220000",
+  n: "0000002c322222220000",
+  o: "0000001c2222221c0000",
+  p: "0000002c3222322c2020",
+  q: "0000001a2622261a0202",
+  r: "0000002c322020200000",
+  s: "0000001c201c023c0000",
+  t: "0010103c1010120c0000",
+  u: "000000222222261a0000",
+  v: "00000022221414080000",
+  w: "00000022222a2a140000",
+  x: "00000022140814220000",
+  y: "0000002222261a02221c",
+  z: "0000003e0408103e0000",
+  0: "00081422222214080000",
+  1: "000818280808083e0000",
+  2: "001c22020c10203e0000",
+  3: "003e02040c02221c0000",
+  4: "00040c14243e04040000",
+  5: "003e202c3202221c0000",
+  6: "000c10202c32221c0000",
+  7: "003e0204040810100000",
+  8: "001c22221c22221c0000",
+  9: "001c22261a0204180000",
+  "-": "000000003e0000000000",
+  "_": "00000000000000003e00",
+  ".": "000000000000081c0800"
+} };
+var F5x8 = { w: 5, h: 8, g: {
+  a: "0000000e12120e00",
+  b: "0010101c12121c00",
+  c: "0000000608080600",
+  d: "0002020e12120e00",
+  e: "0000000c16180c00",
+  f: "00040a081c080800",
+  g: "0000000c120e020c",
+  h: "0010101c12121200",
+  i: "0004000c04040e00",
+  j: "0002000202020a04",
+  k: "001010121c121200",
+  l: "000c040404040e00",
+  m: "0000001a15151500",
+  n: "0000001c12121200",
+  o: "0000000c12120c00",
+  p: "0000001c121c1010",
+  q: "0000000e120e0202",
+  r: "000000141a101000",
+  s: "000000060c020c00",
+  t: "0008081c080a0400",
+  u: "0000001212120e00",
+  v: "0000000a0a0a0400",
+  w: "0000001115150a00",
+  x: "000000120c0c1200",
+  y: "00000012120e120c",
+  z: "0000001e04081e00",
+  0: "00040a0a0a0a0400",
+  1: "00040c0404040e00",
+  2: "000c12020c101e00",
+  3: "001e040c02120c00",
+  4: "00040c141e040400",
+  5: "001e101c02120c00",
+  6: "000c101c12120c00",
+  7: "001e020404080800",
+  8: "000c120c12120c00",
+  9: "000c12120e020c00",
+  "-": "000000001e000000",
+  "_": "000000000000001e",
+  ".": "0000000000040e04"
+} };
+var F4x6 = { w: 4, h: 6, g: {
+  a: "00060a0a0600",
+  b: "080c0a0a0c00",
+  c: "000608080600",
+  d: "02060a0a0600",
+  e: "00040a0c0600",
+  f: "02040e040400",
+  g: "00060a06020c",
+  h: "080c0a0a0a00",
+  i: "04000c040e00",
+  j: "02000202020c",
+  k: "080a0c0a0a00",
+  l: "0c0404040e00",
+  m: "000a0e0a0a00",
+  n: "000c0a0a0a00",
+  o: "00040a0a0400",
+  p: "000c0a0c0808",
+  q: "00060a0a0602",
+  r: "000a0c080800",
+  s: "00060c020c00",
+  t: "040e04040200",
+  u: "000a0a0a0600",
+  v: "000a0a0a0400",
+  w: "000a0a0e0a00",
+  x: "000a04040a00",
+  y: "000a0a06020c",
+  z: "000e02040e00",
+  0: "040a0e0a0400",
+  1: "040c04040e00",
+  2: "040a02040e00",
+  3: "0e0204020c00",
+  4: "0a0a0e020200",
+  5: "0e080c020c00",
+  6: "06080c0a0400",
+  7: "0e0204080800",
+  8: "060a040a0c00",
+  9: "040a06020c00",
+  "-": "00000e000000",
+  "_": "00000000000e",
+  ".": "000000000400"
+} };
+function rowBits(f, ch, y) {
+  const s = f.g[ch];
+  if (!s) return 0;
+  return parseInt(s.slice(y * 2, y * 2 + 2), 16);
+}
+function word(f, s) {
+  const w = s.length * f.w;
+  const px = Array.from({ length: f.h }, () => new Array(w).fill(false));
+  for (let i = 0; i < s.length; i++)
+    for (let y = 0; y < f.h; y++) {
+      const b = rowBits(f, s[i], y);
+      for (let x = 0; x < f.w; x++) if (b & 1 << f.w - 1 - x) px[y][i * f.w + x] = true;
+    }
+  return { w, h: f.h, px };
+}
+function plate(f, s, wpx, hpx, bg, ink, border) {
+  const grid = Array.from({ length: hpx }, () => new Array(wpx).fill(bg));
+  if (border) {
+    for (let x = 0; x < wpx; x++) {
+      grid[0][x] = border;
+      grid[hpx - 1][x] = border;
+    }
+    for (let y = 0; y < hpx; y++) {
+      grid[y][0] = border;
+      grid[y][wpx - 1] = border;
+    }
+  }
+  const m = word(f, s);
+  const dw = m.h;
+  const dh = m.w;
+  const ox = Math.floor((wpx - dw) / 2);
+  const oy = Math.floor((hpx - dh) / 2);
+  for (let y = 0; y < m.h; y++)
+    for (let x = 0; x < m.w; x++) {
+      if (!m.px[y][x]) continue;
+      const dx = ox + y;
+      const dy = oy + (m.w - 1 - x);
+      if (dx >= 0 && dy >= 0 && dx < wpx && dy < hpx) grid[dy][dx] = ink;
+    }
+  return { w: wpx, h: hpx, grid };
+}
+var LADDER = [F6x13, F6x10, F5x8, F4x6];
+function band(f) {
+  let top = f.h;
+  let bot = -1;
+  for (const s of Object.values(f.g))
+    for (let y = 0; y < f.h; y++) {
+      if (!parseInt(s.slice(y * 2, y * 2 + 2), 16)) continue;
+      if (y < top) top = y;
+      if (y > bot) bot = y;
+    }
+  return bot < top ? f.h : bot - top + 1;
+}
+function choose(text, wpx, hpx) {
+  for (const f2 of LADDER) {
+    if (band(f2) + 2 <= wpx && text.length * f2.w <= hpx) return { font: f2, text };
+  }
+  const f = LADDER[LADDER.length - 1];
+  if (band(f) + 2 > wpx) return null;
+  const room = Math.floor(hpx / f.w);
+  return room < 3 ? null : { font: f, text: text.length > room ? text.slice(0, room - 1) + "." : text };
+}
+
 // src/render.ts
+var INK = [32, 34, 46];
+var NIGHT = [26, 28, 40];
 function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   const w = cv2.w * sx;
   const h = cv2.rows * sy;
@@ -1794,6 +2013,10 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   }
   for (const m of scene.monitors) {
     stamp(monitor(m.lit, frame2, m.seed, m.kind), m.x * sx, m.y * sx, MON_COLS * sx, MON_ROWS * sy);
+  }
+  for (const p of scene.plates) {
+    const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);
+    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT), p.x * sx, p.y * sx, PLATE_COLS * sx, PLATE_ROWS * sy);
   }
   for (const b of scene.badges) {
     const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color;
@@ -1972,14 +2195,14 @@ function paintList(list) {
   const hues = projectColours(list.map((s) => s.proj));
   emptyEl.hidden = sorted.length > 0;
   const nodes = [];
-  for (const band of BANDS) {
-    const members = sorted.filter(band.has);
+  for (const band2 of BANDS) {
+    const members = sorted.filter(band2.has);
     if (!members.length) continue;
     const head = document.createElement("li");
     head.className = "band";
     head.style.setProperty("--state", rgb(LOOK[members[0].state].color));
     head.innerHTML = `<span class="band-name"></span><span class="band-n"></span>`;
-    head.querySelector(".band-name").textContent = band.label;
+    head.querySelector(".band-name").textContent = band2.label;
     head.querySelector(".band-n").textContent = String(members.length);
     nodes.push(head);
     nodes.push(...members.map(row));

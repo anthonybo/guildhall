@@ -20,6 +20,12 @@ export const CHAR_H = TILE * 2
 export const MON_COLS = TILE
 export const MON_ROWS = TILE / 2 + 2 // screen plus the desk surface beneath it
 
+/** Nameplate image box, in cells. Two columns is what the 11px ink band of the
+ *  6x13 font needs; one column only fits a 4px x-height, which cannot be read.
+ *  There are four free columns beside every pod, so two is affordable. */
+export const PLATE_COLS = 2
+export const PLATE_ROWS = 3 * (TILE / 2)
+
 /** The typing frames have no legs — 6 of 32 source rows are empty padding — so
  *  seated characters shift down by that fraction to put the body on the seat. */
 export const SIT_SINK = Math.round((CHAR_H * 6) / 32)
