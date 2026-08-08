@@ -17,6 +17,14 @@ export type Session = {
 	pid: number
 	name: string
 	proj: string
+	/**
+	 * Where the work currently is, when that is not `proj`.
+	 *
+	 * Set while a session is working in another project but has not been there
+	 * long enough to be renamed, so a row can say `guildhall → pressroom` instead
+	 * of silently becoming a different-looking session. See settle.ts.
+	 */
+	away?: string
 	cwd: string
 	state: State
 	/** why it is blocked, when it is: "permission prompt", "input needed", … */

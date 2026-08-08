@@ -277,7 +277,10 @@ function paintList(list) {
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
 			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
-			<span class="proj [grid-area:proj] truncate font-bold text-(--proj) after:ml-2 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90"></span>
+			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90">
+				<span class="proj truncate font-bold text-(--proj)"></span>
+				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
+			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
 				${s.ctxUsed ? `<span class="tabular-nums${pct > 90 ? " text-(--hot)" : ""}">${pct}%</span>` : ""}
@@ -285,6 +288,12 @@ function paintList(list) {
 			</span>
 			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
+    const away = li.querySelector(".away");
+    if (s.away) {
+      away.textContent = `\u2192 ${s.away}`;
+      away.title = `Started in ${s.proj}, currently working in ${s.away}`;
+      away.classList.remove("hidden");
+    }
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
     if (s.workspace) {
       const term = document.createElement("button");

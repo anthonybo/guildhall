@@ -32,6 +32,9 @@ export function expansion(s: Session, total: number): string[] {
 	]
 	if (s.agents) pairs.splice(1, 0, ['agents', s.agents])
 	if (s.waitingFor) pairs.splice(1, 0, ['waiting on', s.waitingFor])
+	// The project column is a fixed width and cannot carry a journey, so the row
+	// keeps the stable name and the detail says where the work actually is.
+	if (s.away) pairs.splice(1, 0, ['working in', `${s.away} — still called ${s.proj} until it settles`])
 	if (s.last && s.last !== s.doing) pairs.push(['last said', s.last])
 
 	const w = Math.max(...pairs.map(([k]) => k.length))
@@ -124,7 +127,7 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 export function detail(s: Session | undefined, total: number) {
 	if (!s) return ['', '']
 	const ctx = s.ctxUsed ? `${tokens(s.ctxUsed)}/${tokens(s.ctxLimit)} context` : 'no context yet'
-	const meta = `${s.proj}${s.tab ? ` · ⌘${s.tab}` : ''} · lv${s.level} ${tierOf(s.level).name} · ${s.turns} turns · ${ctx}`
+	const meta = `${s.proj}${s.away ? ` → ${s.away}` : ''}${s.tab ? ` · ⌘${s.tab}` : ''} · lv${s.level} ${tierOf(s.level).name} · ${s.turns} turns · ${ctx}`
 	return [
 		clip(`${fg(C.gold)}◆ ${fg(C.label)}${bold}${cut(s.title, Math.max(20, total - width(meta) - 6))}${R}  ${fg(C.faint)}${meta}${R}`, total),
 		clip(`${fg(C.muted)}  ${cut(s.doing || s.last || '—', total - 4)}${R}`, total),

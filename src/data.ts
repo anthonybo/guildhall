@@ -21,6 +21,7 @@ import { KIND, doingText, firstSentence, shortText } from './data/describe.ts'
 import { digest } from './data/digest.ts'
 import { liveSessions } from './data/registry.ts'
 import { levelFor, xpOf } from './data/score.ts'
+import { prune, settle } from './data/settle.ts'
 import { stateOf } from './data/state.ts'
 import { transcriptIndex } from './data/transcript.ts'
 import type { Digest, Session } from './data/types.ts'
@@ -78,6 +79,9 @@ export function collect(): Session[] {
 	const tabs = cmuxMap()
 	const now = Date.now()
 	const registry = liveSessions()
+	// held names belong to live sessions only, or the map grows for the life of a
+	// program meant to be left running for days
+	prune(registry.map((s) => s.sessionId))
 	// Looks are handed out by index over a stable ordering, so a session keeps the
 	// same character for its whole life and no two collide until the sheets run out.
 	// Ordered by cwd first, so sessions in the same repo read as one team and match
@@ -99,7 +103,9 @@ export function collect(): Session[] {
 			unread: !!tab?.unread,
 			sinceRecord: d.lastTs ? now - d.lastTs : Infinity,
 		})
-		const proj = projectName(s.cwd, d, s.name)
+		// The name a session answers to must not move because it read a sibling's
+		// source for ten minutes — see settle.ts.
+		const { name: proj, away } = settle(s.sessionId, projectName(s.cwd, d, s.name))
 		const used = contextUsed(d)
 		const xp = xpOf(d)
 
@@ -110,6 +116,7 @@ export function collect(): Session[] {
 			// session is actually about, so prefer it wherever there is room
 			name: s.name ?? proj,
 			proj,
+			away,
 			cwd: s.cwd,
 			state,
 			waitingFor: s.waitingFor ?? (d.asked ? 'answer a question' : undefined),
