@@ -92,3 +92,24 @@ test('holding a genuine partial sequence still works', () => {
 	assert.equal(demux(`${E}[1`).rest, `${E}[1`)
 	assert.equal(demux(`${E}[A`).keys, `${E}[A`, 'a complete arrow was held')
 })
+
+test('a burst of typing arrives as one read, and must be split into keys', () => {
+	// The bug this pins: typing a password and pressing return reaches the app as
+	// the single string "my pass\r", not eight reads. Code comparing that whole
+	// chunk against '\r' never matched, so the return was appended to the password
+	// as a character and there was no way to save it. The passcode had it too.
+	const { keys } = demux('my pass\r')
+	assert.equal(keys, 'my pass\r', 'demux should hand the whole burst through')
+	// whatever splits it must end with the return as its own key
+	const split = [...keys]
+	assert.equal(split.at(-1), '\r')
+	assert.equal(split.length, 8)
+})
+
+test('an escape sequence survives being split into keys', () => {
+	// An arrow key is ESC [ A. If splitting a burst breaks it into three, the ESC
+	// reads as "cancel" and the entry is thrown away mid-word.
+	const { keys } = demux('\x1b[A')
+	assert.equal(keys, '\x1b[A')
+	assert.ok(keys.startsWith('\x1b['), 'the sequence must arrive whole')
+})

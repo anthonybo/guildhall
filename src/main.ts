@@ -554,6 +554,35 @@ function onInput(b: Buffer) {
 	if (keys) onKey(Buffer.from(keys, 'binary'))
 }
 
+/**
+ * One read, split into individual keys.
+ *
+ * A terminal delivers a burst as a single read: typing a password and pressing
+ * return arrives as the one string `"my pass\r"`, not eight of them. Comparing
+ * that whole chunk against `'\r'` never matches, so the return was appended to
+ * the password as a character and there was no way to save it. The passcode had
+ * the same fault — `/^\d$/` against a chunk of several digits fails too, so a
+ * fast typist could not enter one either.
+ *
+ * Escape sequences stay whole, or an arrow key would arrive as ESC, `[`, `A` and
+ * the ESC would read as "cancel".
+ */
+function eachKey(chunk: string): string[] {
+	const out: string[] = []
+	for (let i = 0; i < chunk.length; i++) {
+		if (chunk[i] === '\x1b' && i + 1 < chunk.length) {
+			const m = /^\x1b(?:\[[\x30-\x3f]*[\x20-\x2f]*[\x40-\x7e]|O[\x40-\x7e]|.)/.exec(chunk.slice(i))
+			if (m) {
+				out.push(m[0])
+				i += m[0].length - 1
+				continue
+			}
+		}
+		out.push(chunk[i])
+	}
+	return out
+}
+
 function onKey(b: Buffer) {
 	const k = b.toString()
 
@@ -562,26 +591,32 @@ function onKey(b: Buffer) {
 	// Same swallow-everything rule as the passcode: a `q` inside a passphrase must
 	// be a character, not a quit.
 	if (ctlPass !== null) {
-		if (k === '\x1b') ((ctlPass = null), (ctlNote = 'left as it was'))
-		else if (k === '\x7f' || k === '\b') ctlPass = ctlPass.slice(0, -1)
-		else if (k === '\r' || k === '\n') {
-			const r = setControlPass(ctlPass)
-			ctlNote = r.ok ? 'saved — every device must enter it again' : r.why
-			if (r.ok) ctlPass = null
-		} else if (k >= ' ' && k <= '~') ctlPass += k
+		for (const key of eachKey(k)) {
+			if (ctlPass === null) break // saved mid-chunk; the rest is not password
+			if (key === '\x1b') ((ctlPass = null), (ctlNote = 'left as it was'))
+			else if (key === '\x7f' || key === '\b') ctlPass = ctlPass.slice(0, -1)
+			else if (key === '\r' || key === '\n') {
+				const r = setControlPass(ctlPass)
+				ctlNote = r.ok ? 'saved — every device must enter it again' : r.why
+				if (r.ok) ctlPass = null
+			} else if (key.length === 1 && key >= ' ' && key <= '~') ctlPass += key
+		}
 		draw()
 		return
 	}
 
 	if (pin !== null) {
-		if (k === '\x1b') ((pin = null), (pinNote = 'left as it was'))
-		else if (k === '\x7f' || k === '\b') pin = pin.slice(0, -1)
-		else if (/^\d$/.test(k)) {
-			pin += k
-			if (pin.length === 4) {
-				const r = setPasscode(pin)
-				pinNote = r.ok ? 'saved — every paired device must sign in again' : r.why
-				pin = null
+		for (const key of eachKey(k)) {
+			if (pin === null) break // finished mid-chunk
+			if (key === '\x1b') ((pin = null), (pinNote = 'left as it was'))
+			else if (key === '\x7f' || key === '\b') pin = pin.slice(0, -1)
+			else if (/^\d$/.test(key)) {
+				pin += key
+				if (pin.length === 4) {
+					const r = setPasscode(pin)
+					pinNote = r.ok ? 'saved — every paired device must sign in again' : r.why
+					pin = null
+				}
 			}
 		}
 		draw()
