@@ -2667,6 +2667,18 @@ async function refresh() {
   if (r.error) return void (pre.textContent = r.error);
   if (r.render_grid) paint(pre, r.render_grid);
 }
+var ratio = 0;
+function advanceRatio(host) {
+  if (ratio) return ratio;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:100px";
+  probe.textContent = "M".repeat(100);
+  host.append(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  ratio = w > 0 ? w / 1e4 : 0.6;
+  return ratio;
+}
 function paint(pre, g) {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
   const byId = new Map(g.styles.map((st) => [st.id, st]));
@@ -2679,7 +2691,7 @@ function paint(pre, g) {
   pre.style.background = g.terminal_background ?? "transparent";
   pre.style.color = g.terminal_foreground ?? "inherit";
   const usable = Math.max(200, pre.clientWidth - 24);
-  const size = Math.max(6, Math.min(13, usable / (g.columns * 0.6)));
+  const size = Math.max(6, Math.min(28, usable / (g.columns * advanceRatio(pre))));
   pre.style.fontSize = `${size.toFixed(2)}px`;
   pre.style.lineHeight = "1.25";
   const out = [];

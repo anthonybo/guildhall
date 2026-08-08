@@ -93,3 +93,19 @@ test('everything else is still read-only', () =>
 		}
 		srv.close()
 	}))
+
+test('the screen returned is the session asked for, not whatever is focused', async () => {
+	// cmux's rpc ignores an unknown parameter rather than rejecting it, so
+	// `workspaceId` (camelCase) silently returned the FOCUSED surface for every
+	// session. Reading one project while `send` typed into another is the most
+	// dangerous shape this feature can take, and a wrong name is invisible without
+	// a check like this one.
+	const { readGrid } = await import('./control.ts')
+	const fake = '00000000-1111-2222-3333-444444444444'
+	const r = await readGrid(fake)
+	// no such workspace: it must fail rather than fall back to the focused surface
+	if (r.ok) {
+		const g = JSON.parse(r.text).render_grid
+		assert.ok(!g?.surface_id, `an unknown workspace returned surface ${g?.surface_id} instead of an error`)
+	}
+})
