@@ -6,8 +6,6 @@
  * and never launches or modifies one. The only thing it writes is a cmux
  * "focus this tab" request, and only when you press enter.
  */
-import os from 'node:os'
-import { existsSync } from 'node:fs'
 import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
@@ -44,24 +42,9 @@ import { addresses, createServer } from './serve.ts'
 import { choose, plate } from './nameplate.ts'
 import { PLATE_COLS, PLATE_ROWS } from './office/model.ts'
 import { passcode, setPasscode } from './auth.ts'
+import { controlToken } from './controlauth.ts'
 import * as update from './update.ts'
-
-/**
- * The cmux CLI, if this machine has one. Everything cmux gives us — the tab to
- * jump to, whether a tab is unread — is optional: without it the room still shows
- * every session, just with no ⏎ target. Set GUILDHALL_CMUX to point at a binary
- * somewhere else.
- */
-const CMUX = (() => {
-	const override = process.env.GUILDHALL_CMUX
-	if (override) return override
-	const candidates = [
-		'/Applications/cmux.app/Contents/Resources/bin/cmux',
-		`${os.homedir()}/Applications/cmux.app/Contents/Resources/bin/cmux`,
-	]
-	for (const c of candidates) if (existsSync(c)) return c
-	return 'cmux' // fall back to PATH; jump() already swallows a missing binary
-})()
+import { CMUX } from './data/cmux-bin.ts'
 
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
 	console.log(BUILD)
@@ -109,6 +92,14 @@ if (portArg > 0) cfg.port = Number(process.argv[portArg + 1]) || cfg.port
 
 let server: import('node:http').Server | null = null
 let serveError = ''
+/**
+ * What a remote device has typed into this machine, newest first.
+ *
+ * Shown in the footer while control is armed. A remote caller that can act here
+ * must not be able to act invisibly, and the machine's own screen is the one
+ * place the person who owns it is certain to be looking.
+ */
+const remoteLog: { at: number; proj: string; text: string; ok: boolean }[] = []
 
 /** Start or stop the listener to match the setting. Returns what happened. */
 function syncServe() {
@@ -119,7 +110,22 @@ function syncServe() {
 		return
 	}
 	try {
-		server = createServer({ port: cfg.port, host: cfg.host, demo: DEMO })
+		server = createServer({
+			port: cfg.port,
+			host: cfg.host,
+			demo: DEMO,
+			// read at call time, so toggling control in the running app takes effect
+			// at once rather than at the next restart
+			control: () => cfg.control,
+			onSend: (proj, text, ok) => {
+				// Every remote send is announced here. Somebody typing into this
+				// machine from a phone must not be able to do it without it appearing
+				// on the machine's own screen.
+				remoteLog.unshift({ at: Date.now(), proj, text, ok })
+				remoteLog.length = Math.min(remoteLog.length, 20)
+				draw()
+			},
+		})
 		server.on('error', (e: NodeJS.ErrnoException) => {
 			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} in use` : (e.code ?? 'failed')
 			server = null
@@ -337,7 +343,7 @@ function draw() {
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
 		const net = addresses()
-		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, token: controlToken() }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
 		return
 	}
 	const list = visible()
@@ -393,13 +399,19 @@ function draw() {
 		while (body.length < townRows + tableRows - 2) body.push('')
 		body.push(...det)
 	}
+	// The newest remote send, on this machine's own screen. It takes a row from
+	// the room rather than being tucked somewhere quiet: the whole reason it
+	// exists is that somebody typing here from a phone must be impossible to miss.
+	const remote = cfg.control && remoteLog.length ? T.remoteLine(remoteLog[0], cols) : null
+	if (remote) body.pop()
 	while (body.length < rows) body.push('')
 	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
 	const shareState = { on: !!server, port: cfg.port, error: serveError }
 	paint(
 		[
 			T.summary(sessions, cols, awakeState, undefined, shareState),
-			...body.slice(0, rows),
+			...body.slice(0, rows - (remote ? 1 : 0)),
+			...(remote ? [remote] : []),
 			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState),
 		],
 		images,

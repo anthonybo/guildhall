@@ -74,6 +74,10 @@
 			<canvas id="canvas" class="block w-full rounded-md border border-line"></canvas>
 		</main>
 
+		<!-- The live terminal for one session, with a box to type into it. Empty
+		     until a row's terminal button is pressed, and built by terminal.ts. -->
+		<section id="terminal" class="mx-3.5 mt-2.5 overflow-hidden rounded-md border border-gold/50 bg-panel" hidden></section>
+
 		<ul id="list" class="list m-0 grid list-none gap-2 px-3.5 pt-2.5"></ul>
 
 		<p id="empty" class="px-3.5 py-8 text-center text-faint" hidden>No live sessions.</p>

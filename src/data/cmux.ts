@@ -8,13 +8,20 @@ import fs from 'node:fs'
 import { CMUX_STATE } from './paths.ts'
 
 /**
- * Session id → tab POSITION (1-based) and whether the tab is showing unread.
+ * Session id → tab POSITION (1-based), the workspace's UUID, and whether the tab
+ * is showing unread.
  *
- * Position, not cmux's internal workspace ref: the two do not agree, and the
- * number shown to a person has to be the one they can act on.
+ * Two identifiers because they answer different questions. The POSITION is what
+ * a person sees and can act on — cmux's own `workspace:N` refs are not in tab
+ * order, so showing one would name a tab that is somewhere else entirely.
+ *
+ * The UUID is what a machine must use. `--workspace 2` and the second tab are
+ * different workspaces, and addressing a terminal you are about to type into by
+ * a number that means something else is exactly the mistake worth designing out.
+ * It is stable across reorders, which a position is not.
  */
 export function cmuxMap() {
-	const m = new Map<string, { tab: number; unread: boolean }>()
+	const m = new Map<string, { tab: number; workspace: string; unread: boolean }>()
 	let st: any
 	try {
 		st = JSON.parse(fs.readFileSync(CMUX_STATE, 'utf8'))
@@ -25,7 +32,7 @@ export function cmuxMap() {
 		;(win.tabManager?.workspaces ?? []).forEach((ws: any, i: number) => {
 			for (const pn of ws.panels ?? []) {
 				const agent = pn.terminal?.agent
-				if (agent?.sessionId) m.set(agent.sessionId, { tab: i + 1, unread: !!ws.hasUnreadIndicator })
+				if (agent?.sessionId) m.set(agent.sessionId, { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator })
 			}
 		})
 	}
