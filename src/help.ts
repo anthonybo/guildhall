@@ -64,13 +64,35 @@ function passcodeLines(share: ShareInfo): string[] {
  * network, because a credential that can run commands must not be obtainable by
  * anything that can merely reach the page.
  */
-function controlLines(control?: { on: boolean; token: string }): (string | Line)[] {
+export type ControlInfo = {
+	on: boolean
+	/** whether a passphrase has been chosen at all */
+	isSet: boolean
+	/** characters typed so far while setting one, or null when not setting it */
+	typing: string | null
+	/** what happened last time it was set */
+	note: string
+}
+
+function controlLines(control?: ControlInfo): (string | Line)[] {
+	if (control?.typing !== null && control?.typing !== undefined) {
+		// Never echoed, not even here. The dots are enough to see it registering,
+		// and a passphrase on screen is a passphrase over anyone's shoulder.
+		const dots = '●'.repeat(Math.min(control.typing.length, 40))
+		return [
+			`${fg(C.label)}new control password  ${bold}${fg(C.gold)}${dots || '…'}${R}`,
+			`${fg(C.faint)}${control.typing.length} characters · ⏎ to save · ⌫ to fix · esc to leave it${R}`,
+			...(control.note ? [`${fg(C.fillWarn)}${control.note}${R}`] : []),
+		]
+	}
 	if (!control?.on) {
 		return [`${fg(C.fillWarn)}○ control off${R}${fg(C.muted)} — no browser can type into any session.${R}`]
 	}
 	return [
-		`${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — token for the browser, from this machine only:${R}`,
-		`${fg(C.gold)}${control.token}${R}`,
+		control.isSet
+			? `${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — password set. ${bold}c${R}${fg(C.muted)} to change it.${R}`
+			: `${fg(C.fillWarn)}◉ control on, but no password set${R}${fg(C.muted)} — press ${bold}c${R}${fg(C.muted)} to set one.${R}`,
+		...(control.note ? [`${fg(C.faint)}${control.note}${R}`] : []),
 	]
 }
 
@@ -97,7 +119,7 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 	]
 }
 
-function body(share?: ShareInfo, control?: { on: boolean; token: string }): (string | Line)[] {
+function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 	const tier = (n: number) => `${fg(tierOf(n).color)}${tierOf(n).name}${R}`
 	return [
 		{ text: 'guildhall', kind: 'title' },
@@ -156,7 +178,11 @@ function body(share?: ShareInfo, control?: { on: boolean; token: string }): (str
 		`${fg(C.fillWarn)}This is the one thing here that can change your machine. Whoever${R}`,
 		`${fg(C.fillWarn)}holds the token can send text to Claude Code in every repo you${R}`,
 		`${fg(C.fillWarn)}have open, which reaches editing files and running commands.${R}`,
-		`${fg(C.muted)}So it is separate from the passcode, off unless you turn it on,${R}`,
+		`${fg(C.muted)}You choose the password and type it HERE, never in the browser —${R}`,
+		`${fg(C.muted)}this machine is the trust boundary. It is stored scrypted, so the${R}`,
+		`${fg(C.muted)}file holds a hash and nothing anyone can type. Twelve characters${R}`,
+		`${fg(C.muted)}minimum, and five wrong tries makes that device wait.${R}`,
+		`${fg(C.muted)}It is separate from the passcode, off unless you turn it on,${R}`,
 		`${fg(C.muted)}and refused from anywhere but this machine or your tailnet — a${R}`,
 		`${fg(C.muted)}shared secret on a plain LAN is not a boundary. Permission${R}`,
 		`${fg(C.muted)}prompts are never answerable remotely; those stay yours. Every${R}`,
@@ -197,7 +223,7 @@ const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg
  * showing through the gaps. The caller suppresses the image layer entirely while
  * this is open, since kitty images always draw above text.
  */
-export function panel(cols: number, rows: number, share?: ShareInfo, control?: { on: boolean; token: string }): string[] {
+export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo): string[] {
 	const items = body(share, control)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2

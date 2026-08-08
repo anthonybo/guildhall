@@ -12,7 +12,10 @@ import path from 'node:path'
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-serve-control-'))
 
 import { createServer } from './serve.ts'
-import { controlToken } from './controlauth.ts'
+import { resetControlThrottle, setControlPass } from './controlauth.ts'
+
+const PASS = 'a good long control phrase'
+setControlPass(PASS)
 import { issue } from './auth.ts'
 
 /** A server on a random port, with control armed unless the test says otherwise. */
@@ -54,7 +57,8 @@ test('a wrong control token is refused', () =>
 
 test('switching control off closes it immediately, token or not', () =>
 	boot(true).then(async ({ hit, srv, set }) => {
-		const token = controlToken()
+		resetControlThrottle()
+		const token = PASS
 		set(false)
 		// read at call time rather than captured at construction: turning it off in
 		// the running app has to take effect now, not at the next restart
@@ -73,7 +77,7 @@ test('a session with no cmux workspace cannot be typed into', () =>
 		// The demo office has no cmux tabs, so this is the real "there is nothing to
 		// address" path. Refusing is the point: without a workspace UUID the only
 		// alternative is guessing, and a wrong guess types into another project.
-		const r = await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}', headers: { 'x-guildhall-control': controlToken() } })
+		const r = await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}', headers: { 'x-guildhall-control': PASS } })
 		assert.equal(r.status, 404)
 		assert.match(r.text, /not in a cmux tab/)
 		srv.close()
