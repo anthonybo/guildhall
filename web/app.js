@@ -2562,6 +2562,8 @@ function mountRoom(room, el2) {
 
 // web/terminal.ts
 var KEY2 = "guildhall.control";
+var WRAP = "guildhall.terminal.wrap";
+var wrap = localStorage.getItem(WRAP) !== "exact";
 var openId = null;
 var openName = "";
 var timer = 0;
@@ -2576,8 +2578,10 @@ async function api(path, init = {}) {
 }
 function askForToken(why) {
   el.innerHTML = "";
-  const wrap = document.createElement("div");
-  wrap.className = "p-4";
+  el.style.maxWidth = "";
+  el.style.marginInline = "";
+  const wrap2 = document.createElement("div");
+  wrap2.className = "p-4";
   const h = document.createElement("p");
   h.className = "mt-0 mb-2 text-label";
   h.textContent = "Control password";
@@ -2600,29 +2604,50 @@ function askForToken(why) {
   };
   go.addEventListener("click", submit);
   input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
-  wrap.append(h, p, input, go);
-  el.append(wrap);
+  wrap2.append(h, p, input, go);
+  el.append(wrap2);
   input.focus();
 }
 function chrome(name) {
   el.innerHTML = "";
   const bar2 = document.createElement("div");
-  bar2.className = "flex items-center gap-2 border-b border-line px-3 py-2";
+  bar2.id = "screenbar";
+  bar2.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
   const title = document.createElement("span");
   title.className = "font-bold text-label";
   title.textContent = name;
   const live2 = document.createElement("span");
   live2.className = "text-[0.72rem] text-faint";
   live2.textContent = "live terminal";
+  const mode = document.createElement("button");
+  mode.type = "button";
+  mode.id = "screenmode";
+  mode.hidden = true;
+  mode.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+  const label = () => {
+    mode.textContent = wrap ? "Wrapped" : "Exact";
+    mode.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
+  };
+  label();
+  mode.addEventListener("click", () => {
+    wrap = !wrap;
+    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
+    label();
+    refresh();
+  });
   const x = document.createElement("button");
   x.type = "button";
-  x.textContent = "\u2715";
-  x.className = "ml-auto cursor-pointer rounded border-0 bg-transparent px-1 text-faint hover:text-label";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   x.addEventListener("click", close);
-  bar2.append(title, live2, x);
+  const tail = document.createElement("div");
+  tail.className = "ml-auto flex items-center gap-2";
+  tail.append(mode, x);
+  bar2.append(title, live2, tail);
   const pre = document.createElement("pre");
   pre.id = "screen";
-  pre.className = "m-0 max-h-[60vh] overflow-auto px-3 py-2 whitespace-pre";
+  pre.className = "m-0 overflow-auto px-3 py-2 whitespace-pre";
   pre.textContent = "reading\u2026";
   const form = document.createElement("form");
   form.className = "flex gap-2 border-t border-line p-2";
@@ -2667,6 +2692,11 @@ async function refresh() {
   if (r.error) return void (pre.textContent = r.error);
   if (r.render_grid) paint(pre, r.render_grid);
 }
+var COMFORTABLE = 15;
+var LEGIBLE = 8;
+var READABLE = 12;
+var PAD = 24;
+var RULE = /^(\S)\1{7,}$/;
 var ratio = 0;
 function advanceRatio(host) {
   if (ratio) return ratio;
@@ -2690,17 +2720,36 @@ function paint(pre, g) {
   }
   pre.style.background = g.terminal_background ?? "transparent";
   pre.style.color = g.terminal_foreground ?? "inherit";
-  const usable = Math.max(200, pre.clientWidth - 24);
-  const size = Math.max(6, Math.min(28, usable / (g.columns * advanceRatio(pre))));
+  el.style.maxWidth = "";
+  el.style.marginInline = "";
+  const advance = advanceRatio(pre);
+  const usable = Math.max(200, pre.clientWidth - PAD);
+  const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
+  const cramped = exact < LEGIBLE;
+  const reflow = wrap && cramped;
+  const btn = document.getElementById("screenmode");
+  if (btn) btn.hidden = !cramped;
+  const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
   pre.style.fontSize = `${size.toFixed(2)}px`;
   pre.style.lineHeight = "1.25";
+  pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
+  pre.style.overflowWrap = reflow ? "break-word" : "";
+  const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
+  const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
+  const below = el.lastElementChild?.getBoundingClientRect().height ?? 0;
+  pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
+  const needed = Math.ceil(g.columns * advance * size) + PAD + 2;
+  if (needed < pre.clientWidth) {
+    el.style.maxWidth = `${needed}px`;
+    el.style.marginInline = "auto";
+  }
   const out = [];
   for (let r = 0; r < g.rows; r++) {
     const line = document.createElement("div");
     const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
     let col = 0;
     for (const sp of spans) {
-      if (sp.column > col) line.append(" ".repeat(sp.column - col));
+      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
       const st = byId.get(sp.style_id);
       const el2 = document.createElement("span");
       const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
@@ -2712,6 +2761,7 @@ function paint(pre, g) {
       if (st?.italic) el2.style.fontStyle = "italic";
       if (st?.underline || st?.strikethrough) el2.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
       if (st?.invisible) el2.style.visibility = "hidden";
+      if (reflow && RULE.test(sp.text)) el2.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
       el2.textContent = sp.text;
       line.append(el2);
       col = sp.column + [...sp.text].length;
@@ -2739,6 +2789,8 @@ function close() {
   timer = 0;
   el.hidden = true;
   el.innerHTML = "";
+  el.style.maxWidth = "";
+  el.style.marginInline = "";
   onClose();
 }
 function mountTerminal(host, closed) {

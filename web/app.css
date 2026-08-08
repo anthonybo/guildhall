@@ -319,8 +319,8 @@
       background: color-mix(in srgb, var(--state) 40%, transparent);
     }
   }
-  .max-h-\[60vh\] {
-    max-height: 60vh;
+  .min-h-11 {
+    min-height: calc(var(--spacing) * 11);
   }
   .w-\[min\(21rem\,calc\(100vw-1\.8rem\)\)\] {
     width: min(21rem, calc(100vw - 1.8rem));
@@ -372,6 +372,9 @@
   }
   .items-center {
     align-items: center;
+  }
+  .gap-1 {
+    gap: var(--spacing);
   }
   .gap-1\.5 {
     gap: calc(var(--spacing) * 1.5);
@@ -460,6 +463,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-gold) 50%, transparent);
     }
+  }
+  .border-hot {
+    border-color: var(--color-hot);
   }
   .border-line {
     border-color: var(--color-line);
@@ -641,6 +647,9 @@
   .\[overflow-wrap\:anywhere\] {
     overflow-wrap: anywhere;
   }
+  .break-all {
+    word-break: break-all;
+  }
   .whitespace-nowrap {
     white-space: nowrap;
   }
@@ -816,6 +825,12 @@
     .hover\:border-gold:hover {
       border-color: var(--color-gold);
     }
+    .hover\:bg-hot:hover {
+      background-color: var(--color-hot);
+    }
+    .hover\:text-bg:hover {
+      color: var(--color-bg);
+    }
     .hover\:text-gold:hover {
       color: var(--color-gold);
     }
@@ -835,6 +850,9 @@
   }
   .focus-visible\:outline-gold:focus-visible {
     outline-color: var(--color-gold);
+  }
+  .focus-visible\:outline-hot:focus-visible {
+    outline-color: var(--color-hot);
   }
   .aria-checked\:border-gold[aria-checked="true"] {
     border-color: var(--color-gold);
