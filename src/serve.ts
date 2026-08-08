@@ -34,6 +34,15 @@ import type { Session } from './data.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
+/**
+ * A wait that means "may I do this?" rather than "what do you think?".
+ *
+ * Deliberately broader than the one string this codebase writes today. If Claude
+ * Code ever words it differently, the failure that matters is the one where a
+ * prompt slips through unmatched, so this errs toward refusing a send.
+ */
+const PERMISSION = /permission|approv|allow|trust/i
+
 export type ServeOptions = {
 	port: number
 	/** 0.0.0.0 reaches the LAN; 127.0.0.1 is localhost only, for tunnels. */
@@ -179,7 +188,23 @@ export function createServer(opts: ServeOptions) {
 				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
 			}
 			const target = sessions().find((s) => s.id === body.id)
-			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			if (!target) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+			// The fifth guard, and the one the other four missed.
+			//
+			// control.ts refuses `y`, `n`, `a` and `d` so that no remote caller can
+			// approve tool use. But a permission prompt is a NUMBERED list — "1. Yes,
+			// 2. Yes and don't ask again, 3. No" — and `ask` sends text followed by
+			// Enter, so "1" walks straight through a refusal list built out of
+			// letters. The guard was letter-shaped and the prompt is number-shaped.
+			//
+			// Claude Code's own registry reports which sessions are sitting on a modal
+			// prompt, so this reads a first-party fact rather than guessing from the
+			// screen — and a prompt that asks to run a command stays answerable only
+			// by someone at the machine, which was the point of the whole design.
+			// Checked before the workspace lookup: this is a refusal about what the
+			// session is being asked, not about whether the plumbing to reach it exists.
+			if (PERMISSION.test(target.waitingFor ?? '')) return send(res, 409, MIME['.json'], '{"error":"this session is waiting on a permission prompt — that has to be answered at the machine"}')
+			if (!target.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
 			const out = await ask(target.workspace, String(body.text ?? ''))
 			// Every send is announced on the machine's own screen. A remote caller
 			// must not be able to act here invisibly.

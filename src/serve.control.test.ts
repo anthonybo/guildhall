@@ -83,6 +83,34 @@ test('a session with no cmux workspace cannot be typed into', () =>
 		srv.close()
 	}))
 
+test('a session sitting on a permission prompt cannot be answered from away', () =>
+	boot().then(async ({ hit, srv }) => {
+		resetControlThrottle()
+		// control.ts refuses `y`, `n`, `a` and `d` so no remote caller can approve
+		// tool use. But the prompt is a NUMBERED list and a send is text plus Enter,
+		// so "1" reached the same outcome with every letter guard still in place —
+		// the guard was letter-shaped and the prompt is number-shaped. Refused on
+		// what the session is waiting for instead, which no wording can slip past.
+		for (const text of ['1', 'yes', 'go ahead']) {
+			const r = await hit('/api/send', { method: 'POST', body: JSON.stringify({ id: 'lanternfish', text }), headers: { 'x-guildhall-control': PASS } })
+			assert.equal(r.status, 409, `"${text}" was accepted: ${r.text}`)
+			assert.match(r.text, /answered at the machine/)
+		}
+		srv.close()
+	}))
+
+test('a plain question is still answerable from away', () =>
+	boot().then(async ({ hit, srv }) => {
+		resetControlThrottle()
+		// The refusal above must not swallow the feature. This session is blocked on
+		// a question rather than a permission decision, so it gets as far as the
+		// workspace lookup — the demo office has no cmux tabs — rather than a 409.
+		const r = await hit('/api/send', { method: 'POST', body: '{"id":"orchard","text":"1"}', headers: { 'x-guildhall-control': PASS } })
+		assert.equal(r.status, 404, r.text)
+		assert.match(r.text, /not in a cmux tab/)
+		srv.close()
+	}))
+
 test('everything else is still read-only', () =>
 	boot().then(async ({ hit, srv }) => {
 		// the guarantee the rest of the server keeps, and the 405 that states it
