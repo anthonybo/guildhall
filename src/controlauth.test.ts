@@ -4,50 +4,77 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-// never touch the real token; set before the import that reads the directory
+// never touch the real credential; set before the imports that read it
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-control-'))
 
-import { controlAllowed, controlReachable, controlToken, forgetControlToken, rotateControlToken } from './controlauth.ts'
+import { MIN_LENGTH, controlAllowed, controlAttempt, controlLockedFor, controlReachable, hasControlPass, resetControlThrottle, setControlPass } from './controlauth.ts'
 import { refuses } from './control.ts'
 
-test('the control token is long enough that a throttle is not doing the work', () => {
-	// 128 bits. The view passcode is four digits and leans on an exponential
-	// lockout; this credential types into Claude Code sessions, so it cannot.
-	const t = controlToken()
-	assert.match(t, /^[0-9a-f]{32}$/)
-	assert.equal(controlToken(), t, 'the token must be stable across calls')
-	forgetControlToken()
-	assert.equal(controlToken(), t, 'the token must survive being re-read from disk')
+const GOOD = 'correct horse battery'
+
+test('a passphrase is stored hashed, never in plain text', () => {
+	// The file lives in a config directory that gets backed up and sometimes
+	// synced. It must not contain anything anyone could type.
+	assert.deepEqual(setControlPass(GOOD), { ok: true })
+	const raw = fs.readFileSync(path.join(process.env.GUILDHALL_CONFIG_DIR!, 'control-pass'), 'utf8')
+	assert.ok(!raw.includes(GOOD), 'the passphrase itself is on disk')
+	assert.match(raw, /^scrypt\$\d+\$[0-9a-f]{32}\$[0-9a-f]{64}$/m)
+	assert.equal(fs.statSync(path.join(process.env.GUILDHALL_CONFIG_DIR!, 'control-pass')).mode & 0o777, 0o600)
 })
 
-test('the token file is not world readable', () => {
-	controlToken()
-	const mode = fs.statSync(path.join(process.env.GUILDHALL_CONFIG_DIR!, 'control-token')).mode & 0o777
-	assert.equal(mode, 0o600, `token file is ${mode.toString(8)}`)
-})
-
-test('rotating invalidates the old token', () => {
-	const before = controlToken()
-	const after = rotateControlToken()
-	assert.notEqual(before, after)
-	assert.ok(controlAllowed(after))
-	assert.ok(!controlAllowed(before), 'the rotated-out token still works')
-})
-
-test('a wrong, short, or absent token is refused', () => {
+test('the right passphrase is accepted and a wrong one is not', () => {
+	setControlPass(GOOD)
+	assert.ok(hasControlPass())
+	assert.ok(controlAllowed(GOOD))
+	assert.ok(!controlAllowed(GOOD + ' '))
+	assert.ok(!controlAllowed('correct horse batter'))
 	assert.ok(!controlAllowed(undefined))
 	assert.ok(!controlAllowed(''))
-	assert.ok(!controlAllowed('nope'))
-	assert.ok(!controlAllowed('0'.repeat(32)))
-	// the right length but not hex, so the shape check has to catch it before
-	// timingSafeEqual is handed buffers of differing length
-	assert.ok(!controlAllowed('z'.repeat(32)))
+})
+
+test('a phrase too short or too repetitive is refused', () => {
+	// It has to be typed on a phone, so it is chosen rather than random — which
+	// means length is the only thing carrying its entropy.
+	assert.equal(setControlPass('short').ok, false)
+	assert.equal(setControlPass('a'.repeat(MIN_LENGTH + 5)).ok, false, 'one repeated character is long but not hard')
+	assert.equal(setControlPass('abcdefabcdefab').ok, true, 'a long phrase with enough variety should pass')
+})
+
+test('changing it invalidates the old one', () => {
+	setControlPass(GOOD)
+	assert.ok(controlAllowed(GOOD))
+	setControlPass('a different phrase entirely')
+	assert.ok(!controlAllowed(GOOD), 'the replaced phrase still works')
+	assert.ok(controlAllowed('a different phrase entirely'))
+})
+
+test('guessing is throttled, which is what makes a chosen phrase safe', () => {
+	// A random 128-bit token needs no throttle. A phrase you can remember does:
+	// this is what turns an online dictionary attack into something impractical.
+	resetControlThrottle()
+	setControlPass(GOOD)
+	const who = '100.64.0.9'
+	for (let i = 0; i < 5; i++) assert.ok(!controlAttempt(who, 'wrong guess here'), 'a wrong guess was accepted')
+	assert.ok(controlLockedFor(who) > 0, 'five wrong tries did not lock the address')
+	// and the lock holds even against the CORRECT phrase, or it would be no lock
+	assert.ok(!controlAttempt(who, GOOD), 'the lock let the right answer through')
+	resetControlThrottle()
+	assert.ok(controlAttempt(who, GOOD), 'a cleared throttle should accept the right phrase')
+})
+
+test('a correct answer clears the count', () => {
+	resetControlThrottle()
+	setControlPass(GOOD)
+	const who = '100.64.0.10'
+	controlAttempt(who, 'nope nope nope')
+	controlAttempt(who, 'nope nope nope')
+	assert.ok(controlAttempt(who, GOOD))
+	for (let i = 0; i < 4; i++) controlAttempt(who, 'nope nope nope')
+	assert.equal(controlLockedFor(who), 0, 'the earlier failures were not forgiven')
 })
 
 test('only loopback and a tailnet may control; a LAN address may not', () => {
-	// A shared secret on a plain LAN is one guest network away from arbitrary code
-	// execution here. Watching over a LAN is fine; typing is not.
-	for (const ok of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '100.64.0.1', '100.101.102.103', '100.127.255.254']) {
+	for (const ok of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '100.64.0.1', '100.66.222.34', '100.127.255.254']) {
 		assert.ok(controlReachable(ok), `${ok} should be allowed`)
 	}
 	for (const no of ['192.168.1.20', '10.0.0.5', '172.16.4.4', '100.63.255.255', '100.128.0.1', '8.8.8.8', undefined]) {
@@ -56,7 +83,5 @@ test('only loopback and a tailnet may control; a LAN address may not', () => {
 })
 
 test('keys that would answer a permission prompt are refused', () => {
-	// The whole safety story rests on a person approving tool use. A remote
-	// `send-key y` is indistinguishable from consent.
 	for (const k of ['y', 'n', 'a', 'd', 'Y', 'Escape', 'Tab']) assert.ok(refuses(k), `${k} should be refused`)
 })

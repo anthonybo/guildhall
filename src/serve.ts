@@ -27,7 +27,7 @@ import { loginPage } from './login.ts'
 import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
-import { controlAllowed, controlReachable } from './controlauth.ts'
+import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
 import { ask, readScreen } from './control.ts'
 import { demoSessions } from './demo.ts'
 import type { Session } from './data.ts'
@@ -169,7 +169,9 @@ export function createServer(opts: ServeOptions) {
 		if (req.method === 'POST' && url.pathname === '/api/send') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (!controlAllowed(req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"bad control token"}')
+			const waitCtl = controlLockedFor(addr)
+			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			let body: { id?: string; text?: string }
 			try {
 				body = JSON.parse(await readBody(req))
@@ -212,7 +214,9 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/screen') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (!controlAllowed(req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"bad control token"}')
+			const waitCtl = controlLockedFor(addr)
+			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			const target = sessions().find((s) => s.id === url.searchParams.get('id'))
 			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
 			const out = await readScreen(target.workspace, Number(url.searchParams.get('lines')) || 160)

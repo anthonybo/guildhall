@@ -2580,15 +2580,15 @@ function askForToken(why) {
   wrap.className = "p-4";
   const h = document.createElement("p");
   h.className = "mt-0 mb-2 text-label";
-  h.textContent = "Control token";
+  h.textContent = "Control password";
   const p = document.createElement("p");
   p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
-  p.textContent = `${why} The token is in ~/.config/guildhall/control-token on the machine running guildhall, and is shown in its help panel.`;
+  p.textContent = `${why} It is the password you set on the machine running guildhall \u2014 press ? there, then c.`;
   const input = document.createElement("input");
   input.type = "password";
   input.autocomplete = "off";
   input.spellcheck = false;
-  input.placeholder = "32 hex characters";
+  input.placeholder = "the password you set";
   input.className = "w-full rounded border border-line bg-bg px-2 py-1.5 font-mono text-label";
   const go = document.createElement("button");
   go.type = "button";
@@ -2659,8 +2659,9 @@ ${pre.textContent}`;
 async function refresh() {
   if (!openId) return;
   const r = await api(`/api/screen?id=${encodeURIComponent(openId)}&lines=200`);
-  if (r.status === 401) return askForToken("That token was not accepted.");
+  if (r.status === 401) return askForToken("That password was not accepted.");
   if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
+  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
   const pre = document.getElementById("screen");
   if (!pre) return;
   if (r.error) pre.textContent = r.error;
@@ -2674,7 +2675,7 @@ function show(id, name) {
   openId = id;
   openName = name;
   el.hidden = false;
-  if (!token()) return askForToken("This is behind a separate token from the passcode.");
+  if (!token()) return askForToken("This is behind a separate password from the passcode.");
   const { input } = chrome(name);
   refresh();
   clearInterval(timer);

@@ -285,11 +285,16 @@ looking at.
 that way. Anyone holding the control token can send text to Claude Code in every
 repository you have open, which reaches editing files and running commands. So:
 
-- **A separate credential.** 32 hex characters from the system CSPRNG, not the
-  four-digit view passcode. Watching and typing are different privileges, and a
-  device trusted with one has not been trusted with the other. It is read off
-  the machine — `~/.config/guildhall/control-token`, or the `?` panel — and
-  never travels over the network.
+- **A separate credential.** A password you choose, not the four-digit view
+  passcode. Watching and typing are different privileges, and a device trusted
+  with one has not been trusted with the other. You set it on the machine —
+  press `?` then `c` — because that is the trust boundary, and it is stored
+  **scrypted**, so the file holds a hash rather than anything anyone can type.
+  Twelve characters minimum: a chosen phrase carries far less entropy per
+  character than random hex, so length has to make up for it. Five wrong tries
+  and that device waits, doubling each time — a random token needs no throttle,
+  a memorable phrase very much does. With no password set, control is closed
+  rather than open.
 - **Off unless you turn it on**, with its own switch independent of `serve`.
 - **Loopback or tailnet only.** Never a plain LAN, whatever the config says. A
   shared secret on a network you also hand to guests is not a boundary, and no

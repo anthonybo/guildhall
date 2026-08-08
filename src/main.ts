@@ -42,7 +42,7 @@ import { addresses, createServer } from './serve.ts'
 import { choose, plate } from './nameplate.ts'
 import { PLATE_COLS, PLATE_ROWS } from './office/model.ts'
 import { passcode, setPasscode } from './auth.ts'
-import { controlToken } from './controlauth.ts'
+import { hasControlPass, setControlPass } from './controlauth.ts'
 import * as update from './update.ts'
 import { CMUX } from './data/cmux-bin.ts'
 
@@ -264,6 +264,15 @@ let labels = true
 let showHelp = false
 /** digits typed so far while changing the passcode, or null when not changing it */
 let pin: string | null = null
+/**
+ * The control passphrase being typed, or null when it is not being changed.
+ *
+ * Typed here rather than generated, because it has to be entered on a phone —
+ * and typed HERE rather than in the browser, because the machine is the trust
+ * boundary. It is never echoed: only a count of characters shows on screen.
+ */
+let ctlPass: string | null = null
+let ctlNote = ''
 /** what happened last time it was changed, shown until the panel closes */
 let pinNote = ''
 let selectedId: string | null = null
@@ -343,7 +352,7 @@ function draw() {
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
 		const net = addresses()
-		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, token: controlToken() }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
 		return
 	}
 	const list = visible()
@@ -550,6 +559,20 @@ function onKey(b: Buffer) {
 
 	// Typing a new passcode swallows every key, including q — otherwise a 4 in the
 	// code would be fine but a q would quit the app mid-entry.
+	// Same swallow-everything rule as the passcode: a `q` inside a passphrase must
+	// be a character, not a quit.
+	if (ctlPass !== null) {
+		if (k === '\x1b') ((ctlPass = null), (ctlNote = 'left as it was'))
+		else if (k === '\x7f' || k === '\b') ctlPass = ctlPass.slice(0, -1)
+		else if (k === '\r' || k === '\n') {
+			const r = setControlPass(ctlPass)
+			ctlNote = r.ok ? 'saved — every device must enter it again' : r.why
+			if (r.ok) ctlPass = null
+		} else if (k >= ' ' && k <= '~') ctlPass += k
+		draw()
+		return
+	}
+
 	if (pin !== null) {
 		if (k === '\x1b') ((pin = null), (pinNote = 'left as it was'))
 		else if (k === '\x7f' || k === '\b') pin = pin.slice(0, -1)
@@ -572,6 +595,12 @@ function onKey(b: Buffer) {
 		if (k === 'p') {
 			pin = ''
 			pinNote = ''
+			draw()
+			return
+		}
+		if (k === 'c') {
+			ctlPass = ''
+			ctlNote = ''
 			draw()
 			return
 		}
