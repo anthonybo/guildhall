@@ -30,6 +30,7 @@ import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
 import { ask, readGrid } from './control.ts'
 import { demoSessions } from './demo.ts'
+import { press } from './data/press.ts'
 import type { Session } from './data.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -225,6 +226,25 @@ export function createServer(opts: ServeOptions) {
 
 		if (url.pathname === '/api/sessions') {
 			send(res, 200, MIME['.json'], payload())
+			return
+		}
+
+		/**
+		 * What has been committed and deployed, from pressroom.
+		 *
+		 * Behind the view passcode rather than the control token: this is commit
+		 * subjects and deploy hostnames, which is the same order of disclosure as
+		 * the session summaries already served here — not a terminal's contents.
+		 *
+		 * `?deploys=1` opts into the slow half. The local read is git only and takes
+		 * about 2 seconds; adding workflow runs and Cloudflare deploys takes about
+		 * 17, because every Worker repo spawns its own wrangler. Nobody should pay
+		 * that on a poll they did not ask for.
+		 */
+		if (url.pathname === '/api/press') {
+			press(url.searchParams.get('deploys') === '1')
+				.then((snap) => send(res, 200, MIME['.json'], JSON.stringify(snap)))
+				.catch(() => send(res, 200, MIME['.json'], '{"items":[],"repos":0,"local":true,"error":"could not read pressroom"}'))
 			return
 		}
 

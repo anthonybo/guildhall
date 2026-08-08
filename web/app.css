@@ -239,6 +239,9 @@
   .order-3 {
     order: 3;
   }
+  .col-span-full {
+    grid-column: 1 / -1;
+  }
   .container {
     width: 100%;
     @media (width >= 40rem) {
@@ -320,6 +323,9 @@
       background: color-mix(in srgb, var(--state) 40%, transparent);
     }
   }
+  .min-h-9 {
+    min-height: calc(var(--spacing) * 9);
+  }
   .min-h-11 {
     min-height: calc(var(--spacing) * 11);
   }
@@ -370,6 +376,9 @@
   }
   .\[grid-template-columns\:max-content_1fr\] {
     grid-template-columns: max-content 1fr;
+  }
+  .grid-cols-\[1\.2rem_minmax\(5rem\,8rem\)_1fr_auto\] {
+    grid-template-columns: 1.2rem minmax(5rem,8rem) 1fr auto;
   }
   .flex-wrap {
     flex-wrap: wrap;
@@ -477,6 +486,12 @@
   .border-line {
     border-color: var(--color-line);
   }
+  .border-line\/60 {
+    border-color: color-mix(in srgb, #302c40 60%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-line) 60%, transparent);
+    }
+  }
   .border-state-soft {
     border-color: var(--state);
     @supports (color: color-mix(in lab, red, red)) {
@@ -512,6 +527,9 @@
   }
   .bg-transparent {
     background-color: transparent;
+  }
+  .p-0 {
+    padding: 0px;
   }
   .p-2 {
     padding: calc(var(--spacing) * 2);
@@ -560,6 +578,9 @@
   }
   .py-4 {
     padding-block: calc(var(--spacing) * 4);
+  }
+  .py-6 {
+    padding-block: calc(var(--spacing) * 6);
   }
   .py-8 {
     padding-block: calc(var(--spacing) * 8);
@@ -620,6 +641,9 @@
   .text-\[0\.72rem\] {
     font-size: 0.72rem;
   }
+  .text-\[0\.74rem\] {
+    font-size: 0.74rem;
+  }
   .text-\[0\.76rem\] {
     font-size: 0.76rem;
   }
@@ -628,6 +652,9 @@
   }
   .text-\[0\.82rem\] {
     font-size: 0.82rem;
+  }
+  .text-\[0\.84rem\] {
+    font-size: 0.84rem;
   }
   .text-\[0\.86rem\] {
     font-size: 0.86rem;
@@ -682,6 +709,9 @@
   .text-\(--soft\) {
     color: var(--soft);
   }
+  .text-\(--work\) {
+    color: var(--work);
+  }
   .text-\[\#1a1c28\] {
     color: #1a1c28;
   }
@@ -714,6 +744,10 @@
   }
   .italic {
     font-style: italic;
+  }
+  .tabular-nums {
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,);
   }
   .line-through {
     text-decoration-line: line-through;
@@ -870,6 +904,9 @@
   .aria-checked\:text-bg[aria-checked="true"] {
     color: var(--color-bg);
   }
+  .aria-expanded\:border-gold[aria-expanded="true"] {
+    border-color: var(--color-gold);
+  }
   .aria-expanded\:text-gold[aria-expanded="true"] {
     color: var(--color-gold);
   }
@@ -879,8 +916,29 @@
     }
   }
   @media (width < 560px) {
+    .max-\[560px\]\:col-start-1 {
+      grid-column-start: 1;
+    }
+    .max-\[560px\]\:col-start-2 {
+      grid-column-start: 2;
+    }
+    .max-\[560px\]\:col-start-3 {
+      grid-column-start: 3;
+    }
+    .max-\[560px\]\:col-end-4 {
+      grid-column-end: 4;
+    }
+    .max-\[560px\]\:row-start-1 {
+      grid-row-start: 1;
+    }
+    .max-\[560px\]\:row-start-2 {
+      grid-row-start: 2;
+    }
     .max-\[560px\]\:hidden {
       display: none;
+    }
+    .max-\[560px\]\:grid-cols-\[1\.2rem_1fr_auto\] {
+      grid-template-columns: 1.2rem 1fr auto;
     }
     .max-\[560px\]\:border-y {
       border-block-style: var(--tw-border-style);
@@ -975,6 +1033,26 @@ body.stale .sweep::after {
   inherits: false;
 }
 @property --tw-tracking {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-ordinal {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-slashed-zero {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-figure {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-spacing {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-fraction {
   syntax: "*";
   inherits: false;
 }
@@ -1158,6 +1236,11 @@ body.stale .sweep::after {
       --tw-leading: initial;
       --tw-font-weight: initial;
       --tw-tracking: initial;
+      --tw-ordinal: initial;
+      --tw-slashed-zero: initial;
+      --tw-numeric-figure: initial;
+      --tw-numeric-spacing: initial;
+      --tw-numeric-fraction: initial;
       --tw-shadow: 0 0 #0000;
       --tw-shadow-color: initial;
       --tw-shadow-alpha: 100%;

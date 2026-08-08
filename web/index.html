@@ -35,6 +35,18 @@
 			<span id="link" class="ml-auto flex items-center gap-1.5 text-xs whitespace-nowrap text-faint" title="connection"></span>
 			<!-- The panel is built from the spec in settings.ts rather than written
 			     out here, so adding an option never means editing two files. -->
+			<!-- What has shipped, from pressroom. Beside the gear because it is the
+			     other thing you might want that is not a session. -->
+			<button
+				id="pressbtn"
+				class="cursor-pointer rounded border border-line bg-transparent px-2 py-0.5 text-[0.74rem] whitespace-nowrap text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:border-gold aria-expanded:text-gold"
+				type="button"
+				aria-expanded="false"
+				aria-controls="press"
+				title="Commits and deploys across your projects"
+			>
+				shipped
+			</button>
 			<button
 				id="gear"
 				class="cursor-pointer rounded border-0 bg-transparent px-0.5 py-px text-base/none text-faint hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:text-gold"
@@ -77,6 +89,10 @@
 		<!-- The live terminal for one session, with a box to type into it. Empty
 		     until a row's terminal button is pressed, and built by terminal.ts. -->
 		<section id="terminal" class="mt-2.5 overflow-hidden border-gold/50 bg-panel max-[560px]:border-y min-[560px]:mx-3.5 min-[560px]:rounded-md min-[560px]:border" hidden></section>
+
+		<!-- Commits, pushes, workflow runs and Cloudflare deploys on one timeline,
+		     read from pressroom. Empty until the header button asks for it. -->
+		<section id="press" class="mt-2.5 overflow-hidden border-line bg-panel max-[560px]:border-y min-[560px]:mx-3.5 min-[560px]:rounded-md min-[560px]:border" hidden></section>
 
 		<ul id="list" class="list m-0 grid list-none gap-2 px-3.5 pt-2.5"></ul>
 

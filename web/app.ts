@@ -15,6 +15,7 @@ import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
 import { mountTerminal, show as showTerminal } from './terminal.ts'
 import { mountSettings, settings } from './settings.ts'
+import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
 
 const bar = { counts: $<HTMLElement>('#counts'), link: $<HTMLElement>('#link'), ver: $<HTMLElement>('#ver') }
 const roomEl = $<HTMLElement>('#room')
@@ -215,6 +216,17 @@ function showRoom() {
 /* ── wiring ── */
 
 mountTerminal($<HTMLElement>('#terminal'), () => {})
+mountPress($<HTMLElement>('#press'))
+
+// The press view is a second thing to look at, not a second app: one button in
+// the header opens it, and it sits above the list rather than replacing the page,
+// so a glance at what shipped never costs you the session you were watching.
+const pressBtn = $<HTMLButtonElement>('#pressbtn')
+pressBtn.addEventListener('click', () => {
+	const opening = !pressOpen()
+	opening ? showPress() : closePress()
+	pressBtn.setAttribute('aria-expanded', String(opening))
+})
 mountList($<HTMLElement>('#list'), $<HTMLElement>('#empty'), showTerminal)
 mountRoom(roomEl, $<HTMLCanvasElement>('#canvas'))
 mountSettings($<HTMLButtonElement>('#gear'), $<HTMLElement>('#settings'), () => {

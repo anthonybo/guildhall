@@ -77,6 +77,30 @@ export type Digest = {
 	asked?: boolean
 }
 
+/**
+ * One thing that happened to a repository, from pressroom.
+ *
+ * Four kinds on one timeline, kept separate rather than widened into a single
+ * row: a push has no author and no diff, a deploy has no commit at all, and a
+ * run is the only one that changes after it appears.
+ */
+export type PressItem =
+	| { kind: 'commit'; repo: string; at: number; short: string; subject: string; author: string; files: number; insertions: number; deletions: number }
+	| { kind: 'push'; repo: string; at: number; short: string; remote: string; branch: string; count: number | null; forced: boolean }
+	| { kind: 'run'; repo: string; at: number; short: string; workflow: string; branch: string; status: string; conclusion: string | null; url: string; durationMs: number | null }
+	| { kind: 'deploy'; repo: string; at: number; worker: string; hostname: string | null; env: string | null; source: string }
+
+export type PressSnapshot = {
+	at: number
+	items: PressItem[]
+	repos: number
+	/** True when runs and deploys were never asked for, rather than absent. */
+	local: boolean
+	githubError?: string
+	cloudflareError?: string
+	error?: string
+}
+
 /** A registry entry exactly as Claude Code writes it. */
 export type Registry = {
 	pid: number

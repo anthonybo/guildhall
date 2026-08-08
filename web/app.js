@@ -249,10 +249,10 @@ function paintList(list) {
     head.children[0].textContent = band2.label;
     head.children[1].textContent = String(members.length);
     nodes.push(head);
-    nodes.push(...members.map(row));
+    nodes.push(...members.map(row2));
   }
   listEl.replaceChildren(...nodes);
-  function row(s) {
+  function row2(s) {
     const look = LOOK[s.state];
     const li = document.createElement("li");
     const busy = s.state === "working" || s.state === "shell";
@@ -309,9 +309,9 @@ function paintList(list) {
     }
     li.tabIndex = 0;
     li.setAttribute("role", "button");
-    const open = opened.has(s.id);
-    li.setAttribute("aria-expanded", String(open));
-    if (open) {
+    const open2 = opened.has(s.id);
+    li.setAttribute("aria-expanded", String(open2));
+    if (open2) {
       li.classList.add("open");
       li.append(details(s));
     }
@@ -399,15 +399,15 @@ var Canvas = class {
    *  Needed by the documentation renderer, which composites the pixel layer as a
    *  raster and re-draws these as real glyphs on top — a nameplate flattened into
    *  half blocks is unreadable at any size. */
-  cellAt(col, row) {
-    return this.overlay[row]?.[col] ?? null;
+  cellAt(col, row2) {
+    return this.overlay[row2]?.[col] ?? null;
   }
-  text(col, row, s, f, b, bold = false) {
-    if (row < 0 || row >= this.rows) return;
+  text(col, row2, s, f, b, bold = false) {
+    if (row2 < 0 || row2 >= this.rows) return;
     for (const [i, ch] of [...s].entries()) {
       const c = col + i;
       if (c < 0 || c >= this.w) continue;
-      this.overlay[row][c] = { ch, fg: f, bg: b, bold };
+      this.overlay[row2][c] = { ch, fg: f, bg: b, bold };
     }
   }
   render() {
@@ -814,19 +814,19 @@ function addFacilities(room, bandRows, firstFree) {
   }
   let sb = 0;
   for (let i = 0; i < wish.length && sb < socialBands.length; ) {
-    const row = socialBands[sb];
+    const row2 = socialBands[sb];
     let lo = 2;
     let hi = room.cols - 3;
     for (let side = 0; side < 2 && i < wish.length; side++) {
       const f = FACILITIES[wish[i]];
-      if (!f || hi - lo + 1 < f.w + (side === 0 ? 2 : 0) || row + f.h > room.rows - 1) {
+      if (!f || hi - lo + 1 < f.w + (side === 0 ? 2 : 0) || row2 + f.h > room.rows - 1) {
         i++;
         side--;
         if (i >= wish.length) break;
         continue;
       }
       const c0 = side === 0 ? lo : hi - f.w + 1;
-      placeFacility(room, f, c0, row, `${wish[i]}@${row}`);
+      placeFacility(room, f, c0, row2, `${wish[i]}@${row2}`);
       if (side === 0) lo = c0 + f.w + 2;
       else hi = c0 - 1;
       i++;
@@ -993,14 +993,14 @@ var RoomBase = class {
   colourOf(proj) {
     return this.zoneColor.get(proj) ?? ROOFS[0];
   }
-  isOpen(col, row) {
-    if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false;
-    return this.grid[row][col] === "floor";
+  isOpen(col, row2) {
+    if (row2 < 0 || col < 0 || row2 >= this.rows || col >= this.cols) return false;
+    return this.grid[row2][col] === "floor";
   }
-  isWalkable(col, row, own) {
-    if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false;
-    if (this.grid[row][col] !== "floor") return false;
-    const k = `${col},${row}`;
+  isWalkable(col, row2, own) {
+    if (row2 < 0 || col < 0 || row2 >= this.rows || col >= this.cols) return false;
+    if (this.grid[row2][col] !== "floor") return false;
+    const k = `${col},${row2}`;
     return !this.seatTiles.has(k) || k === own;
   }
   findPath(sc, sr, ec, er, own) {
@@ -1204,8 +1204,8 @@ var RoomBase = class {
     ch.activity = null;
     ch.chatWanted = false;
   }
-  reserve(ch, col, row) {
-    const k = `${col},${row}`;
+  reserve(ch, col, row2) {
+    const k = `${col},${row2}`;
     const holder = this.dest.get(k);
     if (holder && holder !== ch.id) return false;
     this.unreserve(ch);
@@ -1217,12 +1217,12 @@ var RoomBase = class {
   }
   /** Free floor that nobody else is heading to or standing on. */
   freeTiles() {
-    const open = this.walkable.filter((t) => {
+    const open2 = this.walkable.filter((t) => {
       const k = `${t.col},${t.row}`;
       return !this.dest.get(k) && !this.seatTiles.has(k);
     });
-    const social = open.filter((t) => t.row > this.workBottom + 1);
-    return social.length ? social : open;
+    const social = open2.filter((t) => t.row > this.workBottom + 1);
+    return social.length ? social : open2;
   }
 };
 
@@ -1340,8 +1340,8 @@ var SimBase = class extends RoomBase {
             break;
           }
           if (this.goToSpot(ch)) break;
-          const open = this.freeTiles();
-          const t = open[Math.floor(this.rng() * open.length)];
+          const open2 = this.freeTiles();
+          const t = open2[Math.floor(this.rng() * open2.length)];
           if (t) this.walkTo(ch, t.col, t.row);
           break;
         }
@@ -1512,9 +1512,9 @@ var SimBase = class extends RoomBase {
    * walking — the reference allows that too — but they must never come to rest
    * on the same tile, so the target is claimed before the path is taken.
    */
-  walkTo(ch, col, row, own) {
-    if (!this.reserve(ch, col, row)) return false;
-    const path = this.findPath(ch.col, ch.row, col, row, own);
+  walkTo(ch, col, row2, own) {
+    if (!this.reserve(ch, col, row2)) return false;
+    const path = this.findPath(ch.col, ch.row, col, row2, own);
     if (!path.length) {
       this.unreserve(ch);
       return false;
@@ -1589,10 +1589,10 @@ var Office = class extends SimBase {
     this.imageSpans.clear();
     const block = (x, y, w, hRows) => {
       for (let i = 0; i < hRows; i++) {
-        const row = (y >> 1) + i;
-        const arr = this.imageSpans.get(row) ?? [];
+        const row2 = (y >> 1) + i;
+        const arr = this.imageSpans.get(row2) ?? [];
         arr.push([x, x + w]);
-        this.imageSpans.set(row, arr);
+        this.imageSpans.set(row2, arr);
       }
     };
     this.monitors = [];
@@ -1699,7 +1699,7 @@ var Office = class extends SimBase {
   horizontalPlates(cv2) {
     const named = /* @__PURE__ */ new Set();
     const claimed = /* @__PURE__ */ new Map();
-    const blocks = (row) => claimed.get(row) ?? [];
+    const blocks = (row2) => claimed.get(row2) ?? [];
     for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
       if (named.has(pod.proj)) continue;
       named.add(pod.proj);
@@ -1731,10 +1731,10 @@ var Office = class extends SimBase {
   labels(cv2, placed, selected, showAll = true) {
     for (const p of placed) {
       for (let i = 0; i < CHAR_H / 2; i++) {
-        const row = (p.y >> 1) + i;
-        const arr = this.imageSpans.get(row) ?? [];
+        const row2 = (p.y >> 1) + i;
+        const arr = this.imageSpans.get(row2) ?? [];
         arr.push([p.x, p.x + CHAR_W]);
-        this.imageSpans.set(row, arr);
+        this.imageSpans.set(row2, arr);
       }
     }
     const taken = /* @__PURE__ */ new Map();
@@ -1744,9 +1744,9 @@ var Office = class extends SimBase {
       const sel = s.id === selected;
       const urgent = s.state === "needs" || s.state === "error";
       if (!urgent && !sel) continue;
-      const row = p.y >> 1;
-      const rows = [...Array(CHAR_H / 2).keys()].map((i) => row + i);
-      rows.push(row - 1, row + CHAR_H / 2);
+      const row2 = p.y >> 1;
+      const rows = [...Array(CHAR_H / 2).keys()].map((i) => row2 + i);
+      rows.push(row2 - 1, row2 + CHAR_H / 2);
       const spots = [];
       for (const r of rows) spots.push([r, p.x + CHAR_W], [r, p.x - 1]);
       const free = spots.filter(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
@@ -1783,8 +1783,8 @@ var Office = class extends SimBase {
     }
   }
   /** Is this run free of other text and of any image? */
-  blocked(row, col, len, taken) {
-    const spans = [...taken.get(row) ?? [], ...this.imageSpans.get(row) ?? []];
+  blocked(row2, col, len, taken) {
+    const spans = [...taken.get(row2) ?? [], ...this.imageSpans.get(row2) ?? []];
     return spans.some((r) => col < r[1] && col + len > r[0]);
   }
 };
@@ -1816,13 +1816,13 @@ function extract(img, rowIdx, frame2, flip) {
   const y0 = rowIdx * FRAME_H;
   const grid = [];
   for (let y = 0; y < FRAME_H; y++) {
-    const row = [];
+    const row2 = [];
     for (let x = 0; x < FRAME_W; x++) {
       const sx = flip ? x0 + (FRAME_W - 1 - x) : x0 + x;
       const i = ((y0 + y) * img.w + sx) * 4;
-      row.push(img.rgba[i + 3] < 128 ? null : [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]]);
+      row2.push(img.rgba[i + 3] < 128 ? null : [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]]);
     }
-    grid.push(row);
+    grid.push(row2);
   }
   return { w: FRAME_W, h: FRAME_H, grid };
 }
@@ -1847,7 +1847,7 @@ function hueRotate(g, deg) {
     w: g.w,
     h: g.h,
     grid: g.grid.map(
-      (row) => row.map(
+      (row2) => row2.map(
         (p) => p ? [
           clamp(p[0] * m[0] + p[1] * m[1] + p[2] * m[2]),
           clamp(p[0] * m[3] + p[1] * m[4] + p[2] * m[5]),
@@ -1859,12 +1859,12 @@ function hueRotate(g, deg) {
 }
 var cache2 = /* @__PURE__ */ new Map();
 function pinBadge(g, colour) {
-  const grid = g.grid.map((row) => [...row]);
+  const grid = g.grid.map((row2) => [...row2]);
   const top = Math.round(g.h * 0.58);
   for (let y = top; y < Math.min(g.h, top + 6); y++) {
-    const row = grid[y];
-    const first = row.findIndex((c) => c);
-    const last2 = row.reduce((acc, c, i) => c ? i : acc, -1);
+    const row2 = grid[y];
+    const first = row2.findIndex((c) => c);
+    const last2 = row2.reduce((acc, c, i) => c ? i : acc, -1);
     if (first < 0 || last2 - first < 3) continue;
     const x = first + 1;
     const edge = [24, 26, 34];
@@ -2387,7 +2387,7 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY, JSON.stringify(settings));
         } catch {
         }
-        for (const el2 of choices.querySelectorAll("[role=radio]")) el2.setAttribute("aria-checked", "false");
+        for (const el3 of choices.querySelectorAll("[role=radio]")) el3.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
@@ -2403,7 +2403,7 @@ function mountSettings(button, panel, onChange) {
   note.className = "mt-3.5 mb-0 border-t border-line pt-3 text-[0.72rem]/[1.4] text-faint";
   note.textContent = "Saved in this browser only. The terminal keeps its own settings.";
   panel.append(note);
-  const open = (want) => {
+  const open2 = (want) => {
     panel.hidden = !want;
     button.setAttribute("aria-expanded", String(want));
     if (want) panel.querySelector("[role=radio]")?.focus();
@@ -2411,13 +2411,13 @@ function mountSettings(button, panel, onChange) {
   };
   button.addEventListener("click", (e) => {
     e.stopPropagation();
-    open(panel.hidden);
+    open2(panel.hidden);
   });
   document.addEventListener("pointerdown", (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open(false);
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open2(false);
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !panel.hidden) open(false);
+    if (e.key === "Escape" && !panel.hidden) open2(false);
   });
 }
 
@@ -2557,9 +2557,9 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-function mountRoom(room, el2) {
+function mountRoom(room, el3) {
   roomEl = room;
-  canvas = el2;
+  canvas = el3;
   ctx2d = canvas.getContext("2d");
   buffer = document.createElement("canvas");
   bufferCtx = buffer.getContext("2d");
@@ -2760,19 +2760,19 @@ function paint(pre, g) {
     for (const sp of spans) {
       if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
       const st = byId.get(sp.style_id);
-      const el2 = document.createElement("span");
+      const el3 = document.createElement("span");
       const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
       const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
-      if (fg) el2.style.color = fg;
-      if (bg && bg !== g.terminal_background) el2.style.background = bg;
-      if (st?.bold) el2.style.fontWeight = "700";
-      if (st?.faint) el2.style.opacity = "0.7";
-      if (st?.italic) el2.style.fontStyle = "italic";
-      if (st?.underline || st?.strikethrough) el2.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
-      if (st?.invisible) el2.style.visibility = "hidden";
-      if (reflow && RULE.test(sp.text)) el2.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
-      el2.textContent = sp.text;
-      line.append(el2);
+      if (fg) el3.style.color = fg;
+      if (bg && bg !== g.terminal_background) el3.style.background = bg;
+      if (st?.bold) el3.style.fontWeight = "700";
+      if (st?.faint) el3.style.opacity = "0.7";
+      if (st?.italic) el3.style.fontStyle = "italic";
+      if (st?.underline || st?.strikethrough) el3.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
+      if (st?.invisible) el3.style.visibility = "hidden";
+      if (reflow && RULE.test(sp.text)) el3.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
+      el3.textContent = sp.text;
+      line.append(el3);
       col = sp.column + [...sp.text].length;
     }
     if (!spans.length) line.append("\xA0");
@@ -2810,6 +2810,126 @@ function mountTerminal(host, closed) {
   });
 }
 
+// web/press.ts
+var el2;
+var timer2 = 0;
+var open = false;
+var deploys = false;
+var scrollOnRender = false;
+var MARK = {
+  commit: { glyph: "\u25CF", tone: "text-(--work)" },
+  push: { glyph: "\u2191", tone: "text-gold" },
+  run: { glyph: "\u2699", tone: "text-muted" },
+  deploy: { glyph: "\u25B2", tone: "text-(--work)" }
+};
+function describe(i) {
+  if (i.kind === "commit") return i.subject;
+  if (i.kind === "push") return `pushed ${i.branch} to ${i.remote}${i.forced ? " \u2014 forced" : ""}${i.count ? ` \xB7 ${i.count} commit${i.count === 1 ? "" : "s"}` : ""}`;
+  if (i.kind === "run") return `${i.workflow} \xB7 ${i.conclusion ?? i.status}`;
+  return `deployed ${i.hostname ?? i.worker}${i.env ? ` (${i.env})` : ""} \xB7 via ${i.source}`;
+}
+var failed = (i) => i.kind === "run" && (i.conclusion === "failure" || i.conclusion === "timed_out");
+function row(i) {
+  const li = document.createElement("li");
+  li.className = `grid grid-cols-[1.2rem_minmax(5rem,8rem)_1fr_auto] items-baseline gap-x-2.5 gap-y-0.5 border-b border-line/60 px-3.5 py-2 max-[560px]:grid-cols-[1.2rem_1fr_auto]`;
+  const mark = MARK[i.kind];
+  li.innerHTML = `
+		<span class="${mark.tone} text-center text-[0.8rem] max-[560px]:col-start-1 max-[560px]:row-start-1" title="${i.kind}">${mark.glyph}</span>
+		<span class="repo truncate font-bold text-[0.82rem] text-label max-[560px]:col-start-2 max-[560px]:row-start-1"></span>
+		<span class="what truncate text-[0.84rem] ${failed(i) ? "text-hot" : "text-muted"} max-[560px]:col-start-2 max-[560px]:col-end-4 max-[560px]:row-start-2"></span>
+		<span class="text-[0.74rem] whitespace-nowrap text-faint tabular-nums max-[560px]:col-start-3 max-[560px]:row-start-1">${ago(Date.now() - i.at)}</span>`;
+  li.querySelector(".repo").textContent = i.repo;
+  li.querySelector(".what").textContent = describe(i);
+  return li;
+}
+function render(snap) {
+  const wrap2 = document.createElement("div");
+  const bar2 = document.createElement("div");
+  bar2.className = "flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2";
+  const title = document.createElement("span");
+  title.className = "font-bold text-label";
+  title.textContent = "Commits & deploys";
+  const meta = document.createElement("span");
+  meta.className = "text-[0.74rem] text-faint";
+  meta.textContent = snap.error ? "" : `${snap.repos} repositories \xB7 read ${ago(Date.now() - snap.at)}`;
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.textContent = deploys ? "Deploys on" : "Include deploys";
+  toggle.title = deploys ? "Also reading GitHub Actions and Cloudflare \u2014 slower" : "Also read workflow runs and Cloudflare deploys (takes ~17s the first time)";
+  toggle.className = `ml-auto flex min-h-9 cursor-pointer items-center rounded border px-3 text-[0.74rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${deploys ? "border-gold text-gold" : "border-line text-muted hover:text-label"}`;
+  toggle.addEventListener("click", () => {
+    deploys = !deploys;
+    refresh2();
+  });
+  bar2.append(title, meta, toggle);
+  wrap2.append(bar2);
+  if (snap.error) {
+    const p = document.createElement("p");
+    p.className = "m-0 px-3.5 py-6 text-center text-[0.84rem] text-muted";
+    p.textContent = snap.error;
+    wrap2.append(p);
+  } else if (!snap.items.length) {
+    const p = document.createElement("p");
+    p.className = "m-0 px-3.5 py-6 text-center text-faint";
+    p.textContent = deploys ? "Reading \u2014 deploys take about 17 seconds." : "Nothing yet.";
+    wrap2.append(p);
+  } else {
+    if (snap.local) {
+      const note = document.createElement("p");
+      note.className = "m-0 border-b border-line/60 px-3.5 py-1.5 text-[0.72rem] text-faint";
+      note.textContent = "Commits and pushes only \u2014 deploys were not read.";
+      wrap2.append(note);
+    }
+    for (const err of [snap.githubError, snap.cloudflareError]) {
+      if (!err) continue;
+      const p = document.createElement("p");
+      p.className = "m-0 border-b border-line/60 px-3.5 py-1.5 text-[0.72rem] text-hot";
+      p.textContent = err;
+      wrap2.append(p);
+    }
+    const ul = document.createElement("ul");
+    ul.className = "m-0 list-none p-0";
+    for (const i of snap.items) ul.append(row(i));
+    wrap2.append(ul);
+  }
+  el2.replaceChildren(wrap2);
+  if (scrollOnRender) {
+    scrollOnRender = false;
+    el2.style.scrollMarginTop = `${(document.getElementById("bar")?.getBoundingClientRect().height ?? 0) + 8}px`;
+    requestAnimationFrame(() => el2.scrollIntoView({ block: "start" }));
+  }
+}
+async function refresh2() {
+  if (!open) return;
+  try {
+    const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`);
+    if (!res.ok) return render({ at: Date.now(), items: [], repos: 0, local: true, error: `the server said ${res.status}` });
+    render(await res.json());
+  } catch {
+    render({ at: Date.now(), items: [], repos: 0, local: true, error: "could not reach guildhall" });
+  }
+}
+function show2() {
+  open = true;
+  el2.hidden = false;
+  el2.textContent = "Reading\u2026";
+  scrollOnRender = true;
+  refresh2();
+  clearInterval(timer2);
+  timer2 = setInterval(refresh2, 3e4);
+}
+function close2() {
+  open = false;
+  clearInterval(timer2);
+  timer2 = 0;
+  el2.hidden = true;
+  el2.replaceChildren();
+}
+var isOpen = () => open;
+function mountPress(host) {
+  el2 = host;
+}
+
 // web/app.ts
 var bar = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
 var roomEl2 = $("#room");
@@ -2832,19 +2952,19 @@ function paintCounts(list) {
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
   bar.counts.replaceChildren(
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
-      const el2 = document.createElement("span");
-      el2.style.color = rgb(LOOK[k].color);
-      el2.className = "whitespace-nowrap";
-      el2.textContent = `${LOOK[k].glyph} `;
+      const el3 = document.createElement("span");
+      el3.style.color = rgb(LOOK[k].color);
+      el3.className = "whitespace-nowrap";
+      el3.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("span");
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
       word2.className = "text-label";
       word2.textContent = ` ${LOOK[k].label}`;
-      el2.title = `${counts[k]} ${LOOK[k].label}`;
-      el2.append(n, word2);
-      return el2;
+      el3.title = `${counts[k]} ${LOOK[k].label}`;
+      el3.append(n, word2);
+      return el3;
     })
   );
 }
@@ -2880,22 +3000,22 @@ function freshness() {
 function connect() {
   let es = null;
   let delay = 1e3;
-  let timer2 = 0;
+  let timer3 = 0;
   const retry = () => {
-    clearTimeout(timer2);
-    timer2 = setTimeout(probe, delay);
+    clearTimeout(timer3);
+    timer3 = setTimeout(probe, delay);
     delay = Math.min(delay * 2, 3e4);
   };
   const probe = async () => {
     try {
       const r = await fetch("/api/sessions", { cache: "no-store" });
       if (r.status === 401) return location.reload();
-      return open();
+      return open2();
     } catch {
     }
     retry();
   };
-  function open() {
+  function open2() {
     es?.close();
     delay = 1e3;
     es = new EventSource("/api/stream");
@@ -2917,13 +3037,20 @@ function connect() {
       retry();
     };
   }
-  open();
+  open2();
   return { probe: () => (delay = 1e3, probe()) };
 }
 function showRoom() {
   roomEl2.hidden = window.innerWidth <= 720 || !settings.room || sessions2.length === 0;
 }
 mountTerminal($("#terminal"), () => {
+});
+mountPress($("#press"));
+var pressBtn = $("#pressbtn");
+pressBtn.addEventListener("click", () => {
+  const opening = !isOpen();
+  opening ? show2() : close2();
+  pressBtn.setAttribute("aria-expanded", String(opening));
 });
 mountList($("#list"), $("#empty"), show);
 mountRoom(roomEl2, $("#canvas"));
