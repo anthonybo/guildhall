@@ -2622,7 +2622,7 @@ function chrome(name) {
   bar2.append(title, live2, x);
   const pre = document.createElement("pre");
   pre.id = "screen";
-  pre.className = "m-0 max-h-[60vh] overflow-auto px-3 py-2 text-[0.72rem]/[1.35] whitespace-pre text-label";
+  pre.className = "m-0 max-h-[60vh] overflow-auto px-3 py-2 whitespace-pre";
   pre.textContent = "reading\u2026";
   const form = document.createElement("form");
   form.className = "flex gap-2 border-t border-line p-2";
@@ -2658,18 +2658,57 @@ ${pre.textContent}`;
 }
 async function refresh() {
   if (!openId) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}&lines=200`);
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`);
   if (r.status === 401) return askForToken("That password was not accepted.");
   if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
   if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
   const pre = document.getElementById("screen");
   if (!pre) return;
-  if (r.error) pre.textContent = r.error;
-  else if (typeof r.text === "string") {
-    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
-    pre.textContent = r.text;
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  if (r.error) return void (pre.textContent = r.error);
+  if (r.render_grid) paint(pre, r.render_grid);
+}
+function paint(pre, g) {
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+  const byId = new Map(g.styles.map((st) => [st.id, st]));
+  const rows = /* @__PURE__ */ new Map();
+  for (const sp of g.row_spans) {
+    const list = rows.get(sp.row) ?? [];
+    list.push(sp);
+    rows.set(sp.row, list);
   }
+  pre.style.background = g.terminal_background ?? "transparent";
+  pre.style.color = g.terminal_foreground ?? "inherit";
+  const usable = Math.max(200, pre.clientWidth - 24);
+  const size = Math.max(6, Math.min(13, usable / (g.columns * 0.6)));
+  pre.style.fontSize = `${size.toFixed(2)}px`;
+  pre.style.lineHeight = "1.25";
+  const out = [];
+  for (let r = 0; r < g.rows; r++) {
+    const line = document.createElement("div");
+    const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
+    let col = 0;
+    for (const sp of spans) {
+      if (sp.column > col) line.append(" ".repeat(sp.column - col));
+      const st = byId.get(sp.style_id);
+      const el2 = document.createElement("span");
+      const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
+      const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
+      if (fg) el2.style.color = fg;
+      if (bg && bg !== g.terminal_background) el2.style.background = bg;
+      if (st?.bold) el2.style.fontWeight = "700";
+      if (st?.faint) el2.style.opacity = "0.7";
+      if (st?.italic) el2.style.fontStyle = "italic";
+      if (st?.underline || st?.strikethrough) el2.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
+      if (st?.invisible) el2.style.visibility = "hidden";
+      el2.textContent = sp.text;
+      line.append(el2);
+      col = sp.column + [...sp.text].length;
+    }
+    if (!spans.length) line.append("\xA0");
+    out.push(line);
+  }
+  pre.replaceChildren(...out);
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
 }
 function show(id, name) {
   openId = id;

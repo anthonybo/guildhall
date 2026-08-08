@@ -24,7 +24,7 @@ const token = () => sessionStorage.getItem(KEY) ?? ''
 async function api(path: string, init: RequestInit = {}) {
 	const res = await fetch(path, { ...init, headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
 	const body = await res.json().catch(() => ({ error: 'unreadable reply' }))
-	return { status: res.status, ...body } as { status: number; text?: string; error?: string; ok?: boolean }
+	return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean }
 }
 
 /** Ask for the token. Only reached when the server says the current one is wrong. */
@@ -81,7 +81,10 @@ function chrome(name: string) {
 	pre.id = 'screen'
 	// the screen is preformatted terminal output: never innerHTML, and it scrolls
 	// inside its own box so a long scrollback cannot stretch the page
-	pre.className = 'm-0 max-h-[60vh] overflow-auto px-3 py-2 text-[0.72rem]/[1.35] whitespace-pre text-label'
+	// A terminal is a fixed grid and must not reflow, so it scrolls sideways.
+	// The type is sized from the real column count in paint(), because a terminal
+	// you have to scroll horizontally to read one line of is barely a terminal.
+	pre.className = 'm-0 max-h-[60vh] overflow-auto px-3 py-2 whitespace-pre'
 	pre.textContent = 'reading…'
 
 	const form = document.createElement('form')
@@ -118,20 +121,77 @@ function chrome(name: string) {
 
 async function refresh() {
 	if (!openId) return
-	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}&lines=200`)
+	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`)
 	if (r.status === 401) return askForToken('That password was not accepted.')
 	if (r.status === 403) return askForToken('Control is off, or this device is not on the machine or its tailnet.')
 	if (r.status === 429) return askForToken('Too many wrong tries — wait a moment.')
 	const pre = document.getElementById('screen')
 	if (!pre) return
-	if (r.error) pre.textContent = r.error
-	else if (typeof r.text === 'string') {
-		const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
-		pre.textContent = r.text
-		// only follow if you were already at the bottom, so reading scrollback is
-		// not yanked away every two seconds
-		if (atBottom) pre.scrollTop = pre.scrollHeight
+	if (r.error) return void (pre.textContent = r.error)
+	if (r.render_grid) paint(pre, r.render_grid)
+}
+
+type Style = { foreground?: string; background?: string; bold?: boolean; faint?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean; inverse?: boolean; invisible?: boolean; id: number }
+type Span = { row: number; column: number; style_id: number; text: string }
+type Grid = { rows: number; columns: number; styles: Style[]; row_spans: Span[]; terminal_foreground?: string; terminal_background?: string }
+
+/**
+ * Draw the grid.
+ *
+ * Spans carry a row, a column and a style id, so this places them rather than
+ * concatenating them — which is what makes a status bar or a progress gauge land
+ * where the terminal put it instead of drifting. Gaps between spans are padded
+ * with spaces, because a terminal row is a fixed number of cells and a missing
+ * one shifts everything after it.
+ */
+function paint(pre: HTMLElement, g: Grid) {
+	const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
+	const byId = new Map(g.styles.map((st) => [st.id, st]))
+	const rows = new Map<number, Span[]>()
+	for (const sp of g.row_spans) {
+		const list = rows.get(sp.row) ?? []
+		list.push(sp)
+		rows.set(sp.row, list)
 	}
+	pre.style.background = g.terminal_background ?? 'transparent'
+	pre.style.color = g.terminal_foreground ?? 'inherit'
+	// Fit the real column count to the real width. A terminal is only legible as a
+	// whole, so the type is sized to the grid rather than the grid to the type.
+	// 0.6 is the advance-to-size ratio of this monospace stack.
+	const usable = Math.max(200, pre.clientWidth - 24)
+	const size = Math.max(6, Math.min(13, usable / (g.columns * 0.6)))
+	pre.style.fontSize = `${size.toFixed(2)}px`
+	pre.style.lineHeight = '1.25'
+
+	const out: HTMLElement[] = []
+	for (let r = 0; r < g.rows; r++) {
+		const line = document.createElement('div')
+		const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column)
+		let col = 0
+		for (const sp of spans) {
+			if (sp.column > col) line.append(' '.repeat(sp.column - col))
+			const st = byId.get(sp.style_id)
+			const el = document.createElement('span')
+			// inverse swaps them, which is how a selected row or a cursor is drawn
+			const fg = st?.inverse ? (st?.background ?? g.terminal_background) : st?.foreground
+			const bg = st?.inverse ? (st?.foreground ?? g.terminal_foreground) : st?.background
+			if (fg) el.style.color = fg
+			if (bg && bg !== g.terminal_background) el.style.background = bg
+			if (st?.bold) el.style.fontWeight = '700'
+			if (st?.faint) el.style.opacity = '0.7'
+			if (st?.italic) el.style.fontStyle = 'italic'
+			if (st?.underline || st?.strikethrough) el.style.textDecoration = `${st.underline ? 'underline' : ''} ${st.strikethrough ? 'line-through' : ''}`.trim()
+			if (st?.invisible) el.style.visibility = 'hidden'
+			// textContent, never innerHTML: this is whatever the terminal is showing
+			el.textContent = sp.text
+			line.append(el)
+			col = sp.column + [...sp.text].length
+		}
+		if (!spans.length) line.append('\u00a0')
+		out.push(line)
+	}
+	pre.replaceChildren(...out)
+	if (atBottom) pre.scrollTop = pre.scrollHeight
 }
 
 /** Open the terminal for a session. */

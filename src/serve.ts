@@ -28,7 +28,7 @@ import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
-import { ask, readScreen } from './control.ts'
+import { ask, readGrid } from './control.ts'
 import { demoSessions } from './demo.ts'
 import type { Session } from './data.ts'
 
@@ -219,8 +219,12 @@ export function createServer(opts: ServeOptions) {
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			const target = sessions().find((s) => s.id === url.searchParams.get('id'))
 			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			const out = await readScreen(target.workspace, Number(url.searchParams.get('lines')) || 160)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { text: out.text } : { error: out.error }))
+			// The styled grid, not flattened text: a TUI is colour and position, and
+			// plain text throws both away. cmux hands back JSON already, so this is
+			// passed through rather than re-encoded.
+			const out = await readGrid(target.workspace)
+			if (!out.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: out.error }))
+			return send(res, 200, MIME['.json'], out.text)
 		}
 
 		if (url.pathname === '/api/stream') {
