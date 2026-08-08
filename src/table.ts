@@ -263,3 +263,21 @@ export function footer(
 	const tail = hidden ? `  ${fg(C.faint)}+${hidden} not seated${R}` : ''
 	return clip(`${line}${tail}`, total)
 }
+
+/**
+ * The newest thing a remote device typed into this machine.
+ *
+ * Deliberately loud. Control is the one feature here that can change anything,
+ * and the person at the keyboard is the only one who can notice it being abused
+ * — so this takes a row of the room rather than hiding in a log file, and it
+ * names the project so "which session did that go to" needs no investigation.
+ */
+export function remoteLine(e: { at: number; proj: string; text: string; ok: boolean }, cols: number) {
+	const when = new Date(e.at).toLocaleTimeString()
+	const mark = e.ok ? '⇢' : '✗'
+	const head = ` ${mark} remote → ${e.proj} ${when}  `
+	const room = Math.max(0, cols - [...head].length - 1)
+	const body = cut(e.text, room)
+	const tint = e.ok ? C.screenAgent : LOOK.error.color
+	return `${bg(tint)}${fg(C.ink)}${bold}${head}${R}${bg(C.night)}${fg(tint)} ${body.padEnd(Math.max(0, room - 1))}${R}`
+}

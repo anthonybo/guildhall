@@ -198,10 +198,12 @@ var opened = /* @__PURE__ */ new Set();
 var tokens = (n) => n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
 var listEl;
 var emptyEl;
+var onTerminal = null;
 var current = [];
-function mountList(list, empty) {
+function mountList(list, empty, terminal) {
   listEl = list;
   emptyEl = empty;
+  onTerminal = terminal ?? null;
 }
 function details(s) {
   const dl = document.createElement("dl");
@@ -211,10 +213,7 @@ function details(s) {
     ["folder", s.cwd],
     ["level", `${s.level} ${tierOf(s.level).name} \xB7 ${tokens(s.xp)} xp`],
     ["turns", String(s.turns)],
-    [
-      "context",
-      s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"
-    ],
+    ["context", s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : "nothing yet"],
     ["idle", ago(s.stale)],
     ...s.tab ? [["tab", `\u2318${s.tab}`]] : [],
     ...s.waitingFor ? [["waiting on", s.waitingFor]] : [],
@@ -244,10 +243,7 @@ function paintList(list) {
     head.className = "band band-rule tint-page sticky top-12 z-[1] mt-3.5 mb-px flex items-center gap-2.5 rounded border-l-5 border-(--state) px-2.5 py-1.5 text-[0.76rem] font-bold tracking-[0.14em] text-(--ink) uppercase first:mt-0";
     const key = members[0].state;
     head.style.setProperty("--state", rgb(LOOK[key].color));
-    head.style.setProperty(
-      "--ink",
-      rgb(readable(LOOK[key].color, bandOf(key)))
-    );
+    head.style.setProperty("--ink", rgb(readable(LOOK[key].color, bandOf(key))));
     head.style.setProperty("--tint", tintOf(band2.key));
     head.innerHTML = `<span></span><span class="rounded-full bg-(--state) px-1.5 py-px font-bold text-[#1a1c28]"></span>`;
     head.children[0].textContent = band2.label;
@@ -263,7 +259,7 @@ function paintList(list) {
     const attn = needsAttention(s);
     li.className = [
       "row group grid cursor-pointer gap-x-2.5 gap-y-0.5 rounded-md border border-l-5 border-(--state) p-2.5 tint-panel",
-      '[grid-template-columns:auto_1fr_auto] [grid-template-areas:"lv_proj_meta""lv_doing_doing""detail_detail_detail"]',
+      '[grid-template-columns:auto_1fr_auto_auto] [grid-template-areas:"lv_proj_meta_term""lv_doing_doing_term""detail_detail_detail_detail"]',
       "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--state)",
       attn ? "attn" : "border-state-soft",
       busy ? "sweep" : ""
@@ -277,10 +273,7 @@ function paintList(list) {
     li.style.setProperty("--soft", rgb(readable(MUTED, card, 5.5)));
     li.style.setProperty("--tint", tintOf(s.state));
     li.style.setProperty("--tier", rgb(tierOf(s.level).color));
-    li.style.setProperty(
-      "--proj",
-      rgb(readable(hues.get(s.proj) ?? look.color, card))
-    );
+    li.style.setProperty("--proj", rgb(readable(hues.get(s.proj) ?? look.color, card)));
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
 			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
@@ -293,6 +286,18 @@ function paintList(list) {
 			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
+    if (s.workspace) {
+      const term = document.createElement("button");
+      term.type = "button";
+      term.textContent = "\u2328";
+      term.title = `Open ${s.proj}'s terminal`;
+      term.className = "[grid-area:term] cursor-pointer self-center rounded border border-line bg-bg px-1.5 py-0.5 text-(--dim) hover:border-gold hover:text-gold";
+      term.addEventListener("click", (e) => {
+        e.stopPropagation();
+        onTerminal?.(s.id, s.proj);
+      });
+      li.append(term);
+    }
     li.tabIndex = 0;
     li.setAttribute("role", "button");
     const open = opened.has(s.id);
@@ -2373,7 +2378,7 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY, JSON.stringify(settings));
         } catch {
         }
-        for (const el of choices.querySelectorAll("[role=radio]")) el.setAttribute("aria-checked", "false");
+        for (const el2 of choices.querySelectorAll("[role=radio]")) el2.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
@@ -2543,9 +2548,9 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-function mountRoom(room, el) {
+function mountRoom(room, el2) {
   roomEl = room;
-  canvas = el;
+  canvas = el2;
   ctx2d = canvas.getContext("2d");
   buffer = document.createElement("canvas");
   bufferCtx = buffer.getContext("2d");
@@ -2553,6 +2558,143 @@ function mountRoom(room, el) {
     sheetsReady = false;
   });
   requestAnimationFrame(frame);
+}
+
+// web/terminal.ts
+var KEY2 = "guildhall.control";
+var openId = null;
+var openName = "";
+var timer = 0;
+var el;
+var onClose = () => {
+};
+var token = () => sessionStorage.getItem(KEY2) ?? "";
+async function api(path, init = {}) {
+  const res = await fetch(path, { ...init, headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+  const body = await res.json().catch(() => ({ error: "unreadable reply" }));
+  return { status: res.status, ...body };
+}
+function askForToken(why) {
+  el.innerHTML = "";
+  const wrap = document.createElement("div");
+  wrap.className = "p-4";
+  const h = document.createElement("p");
+  h.className = "mt-0 mb-2 text-label";
+  h.textContent = "Control token";
+  const p = document.createElement("p");
+  p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
+  p.textContent = `${why} The token is in ~/.config/guildhall/control-token on the machine running guildhall, and is shown in its help panel.`;
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "32 hex characters";
+  input.className = "w-full rounded border border-line bg-bg px-2 py-1.5 font-mono text-label";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "Unlock";
+  go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
+  const submit = () => {
+    sessionStorage.setItem(KEY2, input.value.trim());
+    if (openId) show(openId, openName);
+  };
+  go.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+  wrap.append(h, p, input, go);
+  el.append(wrap);
+  input.focus();
+}
+function chrome(name) {
+  el.innerHTML = "";
+  const bar2 = document.createElement("div");
+  bar2.className = "flex items-center gap-2 border-b border-line px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "text-[0.72rem] text-faint";
+  live2.textContent = "live terminal";
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715";
+  x.className = "ml-auto cursor-pointer rounded border-0 bg-transparent px-1 text-faint hover:text-label";
+  x.addEventListener("click", close);
+  bar2.append(title, live2, x);
+  const pre = document.createElement("pre");
+  pre.id = "screen";
+  pre.className = "m-0 max-h-[60vh] overflow-auto px-3 py-2 text-[0.72rem]/[1.35] whitespace-pre text-label";
+  pre.textContent = "reading\u2026";
+  const form = document.createElement("form");
+  form.className = "flex gap-2 border-t border-line p-2";
+  const input = document.createElement("input");
+  input.id = "ask";
+  input.autocomplete = "off";
+  input.placeholder = "Type into this session\u2026";
+  input.className = "flex-1 rounded border border-line bg-bg px-2 py-1.5 font-mono text-label";
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.textContent = "Send";
+  send.className = "cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
+  form.append(input, send);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value;
+    if (!text.trim()) return;
+    input.value = "";
+    send.disabled = true;
+    const r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
+    send.disabled = false;
+    if (r.error) {
+      pre.textContent = `${r.error}
+
+${pre.textContent}`;
+      input.value = text;
+    }
+    refresh();
+    input.focus();
+  });
+  el.append(bar2, pre, form);
+  return { pre, input };
+}
+async function refresh() {
+  if (!openId) return;
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}&lines=200`);
+  if (r.status === 401) return askForToken("That token was not accepted.");
+  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
+  const pre = document.getElementById("screen");
+  if (!pre) return;
+  if (r.error) pre.textContent = r.error;
+  else if (typeof r.text === "string") {
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+    pre.textContent = r.text;
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
+  }
+}
+function show(id, name) {
+  openId = id;
+  openName = name;
+  el.hidden = false;
+  if (!token()) return askForToken("This is behind a separate token from the passcode.");
+  const { input } = chrome(name);
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 2e3);
+  input.focus();
+}
+function close() {
+  openId = null;
+  clearInterval(timer);
+  timer = 0;
+  el.hidden = true;
+  el.innerHTML = "";
+  onClose();
+}
+function mountTerminal(host, closed) {
+  el = host;
+  onClose = closed;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && openId) close();
+  });
 }
 
 // web/app.ts
@@ -2577,19 +2719,19 @@ function paintCounts(list) {
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
   bar.counts.replaceChildren(
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
-      const el = document.createElement("span");
-      el.style.color = rgb(LOOK[k].color);
-      el.className = "whitespace-nowrap";
-      el.textContent = `${LOOK[k].glyph} `;
+      const el2 = document.createElement("span");
+      el2.style.color = rgb(LOOK[k].color);
+      el2.className = "whitespace-nowrap";
+      el2.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("span");
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
       word2.className = "text-label";
       word2.textContent = ` ${LOOK[k].label}`;
-      el.title = `${counts[k]} ${LOOK[k].label}`;
-      el.append(n, word2);
-      return el;
+      el2.title = `${counts[k]} ${LOOK[k].label}`;
+      el2.append(n, word2);
+      return el2;
     })
   );
 }
@@ -2625,10 +2767,10 @@ function freshness() {
 function connect() {
   let es = null;
   let delay = 1e3;
-  let timer = 0;
+  let timer2 = 0;
   const retry = () => {
-    clearTimeout(timer);
-    timer = setTimeout(probe, delay);
+    clearTimeout(timer2);
+    timer2 = setTimeout(probe, delay);
     delay = Math.min(delay * 2, 3e4);
   };
   const probe = async () => {
@@ -2668,7 +2810,9 @@ function connect() {
 function showRoom() {
   roomEl2.hidden = window.innerWidth <= 720 || !settings.room || sessions2.length === 0;
 }
-mountList($("#list"), $("#empty"));
+mountTerminal($("#terminal"), () => {
+});
+mountList($("#list"), $("#empty"), show);
 mountRoom(roomEl2, $("#canvas"));
 mountSettings($("#gear"), $("#settings"), () => {
   showRoom();

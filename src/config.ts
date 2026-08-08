@@ -26,11 +26,22 @@ export type Config = {
 	/** hold the display awake too, not just the machine. Off keeps the screen's own
 	 *  sleep timer, which on battery is usually two minutes and usually locks. */
 	awakeDisplay: boolean
+	/**
+	 * Let a browser read a session's terminal and type into it.
+	 *
+	 * Its own switch, independent of `serve`, because it is a different kind of
+	 * thing: sharing makes the room readable, this makes the machine writable.
+	 * Anyone who holds the control token can send text to Claude Code sessions in
+	 * every repository here, which reaches editing files and running commands.
+	 * Off unless deliberately turned on, and refused from anywhere but loopback
+	 * or a tailnet however it is configured.
+	 */
+	control: boolean
 }
 
 // Vertical needs the graphics protocol, since the plate is a rotated image; on a
 // terminal without it the room falls back to horizontal on its own.
-const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical', awakeDisplay: true }
+const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical', awakeDisplay: true, control: false }
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
@@ -45,6 +56,7 @@ export function load(): Config {
 			host: typeof raw.host === 'string' && raw.host ? raw.host : DEFAULTS.host,
 			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
 			awakeDisplay: typeof raw.awakeDisplay === 'boolean' ? raw.awakeDisplay : DEFAULTS.awakeDisplay,
+			control: raw.control === true,
 		}
 	} catch {
 		return { ...DEFAULTS }

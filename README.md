@@ -15,9 +15,11 @@ Sprites need a terminal that speaks the kitty graphics protocol — Ghostty, kit
 WezTerm. Anywhere else the room falls back to half blocks and everything else is
 unchanged.
 
-It is **read-only**. It watches the sessions you already run — in cmux or
-anywhere else — and never starts, stops, or moves one. The only thing it writes
-is a "focus this tab" request to cmux, and only when you press enter.
+It is **read-only by default**. It watches the sessions you already run — in
+cmux or anywhere else — and never starts, stops, or moves one. The only thing it
+writes is a "focus this tab" request to cmux, and only when you press enter.
+There is one exception, off unless you turn it on: see *Typing into a session
+from somewhere else* below.
 
 ```
 npm install
@@ -191,7 +193,7 @@ That turns an exhaustive search from seconds into months. Change the code in
 filenames being edited and commands that were run** — which is the reason it is
 off unless you ask for it.
 
-Nothing it serves can change anything. There is no endpoint that writes, on this
+With control off, nothing it serves can change anything. There is no endpoint that writes, on this
 machine or in any session, so the worst case of leaving it on is disclosure, not
 damage.
 
@@ -266,3 +268,38 @@ Character sprites and the simulation model come from
 [pixel-agents](https://github.com/pixel-agents-hq/pixel-agents) (MIT) — see
 `assets/characters/LICENSE-pixel-agents.txt`. The room deviates from it in three
 deliberate ways, each documented at the top of `src/office.ts`.
+
+## Typing into a session from somewhere else
+
+`"control": true` in the config lets the browser open a session's **real
+terminal** — the one already on your screen, not a second copy — read what it is
+showing, and type into it. It works through cmux's socket API: `read-screen` to
+see, `send` and `send-key` to type. Press ⌨ on a row to open it.
+
+Not `claude -p --resume`, which was the obvious alternative and is wrong for
+this: it starts a *second* process against the same transcript, so you get two
+writers on one conversation and nothing appears in the terminal you are actually
+looking at.
+
+**This is the one thing here that can change your machine**, and it is treated
+that way. Anyone holding the control token can send text to Claude Code in every
+repository you have open, which reaches editing files and running commands. So:
+
+- **A separate credential.** 32 hex characters from the system CSPRNG, not the
+  four-digit view passcode. Watching and typing are different privileges, and a
+  device trusted with one has not been trusted with the other. It is read off
+  the machine — `~/.config/guildhall/control-token`, or the `?` panel — and
+  never travels over the network.
+- **Off unless you turn it on**, with its own switch independent of `serve`.
+- **Loopback or tailnet only.** Never a plain LAN, whatever the config says. A
+  shared secret on a network you also hand to guests is not a boundary, and no
+  amount of token length fixes being reachable by every device on the subnet.
+- **Permission prompts stay yours.** Keys that would answer one are refused, so
+  a remote caller cannot approve its own tool use.
+- **Every send is printed** above the footer on the machine's own screen. Acting
+  here remotely is possible; doing it unseen is not.
+
+The session must be in a cmux tab. Without one there is no terminal to address,
+and guildhall refuses rather than guessing — a wrong guess types into another
+project. Addressing is by cmux's workspace UUID, never its position: `workspace:2`
+and the second tab are different things.

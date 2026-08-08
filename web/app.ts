@@ -13,6 +13,7 @@ import type { Session } from '../src/data/types.ts'
 import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
+import { mountTerminal, show as showTerminal } from './terminal.ts'
 import { mountSettings, settings } from './settings.ts'
 
 const bar = { counts: $<HTMLElement>('#counts'), link: $<HTMLElement>('#link'), ver: $<HTMLElement>('#ver') }
@@ -213,7 +214,8 @@ function showRoom() {
 
 /* ── wiring ── */
 
-mountList($<HTMLElement>('#list'), $<HTMLElement>('#empty'))
+mountTerminal($<HTMLElement>('#terminal'), () => {})
+mountList($<HTMLElement>('#list'), $<HTMLElement>('#empty'), showTerminal)
 mountRoom(roomEl, $<HTMLCanvasElement>('#canvas'))
 mountSettings($<HTMLButtonElement>('#gear'), $<HTMLElement>('#settings'), () => {
 	showRoom()

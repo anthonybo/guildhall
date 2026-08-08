@@ -116,6 +116,7 @@ export function collect(): Session[] {
 			// crossing the 200k mark is the only visible sign of a 1M-context session
 			ctxLimit: used > 190_000 ? 1_000_000 : 200_000,
 			tab: tab?.tab,
+			workspace: tab?.workspace || undefined,
 			unread: !!tab?.unread,
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			turns: d.turns ?? 0,

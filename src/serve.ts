@@ -27,6 +27,8 @@ import { loginPage } from './login.ts'
 import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
+import { controlAllowed, controlReachable } from './controlauth.ts'
+import { ask, readScreen } from './control.ts'
 import { demoSessions } from './demo.ts'
 import type { Session } from './data.ts'
 
@@ -37,6 +39,13 @@ export type ServeOptions = {
 	/** 0.0.0.0 reaches the LAN; 127.0.0.1 is localhost only, for tunnels. */
 	host: string
 	demo: boolean
+	/** Whether typing into a session is permitted at all. A function, not a
+	 *  boolean, so turning it off in the running app takes effect immediately
+	 *  rather than at the next restart. */
+	control?: () => boolean
+	/** Announce a remote send on this machine's own screen. A caller that can act
+	 *  here must not be able to do it invisibly. */
+	onSend?: (proj: string, text: string, ok: boolean) => void
 }
 
 /** The session this request carries, if any. Never the passcode itself. */
@@ -51,13 +60,14 @@ function sessionOf(req: http.IncomingMessage) {
  *  acceptable here: there is no proxy on a home network or a tailnet. */
 const addressOf = (req: http.IncomingMessage) => req.socket.remoteAddress ?? 'unknown'
 
-/** Read a small form body. Capped, because nothing here needs more than 4 bytes. */
+/** Read a small request body. Capped: the passcode form needs four bytes and a
+ *  prompt needs a few thousand, so 8KB is generous for both and refuses the rest. */
 function readBody(req: http.IncomingMessage): Promise<string> {
 	return new Promise((resolve) => {
 		let data = ''
 		req.on('data', (c) => {
 			data += c
-			if (data.length > 512) req.destroy()
+			if (data.length > 8192) req.destroy()
 		})
 		req.on('end', () => resolve(data))
 		req.on('error', () => resolve(''))
@@ -142,9 +152,42 @@ export function createServer(opts: ServeOptions) {
 			return
 		}
 
+		/**
+		 * Typing into a session's real terminal.
+		 *
+		 * The only route in this server that changes anything outside itself, and
+		 * it is guarded four ways, each closing a different hole:
+		 *
+		 *  - the feature is off unless `control` was deliberately enabled;
+		 *  - the caller must be on loopback or a tailnet, because a shared secret
+		 *    on a LAN is one guest network away from running commands here;
+		 *  - the control token is required, and it is not the view passcode — a
+		 *    device that may watch has not thereby been trusted to type;
+		 *  - the token goes in a header, never a query string, so it cannot be
+		 *    captured by a proxy log, a referrer, or browser history.
+		 */
+		if (req.method === 'POST' && url.pathname === '/api/send') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (!controlAllowed(req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"bad control token"}')
+			let body: { id?: string; text?: string }
+			try {
+				body = JSON.parse(await readBody(req))
+			} catch {
+				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+			}
+			const target = sessions().find((s) => s.id === body.id)
+			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			const out = await ask(target.workspace, String(body.text ?? ''))
+			// Every send is announced on the machine's own screen. A remote caller
+			// must not be able to act here invisibly.
+			opts.onSend?.(target.proj, String(body.text ?? '').slice(0, 200), out.ok)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
+		}
+
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
 			// nothing else here mutates anything; say so plainly rather than 404ing
-			res.writeHead(405, { allow: 'GET, HEAD, POST /auth' }).end('read-only')
+			res.writeHead(405, { allow: 'GET, HEAD, POST /auth, POST /api/send' }).end('read-only')
 			return
 		}
 
@@ -156,6 +199,24 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/sessions') {
 			send(res, 200, MIME['.json'], payload())
 			return
+		}
+
+		/**
+		 * What a session's terminal is showing right now.
+		 *
+		 * Behind the control token rather than the view passcode, even though it
+		 * only reads. A screen is scrollback — source, command output, whatever a
+		 * session has printed — which is a far larger disclosure than the summaries
+		 * the rest of this serves, and it should not come with a four-digit code.
+		 */
+		if (url.pathname === '/api/screen') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (!controlAllowed(req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"bad control token"}')
+			const target = sessions().find((s) => s.id === url.searchParams.get('id'))
+			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			const out = await readScreen(target.workspace, Number(url.searchParams.get('lines')) || 160)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { text: out.text } : { error: out.error }))
 		}
 
 		if (url.pathname === '/api/stream') {

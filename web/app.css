@@ -259,8 +259,17 @@
   .m-0 {
     margin: 0px;
   }
+  .mx-3\.5 {
+    margin-inline: calc(var(--spacing) * 3.5);
+  }
+  .mt-0 {
+    margin-top: 0px;
+  }
   .mt-1\.5 {
     margin-top: calc(var(--spacing) * 1.5);
+  }
+  .mt-2 {
+    margin-top: calc(var(--spacing) * 2);
   }
   .mt-2\.5 {
     margin-top: calc(var(--spacing) * 2.5);
@@ -273,6 +282,12 @@
   }
   .mb-1\.5 {
     margin-bottom: calc(var(--spacing) * 1.5);
+  }
+  .mb-2 {
+    margin-bottom: calc(var(--spacing) * 2);
+  }
+  .mb-3 {
+    margin-bottom: calc(var(--spacing) * 3);
   }
   .mb-px {
     margin-bottom: 1px;
@@ -306,6 +321,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       background: color-mix(in srgb, var(--state) 40%, transparent);
     }
+  }
+  .max-h-\[60vh\] {
+    max-height: 60vh;
   }
   .w-\[min\(21rem\,calc\(100vw-1\.8rem\)\)\] {
     width: min(21rem, calc(100vw - 1.8rem));
@@ -346,8 +364,8 @@
   .list-none {
     list-style-type: none;
   }
-  .\[grid-template-columns\:auto_1fr_auto\] {
-    grid-template-columns: auto 1fr auto;
+  .\[grid-template-columns\:auto_1fr_auto_auto\] {
+    grid-template-columns: auto 1fr auto auto;
   }
   .\[grid-template-columns\:max-content_1fr\] {
     grid-template-columns: max-content 1fr;
@@ -390,6 +408,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .overflow-auto {
+    overflow: auto;
+  }
+  .overflow-hidden {
+    overflow: hidden;
+  }
   .rounded {
     border-radius: 0.25rem;
   }
@@ -431,6 +455,15 @@
       border-color: color-mix(in srgb,var(--color-gold) 35%,var(--color-line));
     }
   }
+  .border-gold {
+    border-color: var(--color-gold);
+  }
+  .border-gold\/50 {
+    border-color: color-mix(in srgb, #ffd65c 50%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-gold) 50%, transparent);
+    }
+  }
   .border-line {
     border-color: var(--color-line);
   }
@@ -461,11 +494,17 @@
       background-color: color-mix(in oklab, var(--color-bg) 92%, transparent);
     }
   }
+  .bg-gold {
+    background-color: var(--color-gold);
+  }
   .bg-panel {
     background-color: var(--color-panel);
   }
   .bg-transparent {
     background-color: transparent;
+  }
+  .p-2 {
+    padding: calc(var(--spacing) * 2);
   }
   .p-2\.5 {
     padding: calc(var(--spacing) * 2.5);
@@ -473,8 +512,14 @@
   .p-3\.5 {
     padding: calc(var(--spacing) * 3.5);
   }
+  .p-4 {
+    padding: calc(var(--spacing) * 4);
+  }
   .px-0\.5 {
     padding-inline: calc(var(--spacing) * 0.5);
+  }
+  .px-1 {
+    padding-inline: var(--spacing);
   }
   .px-1\.5 {
     padding-inline: calc(var(--spacing) * 1.5);
@@ -485,6 +530,9 @@
   .px-2\.5 {
     padding-inline: calc(var(--spacing) * 2.5);
   }
+  .px-3 {
+    padding-inline: calc(var(--spacing) * 3);
+  }
   .px-3\.5 {
     padding-inline: calc(var(--spacing) * 3.5);
   }
@@ -493,6 +541,9 @@
   }
   .py-1\.5 {
     padding-block: calc(var(--spacing) * 1.5);
+  }
+  .py-2 {
+    padding-block: calc(var(--spacing) * 2);
   }
   .py-2\.5 {
     padding-block: calc(var(--spacing) * 2.5);
@@ -541,6 +592,10 @@
     font-size: 0.72rem;
     line-height: 1.4;
   }
+  .text-\[0\.72rem\]\/\[1\.35\] {
+    font-size: 0.72rem;
+    line-height: 1.35;
+  }
   .text-\[0\.78rem\]\/\[1\.45\] {
     font-size: 0.78rem;
     line-height: 1.45;
@@ -555,6 +610,9 @@
   }
   .text-\[0\.8rem\] {
     font-size: 0.8rem;
+  }
+  .text-\[0\.72rem\] {
+    font-size: 0.72rem;
   }
   .text-\[0\.76rem\] {
     font-size: 0.76rem;
@@ -593,6 +651,9 @@
   .whitespace-nowrap {
     white-space: nowrap;
   }
+  .whitespace-pre {
+    white-space: pre;
+  }
   .text-\(--dim\) {
     color: var(--dim);
   }
@@ -610,6 +671,9 @@
   }
   .text-\[\#1a1c28\] {
     color: #1a1c28;
+  }
+  .text-bg {
+    color: var(--color-bg);
   }
   .text-faint {
     color: var(--color-faint);
@@ -671,8 +735,11 @@
   .\[grid-area\:proj\] {
     grid-area: proj;
   }
-  .\[grid-template-areas\:\"lv_proj_meta\"\"lv_doing_doing\"\"detail_detail_detail\"\] {
-    grid-template-areas: "lv proj meta""lv doing doing""detail detail detail";
+  .\[grid-area\:term\] {
+    grid-area: term;
+  }
+  .\[grid-template-areas\:\"lv_proj_meta_term\"\"lv_doing_doing_term\"\"detail_detail_detail_detail\"\] {
+    grid-template-areas: "lv proj meta term""lv doing doing term""detail detail detail detail";
   }
   .tint-page {
     background: var(--state);
@@ -740,6 +807,9 @@
   @media (hover: hover) {
     .hover\:border-faint:hover {
       border-color: var(--color-faint);
+    }
+    .hover\:border-gold:hover {
+      border-color: var(--color-gold);
     }
     .hover\:text-gold:hover {
       color: var(--color-gold);

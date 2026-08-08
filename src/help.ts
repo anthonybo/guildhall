@@ -56,6 +56,24 @@ function passcodeLines(share: ShareInfo): string[] {
  * lives in a file, the port is a setting, and expecting anyone to assemble a URL
  * out of three places they cannot see is how a working feature goes unused.
  */
+/**
+ * The control token, or how to turn control on.
+ *
+ * Shown here and nowhere else. The token is read off the machine that holds it,
+ * which is the same trust boundary as sitting at it — never sent over the
+ * network, because a credential that can run commands must not be obtainable by
+ * anything that can merely reach the page.
+ */
+function controlLines(control?: { on: boolean; token: string }): (string | Line)[] {
+	if (!control?.on) {
+		return [`${fg(C.fillWarn)}○ control off${R}${fg(C.muted)} — no browser can type into any session.${R}`]
+	}
+	return [
+		`${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — token for the browser, from this machine only:${R}`,
+		`${fg(C.gold)}${control.token}${R}`,
+	]
+}
+
 function shareLines(share?: ShareInfo): (string | Line)[] {
 	if (!share?.on) {
 		return [
@@ -79,7 +97,7 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 	]
 }
 
-function body(share?: ShareInfo): (string | Line)[] {
+function body(share?: ShareInfo, control?: { on: boolean; token: string }): (string | Line)[] {
 	const tier = (n: number) => `${fg(tierOf(n).color)}${tierOf(n).name}${R}`
 	return [
 		{ text: 'guildhall', kind: 'title' },
@@ -128,8 +146,22 @@ function body(share?: ShareInfo): (string | Line)[] {
 		`${fg(C.muted)}on the public internet.${R}`,
 		`${fg(C.fillWarn)}Anyone who reaches it can read session titles, the last thing${R}`,
 		`${fg(C.fillWarn)}each said, filenames being edited and commands that were run.${R}`,
-		`${fg(C.muted)}Nothing it serves can change anything — there is no endpoint that${R}`,
-		`${fg(C.muted)}writes, on this machine or in any session.${R}`,
+		`${fg(C.muted)}Sharing alone changes nothing: with control off there is no${R}`,
+		`${fg(C.muted)}endpoint that writes, on this machine or in any session.${R}`,
+		'',
+		{ text: 'CONTROL — typing into a session from elsewhere', kind: 'head' },
+		...controlLines(control),
+		`${fg(C.muted)}Opens a session's real terminal in the browser and lets you type${R}`,
+		`${fg(C.muted)}into it — the same one on screen here, not a second copy.${R}`,
+		`${fg(C.fillWarn)}This is the one thing here that can change your machine. Whoever${R}`,
+		`${fg(C.fillWarn)}holds the token can send text to Claude Code in every repo you${R}`,
+		`${fg(C.fillWarn)}have open, which reaches editing files and running commands.${R}`,
+		`${fg(C.muted)}So it is separate from the passcode, off unless you turn it on,${R}`,
+		`${fg(C.muted)}and refused from anywhere but this machine or your tailnet — a${R}`,
+		`${fg(C.muted)}shared secret on a plain LAN is not a boundary. Permission${R}`,
+		`${fg(C.muted)}prompts are never answerable remotely; those stay yours. Every${R}`,
+		`${fg(C.muted)}send is printed above the footer, so nothing happens unseen.${R}`,
+		`${fg(C.muted)}Set ${bold}"control": true${R}${fg(C.muted)} in the config file to enable it.${R}`,
 		'',
 		{ text: 'KEYS', kind: 'head' },
 		key('↑ ↓', 'move the selection'),
@@ -165,8 +197,8 @@ const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg
  * showing through the gaps. The caller suppresses the image layer entirely while
  * this is open, since kitty images always draw above text.
  */
-export function panel(cols: number, rows: number, share?: ShareInfo): string[] {
-	const items = body(share)
+export function panel(cols: number, rows: number, share?: ShareInfo, control?: { on: boolean; token: string }): string[] {
+	const items = body(share, control)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
 	const boxW = Math.min(cols - 2, Math.max(46, inner))
