@@ -352,7 +352,29 @@ function draw() {
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
 		const net = addresses()
-		paint([...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote }), T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() })], '')
+		// While something is being typed, the bottom row carries the prompt instead
+		// of the footer. The panel is taller than a real terminal, so anything that
+		// lives inside it can be scrolled off — and a field you cannot see is a
+		// field you cannot use.
+		// The panel does not fit a real terminal, so anything it needs you to DO has
+		// to be on the bottom row as well — a key you cannot see is a key you will
+		// never press. Control being armed with no password is exactly that case.
+		const needsPass = cfg.control && !hasControlPass()
+		const entry =
+			ctlPass !== null
+				? T.promptLine('control password', ctlPass.length, ctlNote, cols)
+				: pin !== null
+					? T.promptLine('new passcode', pin.length, pinNote, cols)
+					: needsPass
+						? T.hintLine('control is on but has no password — press c to set one', cols)
+						: null
+		paint(
+			[
+				...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote }),
+				entry ?? T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() }),
+			],
+			'',
+		)
 		return
 	}
 	const list = visible()
