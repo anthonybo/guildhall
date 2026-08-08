@@ -144,6 +144,26 @@ type Grid = { rows: number; columns: number; styles: Style[]; row_spans: Span[];
  * with spaces, because a terminal row is a fixed number of cells and a missing
  * one shifts everything after it.
  */
+/**
+ * Width of one character as a fraction of the font size, measured once.
+ *
+ * Cached because it cannot change without the font changing, and measuring it
+ * forces a layout — which is not something to do twice a second behind a poll.
+ */
+let ratio = 0
+function advanceRatio(host: HTMLElement) {
+	if (ratio) return ratio
+	const probe = document.createElement('span')
+	probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:100px'
+	probe.textContent = 'M'.repeat(100)
+	host.append(probe)
+	const w = probe.getBoundingClientRect().width
+	probe.remove()
+	// 100 chars at 100px, so the raw width is already the ratio x 10000
+	ratio = w > 0 ? w / 10000 : 0.6
+	return ratio
+}
+
 function paint(pre: HTMLElement, g: Grid) {
 	const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
 	const byId = new Map(g.styles.map((st) => [st.id, st]))
@@ -157,9 +177,13 @@ function paint(pre: HTMLElement, g: Grid) {
 	pre.style.color = g.terminal_foreground ?? 'inherit'
 	// Fit the real column count to the real width. A terminal is only legible as a
 	// whole, so the type is sized to the grid rather than the grid to the type.
-	// 0.6 is the advance-to-size ratio of this monospace stack.
+	//
+	// The ratio is measured, not assumed. It was hard-coded at 0.6 and the true
+	// advance for this stack is nearer 0.77 — a guess that wrong makes the screen
+	// either overflow or sit in a pool of dead space, and it varies by platform
+	// and by which font in the stack actually resolved.
 	const usable = Math.max(200, pre.clientWidth - 24)
-	const size = Math.max(6, Math.min(13, usable / (g.columns * 0.6)))
+	const size = Math.max(6, Math.min(28, usable / (g.columns * advanceRatio(pre))))
 	pre.style.fontSize = `${size.toFixed(2)}px`
 	pre.style.lineHeight = '1.25'
 

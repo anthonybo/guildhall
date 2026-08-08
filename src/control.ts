@@ -62,10 +62,17 @@ function run(args: string[]): Promise<Result> {
  *
  * `terminal.replay` is not in `cmux --help`; it is in `cmux capabilities` under
  * `methods`, which is where the richer API lives.
+ *
+ * The parameter is `workspace_id`, snake_case. `workspaceId` is not rejected —
+ * it is IGNORED, and the call returns whichever surface happens to be focused.
+ * That is the worst possible failure for this feature: every session showed the
+ * same screen while `send` still targeted correctly, so you could read one
+ * project and type into another. Anything added here must assert it got the
+ * surface it asked for; see the test.
  */
 export async function readGrid(workspace: string): Promise<Result> {
 	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
-	return run(['rpc', 'terminal.replay', JSON.stringify({ workspaceId: workspace })])
+	return run(['rpc', 'terminal.replay', JSON.stringify({ workspace_id: workspace })])
 }
 
 /** What the session's terminal is showing right now, as plain text. */
