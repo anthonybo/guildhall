@@ -281,3 +281,31 @@ export function remoteLine(e: { at: number; proj: string; text: string; ok: bool
 	const tint = e.ok ? C.screenAgent : LOOK.error.color
 	return `${bg(tint)}${fg(C.ink)}${bold}${head}${R}${bg(C.night)}${fg(tint)} ${body.padEnd(Math.max(0, room - 1))}${R}`
 }
+
+/**
+ * A text-entry prompt, pinned to the bottom row.
+ *
+ * The help panel grew past the height of a real terminal, so the control
+ * password section — its prompt, its character count and its rejection
+ * messages — ended up below the fold. You could press `c`, type a password and
+ * hit return with no visible evidence any of it had happened, and a refusal for
+ * being too short looked identical to nothing at all.
+ *
+ * So entry does not live in the panel. It takes the last row of the screen,
+ * which no amount of content above it can push out of view.
+ */
+export function promptLine(label: string, typed: number, note: string, cols: number) {
+	const dots = '●'.repeat(Math.min(typed, 32))
+	const head = ` ${label} `
+	const body = `${dots}${dots ? ' ' : ''}${typed} typed · ⏎ save · ⌫ fix · esc cancel${note ? ` · ${note}` : ''}`
+	const room = Math.max(0, cols - width(head) - 1)
+	const tint = note ? LOOK.needs.color : C.gold
+	return `${bg(tint)}${fg(C.ink)}${bold}${head}${R}${bg(C.night)}${fg(tint)} ${padR(clip(body, room), Math.max(0, room - 1))}${R}`
+}
+
+/** A single call to action on the bottom row, for something the panel is too
+ *  tall to show. Same reasoning as `promptLine`. */
+export function hintLine(text: string, cols: number) {
+	const room = Math.max(0, cols - 2)
+	return `${bg(LOOK.needs.color)}${fg(C.ink)}${bold} ${padR(clip(text, room), room)}${R}`
+}
