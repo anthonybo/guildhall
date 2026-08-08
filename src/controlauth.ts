@@ -12,12 +12,12 @@
  * has to be typed on a phone and a 32-character hex string is not. That trade is
  * only safe with two things attached, and both are here:
  *
- *  - a LENGTH FLOOR. A chosen phrase has far less entropy per character than
- *    random hex, so it has to make up for it in length. Twelve is the minimum
- *    and the panel says so.
- *  - a THROTTLE. Random 128-bit tokens do not need one; guessable phrases do.
- *    Five wrong answers from an address and it waits, doubling each time, which
- *    turns an online dictionary attack into something that takes years.
+ *  - a THROTTLE, which does nearly all of the work. Five wrong answers from an
+ *    address and it waits, doubling each time — about 405 guesses a year. A
+ *    random 128-bit token needs no throttle; a chosen phrase is safe only
+ *    because of one.
+ *  - a LENGTH FLOOR, which does the rest. Eight, chosen by arithmetic against
+ *    the throttle rather than by instinct — see MIN_LENGTH.
  *
  * Stored SCRYPTED, never in plain text. The file holds a random salt and a
  * derived key, so reading it tells an attacker nothing they can type, and a
@@ -36,15 +36,24 @@ const file = () => path.join(dir(), 'control-pass')
 export const controlPassPath = () => file()
 
 /**
- * Twelve characters.
+ * Eight characters.
  *
- * Short enough to type on a phone once per device, long enough that a chosen
- * phrase is not trivially guessable even before the throttle is counted. The
- * old machine-generated token was 128 random bits and needed no floor; a phrase
- * you can remember is worth perhaps two bits a character, so the length is what
- * has to carry it.
+ * Set by arithmetic rather than by reflex. The throttle below allows five free
+ * tries and then a doubling wait capped at half an hour, which works out at
+ * about 405 guesses a YEAR. Against eight lowercase letters — 2.1e11
+ * combinations — that is 260 million years to get halfway. Online guessing is
+ * not the threat here, and a longer floor buys nothing against it.
+ *
+ * It was twelve first, which was over-specified: long enough to be annoying to
+ * type on a phone, which is the one place this credential exists to be used.
+ *
+ * Length still matters for one case: somebody who steals the file and cracks it
+ * offline, where the throttle does not apply and only scrypt's cost stands in
+ * the way. But reading that file needs read access to the home directory, and
+ * anybody who has that already has the SSH keys and the source. The password is
+ * not the weak link in that scenario, so it should not be priced as if it were.
  */
-export const MIN_LENGTH = 12
+export const MIN_LENGTH = 8
 
 /** scrypt cost. N=16384 keeps a single check near 50ms here, which is nothing
  *  for one login and a great deal for anyone trying millions. */

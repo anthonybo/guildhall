@@ -180,7 +180,7 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		`${fg(C.fillWarn)}have open, which reaches editing files and running commands.${R}`,
 		`${fg(C.muted)}You choose the password and type it HERE, never in the browser —${R}`,
 		`${fg(C.muted)}this machine is the trust boundary. It is stored scrypted, so the${R}`,
-		`${fg(C.muted)}file holds a hash and nothing anyone can type. Twelve characters${R}`,
+		`${fg(C.muted)}file holds a hash and nothing anyone can type. Eight characters${R}`,
 		`${fg(C.muted)}minimum, and five wrong tries makes that device wait.${R}`,
 		`${fg(C.muted)}It is separate from the passcode, off unless you turn it on,${R}`,
 		`${fg(C.muted)}and refused from anywhere but this machine or your tailnet — a${R}`,
