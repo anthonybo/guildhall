@@ -693,6 +693,9 @@
   .text-ok {
     color: var(--color-ok);
   }
+  .lowercase {
+    text-transform: lowercase;
+  }
   .uppercase {
     text-transform: uppercase;
   }

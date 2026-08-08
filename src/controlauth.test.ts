@@ -33,9 +33,12 @@ test('the right passphrase is accepted and a wrong one is not', () => {
 })
 
 test('a phrase too short or too repetitive is refused', () => {
-	// It has to be typed on a phone, so it is chosen rather than random — which
-	// means length is the only thing carrying its entropy.
+	// Eight, because the throttle allows roughly 405 guesses a year and eight
+	// lowercase letters is 2.1e11 combinations. Online guessing is not the threat;
+	// making it painful to type on a phone was a real cost for no gain.
+	assert.equal(MIN_LENGTH, 8)
 	assert.equal(setControlPass('short').ok, false)
+	assert.equal(setControlPass('mypass12').ok, true, 'eight varied characters should be accepted')
 	assert.equal(setControlPass('a'.repeat(MIN_LENGTH + 5)).ok, false, 'one repeated character is long but not hard')
 	assert.equal(setControlPass('abcdefabcdefab').ok, true, 'a long phrase with enough variety should pass')
 })
