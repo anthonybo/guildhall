@@ -41,9 +41,15 @@ const CONTAINER = /^(projects|repos|workspace)$/
  * name, which tells you nothing when eight of nine share it. Fall back to the
  * directory its own tool calls keep touching.
  */
-function projectName(cwd: string, d: Digest) {
+function projectName(cwd: string, d: Digest, given?: string) {
 	const base = path.basename(cwd)
-	return CONTAINER.test(base) && d.subProj ? d.subProj : base
+	if (!CONTAINER.test(base)) return base
+	// A session that has not touched a subdirectory yet — one opened a minute ago,
+	// or one that has only talked — has no tool calls to be named after, and the
+	// fallback used to be the container itself. That is the collision this is here
+	// to avoid: six sessions in ~/projects all answering to "projects". The
+	// registry's own name is dull but unique, which is the property that matters.
+	return d.subProj || given || base
 }
 
 /**
@@ -93,7 +99,7 @@ export function collect(): Session[] {
 			unread: !!tab?.unread,
 			sinceRecord: d.lastTs ? now - d.lastTs : Infinity,
 		})
-		const proj = projectName(s.cwd, d)
+		const proj = projectName(s.cwd, d, s.name)
 		const used = contextUsed(d)
 		const xp = xpOf(d)
 
