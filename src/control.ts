@@ -51,7 +51,24 @@ function run(args: string[]): Promise<Result> {
 	})
 }
 
-/** What the session's terminal is showing right now. */
+/**
+ * The terminal as a styled grid: every span with its colour, weight and place.
+ *
+ * `read-screen` returns plain text, which loses the two things a TUI is made of
+ * — colour and exact position — so Claude Code's status bar arrived as grey
+ * rubble. This is the same screen as structured data: a style table, and spans
+ * that each name a row, a column and a style id. Reconstructing it is exact
+ * rather than approximate, because nothing was flattened on the way out.
+ *
+ * `terminal.replay` is not in `cmux --help`; it is in `cmux capabilities` under
+ * `methods`, which is where the richer API lives.
+ */
+export async function readGrid(workspace: string): Promise<Result> {
+	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
+	return run(['rpc', 'terminal.replay', JSON.stringify({ workspaceId: workspace })])
+}
+
+/** What the session's terminal is showing right now, as plain text. */
 export async function readScreen(workspace: string, lines = 120, scrollback = false): Promise<Result> {
 	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
 	const args = ['read-screen', '--workspace', workspace, '--lines', String(Math.max(1, Math.min(2000, lines)))]
