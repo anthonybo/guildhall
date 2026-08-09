@@ -65,6 +65,44 @@ test('guessing is throttled, which is what makes a chosen phrase safe', () => {
 	assert.ok(controlAttempt(who, GOOD), 'a cleared throttle should accept the right phrase')
 })
 
+test('a long quiet spell forgives an address', () => {
+	// Without this the count only ever went up: it reset on a correct password and
+	// on nothing else. Five fat-fingered attempts spread over a week left the next
+	// mistake locked out for the full half hour, which is a lockout for being
+	// forgetful rather than for being an attacker.
+	resetControlThrottle()
+	setControlPass(GOOD)
+	const who = '100.64.0.11' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const t0 = 1_000_000
+	for (let i = 0; i < 5; i++) controlAttempt(who, 'wrong guess here', t0 + i)
+	assert.ok(controlLockedFor(who, t0 + 10) > 0, 'five wrong tries did not lock')
+
+	// Come back an hour later: the lock has expired and the count starts over, so
+	// the next slip costs one try rather than resuming the doubling at the top.
+	const later = t0 + 60 * 60_000
+	assert.equal(controlLockedFor(who, later), 0, 'still locked an hour later')
+	for (let i = 0; i < 4; i++) controlAttempt(who, 'wrong guess here', later + i)
+	assert.equal(controlLockedFor(who, later + 10), 0, 'four fresh tries should not lock')
+})
+
+test('a burst is still throttled across the forgiving window', () => {
+	// The forgiveness must not become a way to guess forever: attempts that keep
+	// coming, keep counting. Only silence resets it.
+	resetControlThrottle()
+	setControlPass(GOOD)
+	const who = '100.64.0.12' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const start = 2_000_000
+	let t = start
+	for (let i = 0; i < 5; i++) {
+		controlAttempt(who, 'wrong guess here', t)
+		t += 60_000 // a minute apart — spread out, but well inside the window
+	}
+	// Checked at the moment of the fifth attempt, not a minute later: the first
+	// lock is only fifteen seconds, so a later check says nothing about whether
+	// the tries were counted.
+	assert.ok(controlLockedFor(who, t - 60_000 + 1) > 0, 'a slow burst escaped the throttle')
+})
+
 test('a correct answer clears the count', () => {
 	resetControlThrottle()
 	setControlPass(GOOD)

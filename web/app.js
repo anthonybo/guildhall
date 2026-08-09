@@ -2569,10 +2569,30 @@ function mountRoom(room, el3) {
   requestAnimationFrame(frame);
 }
 
+// web/links.ts
+var URL_RE = /https?:\/\/[^\s'"`<>()[\]{}]+/g;
+var TRAILING = /[.,;:!?)\]}>'"`]+$/;
+function linkParts(text) {
+  const out = [];
+  URL_RE.lastIndex = 0;
+  let at = 0;
+  let m;
+  while (m = URL_RE.exec(text)) {
+    const href = m[0].replace(TRAILING, "");
+    if (!href || !/^https?:\/\/[^/]/.test(href)) continue;
+    if (m.index > at) out.push({ text: text.slice(at, m.index) });
+    out.push({ text: href, href });
+    at = m.index + href.length;
+  }
+  if (at < text.length) out.push({ text: text.slice(at) });
+  return out;
+}
+
 // web/terminal.ts
 var KEY2 = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
 var wrap = localStorage.getItem(WRAP) !== "exact";
+var lastSig = "";
 var openId = null;
 var openName = "";
 var timer = 0;
@@ -2586,6 +2606,8 @@ async function api(path, init = {}) {
   return { status: res.status, ...body };
 }
 function askForToken(why) {
+  clearInterval(timer);
+  timer = 0;
   el.innerHTML = "";
   el.style.maxWidth = "";
   el.style.marginInline = "";
@@ -2699,13 +2721,34 @@ async function refresh() {
   const pre = document.getElementById("screen");
   if (!pre) return;
   if (r.error) return void (pre.textContent = r.error);
-  if (r.render_grid) paint(pre, r.render_grid);
+  if (!r.render_grid) return;
+  const sig = JSON.stringify(r.render_grid.row_spans);
+  if (sig === lastSig && pre.childElementCount) return;
+  lastSig = sig;
+  paint(pre, r.render_grid);
 }
 var COMFORTABLE = 15;
 var LEGIBLE = 8;
 var READABLE = 12;
 var PAD = 24;
 var RULE = /^(\S)\1{7,}$/;
+function fill(host, text) {
+  const parts = linkParts(text);
+  if (parts.length === 1 && !parts[0].href) return void host.append(text);
+  for (const p of parts) {
+    if (!p.href) {
+      host.append(p.text);
+      continue;
+    }
+    const a = document.createElement("a");
+    a.href = p.href;
+    a.textContent = p.text;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "underline decoration-dotted underline-offset-2 hover:decoration-solid";
+    host.append(a);
+  }
+}
 var ratio = 0;
 function advanceRatio(host) {
   if (ratio) return ratio;
@@ -2771,7 +2814,7 @@ function paint(pre, g) {
       if (st?.underline || st?.strikethrough) el3.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
       if (st?.invisible) el3.style.visibility = "hidden";
       if (reflow && RULE.test(sp.text)) el3.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
-      el3.textContent = sp.text;
+      fill(el3, sp.text);
       line.append(el3);
       col = sp.column + [...sp.text].length;
     }

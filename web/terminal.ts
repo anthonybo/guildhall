@@ -11,6 +11,8 @@
  * you are looking at it, and polling stops dead when the panel closes — which is
  * the behaviour a phone battery wants and a stream would not give.
  */
+import { linkParts } from './links.ts'
+
 const KEY = 'guildhall.control'
 const WRAP = 'guildhall.terminal.wrap'
 
@@ -29,6 +31,9 @@ const WRAP = 'guildhall.terminal.wrap'
  */
 let wrap = localStorage.getItem(WRAP) !== 'exact'
 
+/** The last screen drawn, so an unchanged one is not rebuilt under your selection. */
+let lastSig = ''
+
 let openId: string | null = null
 let openName = ''
 let timer = 0
@@ -45,6 +50,22 @@ async function api(path: string, init: RequestInit = {}) {
 
 /** Ask for the token. Only reached when the server says the current one is wrong. */
 function askForToken(why: string) {
+	// STOP POLLING. This is the whole bug behind "I keep getting locked out and I
+	// never even entered a password".
+	//
+	// The screen polls every two seconds. A refusal used to render this form and
+	// leave the timer running, so the client re-sent the same rejected password
+	// thirty times a minute, forever. The server counts each one and never resets
+	// the count on failure, so the lock doubles every time: five free tries gone in
+	// ten seconds, then 15s, 30s, 60s, up to a thirty-minute maximum — and two
+	// seconds after each lock expired the timer burned the next attempt and
+	// re-locked, longer. One stale token was enough to lock a phone out
+	// permanently with nobody touching it.
+	//
+	// A refused request is now the end of the conversation. Only submitting a
+	// password starts it again.
+	clearInterval(timer)
+	timer = 0
 	el.innerHTML = ''
 	// the panel was sized to a terminal; a password form is not one
 	el.style.maxWidth = ''
@@ -193,7 +214,18 @@ async function refresh() {
 	const pre = document.getElementById('screen')
 	if (!pre) return
 	if (r.error) return void (pre.textContent = r.error)
-	if (r.render_grid) paint(pre, r.render_grid)
+	if (!r.render_grid) return
+	// Repaint only when the screen actually changed.
+	//
+	// This used to rebuild every node twice a second regardless, which quietly
+	// destroyed any selection you had made — so copying a URL off a session was
+	// impossible unless you could do it inside a two-second window. A terminal
+	// nobody is typing into is identical poll after poll, which is exactly when
+	// somebody is trying to select something out of it.
+	const sig = JSON.stringify(r.render_grid.row_spans)
+	if (sig === lastSig && pre.childElementCount) return
+	lastSig = sig
+	paint(pre, r.render_grid)
 }
 
 type Style = { foreground?: string; background?: string; bold?: boolean; faint?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean; inverse?: boolean; invisible?: boolean; id: number }
@@ -245,6 +277,35 @@ const PAD = 24
 
 /** One non-space character repeated a long way: a divider, not words. */
 const RULE = /^(\S)\1{7,}$/
+
+/**
+ * Put `text` into `host`, turning any URLs into real links.
+ *
+ * Built as nodes rather than markup: this is whatever a session happened to
+ * print, and it must never be able to become HTML. The anchor keeps the
+ * terminal's own colour and adds an underline, so a link looks like a link
+ * without losing whatever the colour already meant.
+ */
+function fill(host: HTMLElement, text: string) {
+	const parts = linkParts(text)
+	// the overwhelmingly common case: no link, one text node, no allocation beyond it
+	if (parts.length === 1 && !parts[0]!.href) return void host.append(text)
+	for (const p of parts) {
+		if (!p.href) {
+			host.append(p.text)
+			continue
+		}
+		const a = document.createElement('a')
+		a.href = p.href
+		a.textContent = p.text
+		a.target = '_blank'
+		// noopener because the opened page must not get a handle on this one, and
+		// this page can type into somebody's terminal
+		a.rel = 'noopener noreferrer'
+		a.className = 'underline decoration-dotted underline-offset-2 hover:decoration-solid'
+		host.append(a)
+	}
+}
 
 let ratio = 0
 function advanceRatio(host: HTMLElement) {
@@ -353,8 +414,9 @@ function paint(pre: HTMLElement, g: Grid) {
 			// one — so a rule is clipped to the width instead of wrapped. It reads as
 			// the line it was meant to be, and costs one row rather than four.
 			if (reflow && RULE.test(sp.text)) el.style.cssText += ';display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom'
-			// textContent, never innerHTML: this is whatever the terminal is showing
-			el.textContent = sp.text
+			// nodes, never innerHTML: this is whatever the terminal is showing, and it
+			// must not be able to become markup
+			fill(el, sp.text)
 			line.append(el)
 			col = sp.column + [...sp.text].length
 		}

@@ -118,11 +118,22 @@ export function controlAllowed(offered: string | undefined): boolean {
  * actually stops an online attack. Mirrors the passcode's: five tries, then a
  * wait that doubles, capped at half an hour. */
 
-type Attempts = { fails: number; until: number }
+type Attempts = { fails: number; until: number; last: number }
 const byAddress = new Map<string, Attempts>()
 const FREE_TRIES = 5
 const BASE_LOCK = 15_000
 const MAX_LOCK = 30 * 60_000
+
+/**
+ * Quiet time after which an address is forgiven and starts over.
+ *
+ * Without this the count only ever went up: it reset on a correct password and
+ * on nothing else, so five fat-fingered attempts spread across a week left the
+ * next mistake locked out for the full half hour. An attacker cannot use this —
+ * waiting fifteen minutes between guesses is not an online attack, it is four
+ * guesses an hour against a phrase with a lot more than four possibilities.
+ */
+const FORGIVE_MS = 15 * 60_000
 
 /** Milliseconds this address must wait, or 0. */
 export function controlLockedFor(addr: string, now = Date.now()) {
@@ -136,8 +147,11 @@ export function controlAttempt(addr: string, offered: string | undefined, now = 
 		byAddress.delete(addr)
 		return true
 	}
-	const a = byAddress.get(addr) ?? { fails: 0, until: 0 }
+	const prior = byAddress.get(addr)
+	// a long quiet spell means the last burst is over; do not hold it against them
+	const a = prior && now - prior.last < FORGIVE_MS ? prior : { fails: 0, until: 0, last: now }
 	a.fails++
+	a.last = now
 	if (a.fails >= FREE_TRIES) {
 		const over = a.fails - FREE_TRIES
 		a.until = now + Math.min(BASE_LOCK * 2 ** over, MAX_LOCK)

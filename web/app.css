@@ -755,6 +755,12 @@
   .underline {
     text-decoration-line: underline;
   }
+  .decoration-dotted {
+    text-decoration-style: dotted;
+  }
+  .underline-offset-2 {
+    text-underline-offset: 2px;
+  }
   .shadow-\[0_10px_30px_rgb\(0_0_0\/45\%\)\] {
     --tw-shadow: 0 10px 30px var(--tw-shadow-color, rgb(0 0 0/45%));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
@@ -877,6 +883,9 @@
     }
     .hover\:text-label:hover {
       color: var(--color-label);
+    }
+    .hover\:decoration-solid:hover {
+      text-decoration-style: solid;
     }
   }
   .focus-visible\:outline-2:focus-visible {
