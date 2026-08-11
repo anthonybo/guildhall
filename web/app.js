@@ -2288,12 +2288,21 @@ function pick(text, wpx, hpx) {
 // src/render.ts
 var INK = [32, 34, 46];
 var NIGHT = [26, 28, 40];
+var frameBuffer = null;
+function buffer(bytes) {
+  if (!frameBuffer || frameBuffer.length !== bytes) {
+    frameBuffer = new Uint8ClampedArray(bytes);
+    return frameBuffer;
+  }
+  frameBuffer.fill(0);
+  return frameBuffer;
+}
 var LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
 var PACK = LITTLE ? (v) => (4278190080 | (v & 255) << 16 | v & 65280 | v >> 16 & 255) >>> 0 : (v) => ((v & 16777215) << 8 | 255) >>> 0;
 function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   const w = cv2.w * sx;
   const h = cv2.rows * sy;
-  const rgba = new Uint8ClampedArray(w * h * 4);
+  const rgba = buffer(w * h * 4);
   const put = (x0, y0, bw, bh, c) => {
     for (let y = y0; y < y0 + bh; y++) {
       if (y < 0 || y >= h) continue;
@@ -2473,7 +2482,7 @@ function mountSettings(button, panel, onChange) {
 var roomEl;
 var canvas;
 var ctx2d;
-var buffer;
+var buffer2;
 var bufferCtx;
 var sessions = [];
 var office = null;
@@ -2537,9 +2546,9 @@ function frame(now) {
   off.overlay(cv, placed, void 0, true);
   const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] };
   const { rgba, w, h } = renderRoom(cv, scene, placed, 4, 8, screenFrame);
-  if (buffer.width !== w || buffer.height !== h) {
-    buffer.width = w;
-    buffer.height = h;
+  if (buffer2.width !== w || buffer2.height !== h) {
+    buffer2.width = w;
+    buffer2.height = h;
   }
   bufferCtx.putImageData(new ImageData(rgba, w, h), 0, 0);
   const dpr = Math.min(3, window.devicePixelRatio || 1);
@@ -2553,7 +2562,7 @@ function frame(now) {
     canvas.style.height = `${cssH}px`;
   }
   ctx2d.imageSmoothingEnabled = false;
-  ctx2d.drawImage(buffer, 0, 0, pxW, pxH);
+  ctx2d.drawImage(buffer2, 0, 0, pxW, pxH);
   drawLabels(pxW, pxH);
 }
 function drawPlates(pxW, pxH) {
@@ -2609,8 +2618,8 @@ function mountRoom(room, el3) {
   roomEl = room;
   canvas = el3;
   ctx2d = canvas.getContext("2d");
-  buffer = document.createElement("canvas");
-  bufferCtx = buffer.getContext("2d");
+  buffer2 = document.createElement("canvas");
+  bufferCtx = buffer2.getContext("2d");
   loadSheets().catch(() => {
     sheetsReady = false;
   });
