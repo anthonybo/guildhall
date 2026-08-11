@@ -3029,6 +3029,12 @@ function render(snap) {
     p.textContent = deploys ? "Reading \u2014 deploys take about 17 seconds." : "Reading\u2026";
     body.append(p);
   } else {
+    if (snap.stale) {
+      const note = document.createElement("p");
+      note.className = "m-0 border-b border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.72rem] text-gold";
+      note.textContent = snap.stale;
+      body.append(note);
+    }
     const busy = snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
     const quiet = snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
     body.append(heading("unpushed & dirty", busy.length));
@@ -3076,15 +3082,32 @@ function render(snap) {
   wrap2.append(body);
   el2.replaceChildren(wrap2);
 }
+function normalise(snap) {
+  return {
+    at: typeof snap?.at === "number" ? snap.at : Date.now(),
+    items: Array.isArray(snap?.items) ? snap.items : [],
+    repos: Array.isArray(snap?.repos) ? snap.repos : [],
+    local: !!snap?.local,
+    githubError: snap?.githubError ?? void 0,
+    cloudflareError: snap?.cloudflareError ?? void 0,
+    error: snap?.error ?? void 0,
+    // A note, deliberately not an error: the feed is the same in both versions and
+    // is worth drawing. Saying "the server is older" and then showing nothing
+    // would throw away the half that works.
+    stale: Array.isArray(snap?.repos) ? void 0 : "The machine is running an older guildhall \u2014 restart it for the repo panel. The feed below is current."
+  };
+}
 async function refresh2() {
   if (!open) return;
+  let snap;
   try {
     const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`);
     if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: `the server said ${res.status}` });
-    render(await res.json());
+    snap = await res.json();
   } catch {
-    render({ at: Date.now(), items: [], repos: [], local: true, error: "could not reach guildhall" });
+    return render({ at: Date.now(), items: [], repos: [], local: true, error: "could not reach guildhall" });
   }
+  render(normalise(snap));
 }
 function show2() {
   open = true;

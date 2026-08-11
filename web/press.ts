@@ -45,7 +45,7 @@ type Repo = {
 	error?: string
 }
 
-type Snapshot = { at: number; items: Item[]; repos: Repo[]; local: boolean; githubError?: string; cloudflareError?: string; error?: string }
+type Snapshot = { at: number; items: Item[]; repos: Repo[]; local: boolean; githubError?: string; cloudflareError?: string; error?: string; stale?: string }
 
 let el: HTMLElement
 let timer = 0
@@ -280,6 +280,12 @@ function render(snap: Snapshot) {
 		p.textContent = deploys ? 'Reading — deploys take about 17 seconds.' : 'Reading…'
 		body.append(p)
 	} else {
+		if (snap.stale) {
+			const note = document.createElement('p')
+			note.className = 'm-0 border-b border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.72rem] text-gold'
+			note.textContent = snap.stale
+			body.append(note)
+		}
 		// Repos with something to report first. A panel of thirty rows saying nothing
 		// buries the two that matter, so the quiet ones collapse behind a count.
 		const busy = snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error)
@@ -334,15 +340,53 @@ function render(snap: Snapshot) {
 	el.replaceChildren(wrap)
 }
 
+/**
+ * Make whatever the server sent safe to draw.
+ *
+ * The browser client and the server update on different clocks: `web/` is read
+ * from disk, so a rebuild reaches a page on its next reload, while the routes are
+ * compiled into a process that only changes when it restarts. A newer page talking
+ * to an older server is therefore the NORMAL state for a while, not an edge case,
+ * and it must degrade rather than break.
+ *
+ * It broke: an older server returns `repos` as a count instead of a list, the view
+ * called `.filter` on the number 32, and the resulting TypeError surfaced as
+ * "could not reach guildhall". The panel simply stays empty until the server
+ * catches up, and the feed — which both versions agree about — still draws.
+ */
+function normalise(snap: any): Snapshot {
+	return {
+		at: typeof snap?.at === 'number' ? snap.at : Date.now(),
+		items: Array.isArray(snap?.items) ? snap.items : [],
+		repos: Array.isArray(snap?.repos) ? snap.repos : [],
+		local: !!snap?.local,
+		githubError: snap?.githubError ?? undefined,
+		cloudflareError: snap?.cloudflareError ?? undefined,
+		error: snap?.error ?? undefined,
+		// A note, deliberately not an error: the feed is the same in both versions and
+		// is worth drawing. Saying "the server is older" and then showing nothing
+		// would throw away the half that works.
+		stale: Array.isArray(snap?.repos) ? undefined : 'The machine is running an older guildhall — restart it for the repo panel. The feed below is current.',
+	}
+}
+
 async function refresh() {
 	if (!open) return
+	// Fetch and draw are separate, and the catch covers ONLY the fetch.
+	//
+	// They used to share one try, so a bug inside render() was reported as "could
+	// not reach guildhall" — which is what happened: the server was returning an
+	// older shape, render() threw on it, and the page blamed the network. A wrong
+	// error is worse than no error, because it sends you looking at the wrong thing.
+	let snap: Snapshot
 	try {
 		const res = await fetch(`/api/press${deploys ? '?deploys=1' : ''}`)
 		if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: `the server said ${res.status}` })
-		render(await res.json())
+		snap = await res.json()
 	} catch {
-		render({ at: Date.now(), items: [], repos: [], local: true, error: 'could not reach guildhall' })
+		return render({ at: Date.now(), items: [], repos: [], local: true, error: 'could not reach guildhall' })
 	}
+	render(normalise(snap))
 }
 
 export function show() {
