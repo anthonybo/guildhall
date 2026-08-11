@@ -48,6 +48,36 @@
  * is almost bare so that nine parked sessions cannot out-shout one that needs
  * you, which by count they otherwise would.
  */
+/*
+ * Why a tap on a button used to need several tries on a phone.
+ *
+ * `touch-action` defaults to `auto`, which on a page the user can zoom means Safari
+ * must wait after a tap to see whether a second one is coming — a double-tap is
+ * zoom. That is the ~300ms delay, and the delay is the real problem: this app
+ * repaints the terminal every two seconds, so a tap that arrives shortly before a
+ * repaint is still being held when the DOM changes underneath it, and it is
+ * discarded rather than delivered. Hence "it took like 10 clicks".
+ *
+ * `manipulation` keeps panning and pinch-zoom and drops only double-tap-to-zoom,
+ * and it is scoped to things you tap rather than the page, so zooming the terminal
+ * text — the reason zoom was deliberately kept — still works everywhere else.
+ *
+ * A base rule rather than a utility on each control, because the failure mode of
+ * the utility version is a button somebody forgets, which is indistinguishable
+ * from this bug returning.
+ */
+@layer base {
+	button,
+	a,
+	input,
+	select,
+	textarea,
+	summary,
+	[role='button'] {
+		touch-action: manipulation;
+	}
+}
+
 @utility tint-panel {
 	background: color-mix(in srgb, var(--state) var(--tint, 10%), var(--color-panel));
 }

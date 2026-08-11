@@ -1083,6 +1083,11 @@
     }
   }
 }
+@layer base {
+  button,	a,	input,	select,	textarea,	summary,	[role='button'] {
+    touch-action: manipulation;
+  }
+}
 @keyframes sweep {
   from {
     transform: translateX(-100%);
