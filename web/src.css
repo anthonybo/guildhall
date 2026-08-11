@@ -76,6 +76,27 @@
 	[role='button'] {
 		touch-action: manipulation;
 	}
+
+	/*
+	 * An icon inside a control is never the thing you are aiming at.
+	 *
+	 * `touch-action` does NOT inherit, so an <svg> inside a button keeps `auto` even
+	 * though the button is `manipulation` — and the finger lands on the svg, not the
+	 * button. That silently undid the fix above the moment the terminal button became
+	 * a drawing instead of a text glyph: the tap was held for the double-tap wait
+	 * again, and because the session list rebuilds every two seconds, the row was
+	 * destroyed underneath the held tap and the click never arrived. Tapping the
+	 * terminal icon appeared to do nothing at all.
+	 *
+	 * `pointer-events: none` is the durable fix rather than adding `svg` to the list
+	 * above: it makes the CONTROL the hit target in every case, so no future icon can
+	 * reintroduce this by being a kind of element nobody thought to enumerate.
+	 */
+	button svg,
+	a svg,
+	[role='button'] svg {
+		pointer-events: none;
+	}
 }
 
 @utility tint-panel {

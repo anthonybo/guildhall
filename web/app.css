@@ -1096,6 +1096,9 @@
   button,	a,	input,	select,	textarea,	summary,	[role='button'] {
     touch-action: manipulation;
   }
+  button svg,	a svg,	[role='button'] svg {
+    pointer-events: none;
+  }
 }
 @keyframes sweep {
   from {
