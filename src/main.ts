@@ -55,6 +55,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 
   guildhall              watch the room
   guildhall --guard      headless: hold sleep off while sessions work, draw nothing
+  guildhall --headless   headless: serve the browser view only, draw nothing
   guildhall --once       print one frame and exit
   guildhall --no-awake   start with the sleep hold disarmed
   guildhall --serve      share read-only over the network (off by default)
@@ -76,6 +77,17 @@ const BENCH = process.argv.includes('--bench')
  * dashboard. This mode is what you leave running (or hand to a LaunchAgent).
  */
 const GUARD = process.argv.includes('--guard')
+/**
+ * Serve the browser view and nothing else — no canvas, no images, no keys.
+ *
+ * The web server used to exist only alongside the room, which tied it to a
+ * terminal. That is fine at the desk and wrong everywhere else: away from the
+ * machine, every change to the server needed somebody physically there to quit
+ * the app and start it again. Headless, it is a service that can be restarted by
+ * anything, including a watcher, and the room stays a thing you open when you
+ * happen to want to look at it.
+ */
+const HEADLESS = process.argv.includes('--headless')
 /** A fictional office, for documentation and for looking at this with nothing
  *  running. Never touches the real registry. */
 const DEMO = process.argv.includes('--demo')
@@ -774,6 +786,40 @@ function start() {
  * nothing running now is exactly the one that will have something running in ten
  * minutes, and a guard that quits on an empty room protects nothing.
  */
+/**
+ * The browser view as a service. No canvas, no images, no input.
+ *
+ * Same polling the room does, without the drawing — the stream and every route
+ * read `sessions`, so this is the whole app minus the picture. It logs to stdout
+ * because whatever supervises it is the only thing watching, and it never exits on
+ * an empty room: a machine with nothing running now is exactly the one that will
+ * have something running in ten minutes.
+ *
+ * `--serve` is implied. Starting this and having it serve nothing because a config
+ * file said `serve: false` would be a trap.
+ */
+function headless() {
+	const stamp = () => new Date().toLocaleString('sv-SE').slice(0, 19)
+	cfg.serve = true
+	syncServe()
+	console.log(`${stamp()}  guildhall headless on ${cfg.host}:${cfg.port} (pid ${process.pid}) — ${BUILD}`)
+	if (serveError) console.log(`${stamp()}  serve failed: ${serveError}`)
+	const tick = () => {
+		sessions = collect()
+		awake.sync(sessions)
+	}
+	tick()
+	timers.push(setInterval(tick, 2000))
+	const stop = () => {
+		for (const t of timers) clearInterval(t)
+		awake.configure(false)
+		console.log(`${stamp()}  headless stopped`)
+		process.exit(0)
+	}
+	process.on('SIGINT', stop)
+	process.on('SIGTERM', stop)
+}
+
 function guard() {
 	// local time, not ISO/UTC: this log is read by a person on this machine, and a
 	// timestamp seven hours off their clock is worse than none
@@ -806,6 +852,7 @@ function main() {
 	loadSheets()
 	sessions = collect()
 	if (GUARD) return guard()
+	if (HEADLESS) return headless()
 	if (!sessions.length) {
 		console.log('no live claude sessions found')
 		process.exit(0)

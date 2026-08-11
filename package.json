@@ -24,7 +24,8 @@
 		"format": "prettier --write .",
 		"docs": "sh tools/make-docs-images.sh",
 		"check:docs": "sh tools/check-docs-images.sh",
-		"check:web": "sh tools/check-web-bundle.sh"
+		"check:web": "sh tools/check-web-bundle.sh",
+		"serve": "node tools/serve.mjs"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",
