@@ -100,15 +100,23 @@ Current gates, and what each is guarding against:
 
 | check | budget | why |
 |---|---|---|
-| terminal frame | 3.0 cpu-ms | was **5.6** — `drawPlates` called `choose()` for 11 plates every frame with arguments that never change, 77.6% of the frame |
+| terminal frame | 4.0 cpu-ms | was **5.6** — `drawPlates` called `choose()` for 11 plates every frame with arguments that never change, 77.6% of the frame |
 | `collect()` poll | 12 cpu-ms | catches a broken digest cache or a directory walk added to the hot path |
-| `renderRoom` @ browser scale | 16 cpu-ms | was **17.7**, which is over a 60fps budget by itself — the loop saturated a core and could not keep up |
+| `renderRoom` @ browser scale | 20 cpu-ms | was **17.7**, over a 60fps budget by itself — the loop saturated a core and could not keep up |
 | `@keyframes` in built CSS | 1 | a perpetual animation costs ~15% of a core on a phone whether anyone is looking or not |
 | `web/app.js` | 170 KB | a phone downloads it over a tailnet |
 
-**Measure in CPU time, never wall clock.** This machine sits above load 10 with a
-dozen Claude sessions running, and wall clock under that load is noise — the same
-benchmark read anywhere from 2.4 to 17.7ms. CPU time held to ±3% across runs.
+**Measure in CPU time, never wall clock.** Wall clock here is meaningless: the same
+benchmark read 2.4 to 17.7ms depending on machine load.
+
+**But CPU time is not load-proof either** — I claimed it was and it is not. Within
+one run it is very stable (six readings spread 0.56ms), but the whole level moves
+with contention: `renderRoom` costs 9.9 cpu-ms at load 3 and 16.2 at load 27. So the
+ceilings are set from the worst honest reading on a busy machine, and **this gate
+catches a doubling, not a 20% creep**. That is enough for the regressions this
+codebase actually produces and avoids failing commits for weather. Normalising
+against a synthetic reference workload was tried twice and made it worse both times
+— the reasons are written down in `tools/check-perf.mjs` so nobody repeats it.
 
 **If you need to raise a budget, raise it in `tools/check-perf.mjs` and say why in
 the commit.** The number is a decision; moving it silently is how the old costs got

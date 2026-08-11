@@ -26,6 +26,29 @@ import { ago, rgb } from './dom.ts'
  * Only the card is toned down. Text keeps its own contrast — a wash behind it
  * changes nothing about how readable it is.
  */
+/**
+ * The terminal button's icon: a CRT with a prompt and a block cursor on it.
+ *
+ * `currentColor` throughout, so the whole monitor follows the button's text colour
+ * and the hover state is one CSS rule rather than six fills to keep in step. The
+ * bezel and base are dimmed with opacity from that same colour for the same reason.
+ *
+ * Whole-unit coordinates on a 16x14 grid with `shape-rendering="crispEdges"`: this
+ * is pixel art and has to stay hard-edged at any size, which is the same rule the
+ * room follows when it upscales with smoothing off.
+ *
+ * `aria-hidden` because the button already has a title that says what it opens; a
+ * screen reader announcing "image" here would add nothing.
+ */
+const CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
+	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
+	<rect x="1" y="1" width="14" height="9" fill="#0d0c12"/>
+	<rect x="3" y="4" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="3" y="6" width="1" height="1"/>
+	<rect x="6" y="4" width="2" height="3"/>
+	<rect x="6" y="11" width="4" height="2" opacity=".55"/>
+	<rect x="3" y="13" width="10" height="1"/>
+</svg>`
+
 const WEIGHT: Record<string, number> = {
 	error: 0.26,
 	needs: 0.22,
@@ -229,9 +252,20 @@ export function paintList(list: Session[]) {
 		if (s.workspace) {
 			const term = document.createElement('button')
 			term.type = 'button'
-			term.textContent = '⌨'
+			// A pixel CRT, drawn in the same language as the room's own monitors.
+			//
+			// It was `⌨` — a keyboard, in dim grey — and then `>_` in a bordered box,
+			// which was a glyph pretending to be an icon. This is a monitor: bezel,
+			// dark screen, a green prompt and a block cursor on it, a neck and a base.
+			// The block cursor is the most CRT thing that survives at this size.
+			//
+			// Inline SVG on whole-unit coordinates with crispEdges, so it stays hard-
+			// edged pixel art at any scale instead of going soft the way a resized
+			// bitmap would — the same reason the room upscales with smoothing off.
 			term.title = `Open ${s.proj}'s terminal`
-			term.className = '[grid-area:term] cursor-pointer self-center rounded border border-line bg-bg px-1.5 py-0.5 text-(--dim) hover:border-gold hover:text-gold'
+			term.className =
+				'[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold'
+			term.innerHTML = CRT
 			// stopPropagation: this opens a terminal, not the row's own detail
 			term.addEventListener('click', (e) => {
 				e.stopPropagation()

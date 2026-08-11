@@ -162,6 +162,14 @@ function readable(fg, bg, target = 4.5) {
 }
 
 // web/list.ts
+var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
+	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
+	<rect x="1" y="1" width="14" height="9" fill="#0d0c12"/>
+	<rect x="3" y="4" width="1" height="1"/><rect x="4" y="5" width="1" height="1"/><rect x="3" y="6" width="1" height="1"/>
+	<rect x="6" y="4" width="2" height="3"/>
+	<rect x="6" y="11" width="4" height="2" opacity=".55"/>
+	<rect x="3" y="13" width="10" height="1"/>
+</svg>`;
 var WEIGHT = {
   error: 0.26,
   needs: 0.22,
@@ -298,9 +306,9 @@ function paintList(list) {
     if (s.workspace) {
       const term = document.createElement("button");
       term.type = "button";
-      term.textContent = "\u2328";
       term.title = `Open ${s.proj}'s terminal`;
-      term.className = "[grid-area:term] cursor-pointer self-center rounded border border-line bg-bg px-1.5 py-0.5 text-(--dim) hover:border-gold hover:text-gold";
+      term.className = "[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+      term.innerHTML = CRT;
       term.addEventListener("click", (e) => {
         e.stopPropagation();
         onTerminal?.(s.id, s.proj);

@@ -12,15 +12,14 @@
  * So the numbers below are gates, not notes. Anything that crosses one fails the
  * commit, and the message says what the number was when the budget was set.
  *
- * MEASURED IN CPU TIME, NOT WALL CLOCK. This machine routinely sits at a load
- * average above 10 with a dozen Claude sessions running, and wall clock under that
- * is noise: the same benchmark varied 2.36 to 17.7ms depending on what else was
- * happening. CPU time held to ±3% across runs at the same load, which is what makes
- * a threshold enforceable rather than flaky.
+ * MEASURED IN CPU TIME, NOT WALL CLOCK. Wall clock on this machine is meaningless:
+ * it routinely sits above load 10 with a dozen Claude sessions running, and the same
+ * benchmark read anywhere from 2.4 to 17.7ms depending on what else was happening.
  *
- * Thresholds sit at roughly 1.7x the measured value — tight enough to catch the
- * regressions that actually happened here (all of which were 3x or worse), loose
- * enough that an unlucky run does not block a commit.
+ * CPU time is better but NOT load-proof, which I originally claimed and was wrong
+ * about — see the note above `run()` for the numbers and for the normalisation
+ * experiment that failed. Ceilings are set from the worst honest reading on a busy
+ * machine, so this catches a doubling rather than a creep.
  *
  *   node tools/check-perf.mjs           check, exit 1 on a breach
  *   node tools/check-perf.mjs --report  print the numbers and exit 0
@@ -37,6 +36,33 @@ const tsx = join(ROOT, 'node_modules/.bin/tsx')
 /** Median of a few runs: one sample under load can be unlucky, three rarely are. */
 const median = (xs) => xs.slice().sort((a, b) => a - b)[Math.floor(xs.length / 2)]
 
+/**
+ * CPU time is NOT load-independent, which I had wrong when I set these budgets.
+ *
+ * Within one run it is beautifully stable — six measurements of renderRoom spread
+ * 0.56ms. But the whole LEVEL moves with machine load, because contention costs
+ * real cycles in cache and TLB misses. Measured here: renderRoom cost 9.9 cpu-ms at
+ * load 3, 11.7-13.3 at load 12, and 15.3-16.2 at load 27. A ceiling set from a
+ * quiet machine therefore fails honest work whenever the machine is busy — which is
+ * when somebody is most likely to be committing. The first thing this gate blocked
+ * was its own author's commit, at load 24.
+ *
+ * NORMALISING AGAINST A REFERENCE WORKLOAD WAS TRIED AND IS WORSE. Written down so
+ * nobody spends the afternoon rediscovering it:
+ *
+ *  - Reference sampled 6x: renderRoom spread 5.7%, the RATIO spread 20%. The
+ *    reference's own noise was larger than the signal it was meant to remove.
+ *  - Reference sampled 30x to quieten it: the reference went bimodal, 5.5 and 11.9
+ *    cpu-ms in alternate runs. That is JIT tiering — the loop gets optimised partway
+ *    through, so the mean depends on when the optimiser fired. A clock that changes
+ *    speed is not a clock.
+ *
+ * So: fixed ceilings, set from the WORST honest reading rather than the best, and
+ * understood for what they are. This gate catches a DOUBLING, not a 20% creep. That
+ * is enough for the regressions this codebase actually produces — choose() was 3x,
+ * the pixel loop 1.8x — and pretending to finer resolution would only mean failing
+ * commits for weather.
+ */
 const run = (src) => Number(execFileSync(tsx, ['-e', src], { cwd: ROOT, encoding: 'utf8' }).trim())
 
 const checks = []
@@ -51,9 +77,9 @@ const checks = []
 checks.push({
 	name: 'terminal frame',
 	unit: 'cpu-ms/frame',
-	budget: 3.0,
+	budget: 4.0,
 	was: 1.7,
-	note: 'was 5.6 before choose() was memoised',
+	note: 'was 5.6 before choose() was memoised; ceiling covers a loaded machine',
 	measure: () =>
 		median(
 			[1, 2, 3].map(() => {
@@ -105,9 +131,9 @@ checks.push({
 checks.push({
 	name: 'renderRoom @ browser scale',
 	unit: 'cpu-ms/frame',
-	budget: 16,
+	budget: 20,
 	was: 9.9,
-	note: 'was 17.7 — over the 60fps budget by itself',
+	note: 'was 17.7; reads 16.2 at load 27, so the ceiling covers that',
 	measure: () =>
 		run(`
 			import { Canvas } from './src/canvas.ts'

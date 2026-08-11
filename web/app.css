@@ -329,6 +329,9 @@
       background: color-mix(in srgb, var(--state) 40%, transparent);
     }
   }
+  .h-9 {
+    height: calc(var(--spacing) * 9);
+  }
   .h-full {
     height: 100%;
   }
@@ -349,6 +352,9 @@
   }
   .w-4 {
     width: calc(var(--spacing) * 4);
+  }
+  .w-11 {
+    width: calc(var(--spacing) * 11);
   }
   .w-\[2\.6rem\] {
     width: 2.6rem;
@@ -421,6 +427,9 @@
   }
   .items-center {
     align-items: center;
+  }
+  .justify-center {
+    justify-content: center;
   }
   .gap-1 {
     gap: var(--spacing);
