@@ -2668,6 +2668,19 @@ function repaintSoon() {
   lastSig = "";
 }
 var fullScreen = () => window.matchMedia("(max-width: 880px)").matches;
+function trackViewport() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  if (!openId || !fullScreen()) {
+    el.style.height = "";
+    el.style.top = "";
+    el.style.bottom = "";
+    return;
+  }
+  el.style.height = `${vv.height}px`;
+  el.style.top = `${vv.offsetTop}px`;
+  el.style.bottom = "auto";
+}
 var openId = null;
 var openName = "";
 var timer = 0;
@@ -2676,9 +2689,14 @@ var onClose = () => {
 };
 var token = () => sessionStorage.getItem(KEY2) ?? "";
 async function api(path, init = {}) {
-  const res = await fetch(path, { ...init, headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
-  const body = await res.json().catch(() => ({ error: "unreadable reply" }));
-  return { status: res.status, ...body };
+  try {
+    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+    const body = await res.json().catch(() => ({ error: "unreadable reply" }));
+    return { status: res.status, ...body };
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
+  }
 }
 function askForToken(why) {
   clearInterval(timer);
@@ -2781,6 +2799,16 @@ function chrome(name) {
   input.id = "ask";
   input.autocomplete = "off";
   input.placeholder = "Type into this session\u2026";
+  input.enterKeyHint = "send";
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    form.requestSubmit();
+  });
+  for (const ev of ["focus", "blur"])
+    input.addEventListener(ev, () => {
+      for (const delay of [0, 150, 350, 600]) setTimeout(trackViewport, delay);
+    });
   input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
   const send = document.createElement("button");
   send.type = "submit";
@@ -2793,8 +2821,12 @@ function chrome(name) {
     if (!text.trim()) return;
     input.value = "";
     send.disabled = true;
-    const r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
-    send.disabled = false;
+    let r;
+    try {
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
+    } finally {
+      send.disabled = false;
+    }
     if (r.error) {
       pre.textContent = `${r.error}
 
@@ -2928,6 +2960,7 @@ function show(id, name) {
   openName = name;
   el.hidden = false;
   document.body.classList.add("overflow-hidden");
+  trackViewport();
   if (!token()) return askForToken("This is behind a separate password from the passcode.");
   const { input } = chrome(name);
   refresh();
@@ -2943,6 +2976,9 @@ function close() {
   el.innerHTML = "";
   el.style.maxWidth = "";
   el.style.marginInline = "";
+  el.style.height = "";
+  el.style.top = "";
+  el.style.bottom = "";
   document.body.classList.remove("overflow-hidden");
   onClose();
 }
@@ -2955,12 +2991,15 @@ function mountTerminal(host, closed) {
   let t = 0;
   addEventListener("resize", () => {
     if (!openId) return;
+    trackViewport();
     clearTimeout(t);
     t = setTimeout(() => {
       repaintSoon();
       refresh();
     }, 120);
   });
+  window.visualViewport?.addEventListener("resize", trackViewport);
+  window.visualViewport?.addEventListener("scroll", trackViewport);
 }
 var isOpen = () => openId !== null;
 

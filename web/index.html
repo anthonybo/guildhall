@@ -4,12 +4,15 @@
 		<meta charset="utf-8" />
 		<!-- viewport-fit=cover so the page reaches under a phone's rounded corners,
 		     with safe-area insets doing the actual keeping-out-of-the-way -->
-		<!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the
-		     viewport rather than sliding the page up under itself, so a full-screen
-		     terminal keeps its input above the keyboard instead of behind it.
+		<!-- `interactive-widget=resizes-content` was here and has been removed. It is
+		     the right idea — the keyboard should shrink the viewport rather than slide
+		     the page under itself — but WebKit does not implement it, so on the phone
+		     this is actually read from it did nothing while looking like the fix. The
+		     keyboard is handled in terminal.ts against visualViewport instead, which
+		     works on both engines.
 		     Deliberately NO maximum-scale: iOS ignores it, and suppressing zoom on a
 		     view made of small text is the wrong thing to take away. -->
-		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 		<meta name="color-scheme" content="dark" />
 		<meta name="theme-color" content="#191722" />
 		<!-- added to a phone home screen this opens without browser chrome -->

@@ -61,6 +61,39 @@ function repaintSoon() {
  */
 const fullScreen = () => window.matchMedia('(max-width: 880px)').matches
 
+/**
+ * Pin the full-screen panel to the VISUAL viewport, not the layout one.
+ *
+ * `position: fixed` with `inset-0` and `100dvh` anchors to the LAYOUT viewport. On
+ * iOS that is the wrong box whenever the two disagree — which is most of the time
+ * that matters: the on-screen keyboard shrinks the visual viewport and leaves the
+ * layout viewport alone, and the URL bar sliding changes the offset between them.
+ * `interactive-widget=resizes-content` is meant to fix exactly this and iOS does not
+ * implement it, so the meta tag I added buys nothing here.
+ *
+ * The result was a panel taller than the screen, anchored above it: the input and
+ * Send sat behind the keyboard, taps landed at coordinates that were no longer
+ * where the buttons appeared to be, and nothing responded — including Close.
+ * Rotating the phone forced a re-layout, which is why that got you out.
+ *
+ * visualViewport reports the box you can actually see and touch. Sizing to it is
+ * the documented workaround for iOS, and it costs two listeners.
+ */
+function trackViewport() {
+	const vv = window.visualViewport
+	if (!vv) return // no support: the CSS 100dvh fallback stands
+	if (!openId || !fullScreen()) {
+		el.style.height = ''
+		el.style.top = ''
+		el.style.bottom = ''
+		return
+	}
+	el.style.height = `${vv.height}px`
+	el.style.top = `${vv.offsetTop}px`
+	// `inset-0` sets bottom too, which would fight an explicit height
+	el.style.bottom = 'auto'
+}
+
 let openId: string | null = null
 let openName = ''
 let timer = 0
@@ -70,9 +103,18 @@ let onClose = () => {}
 const token = () => sessionStorage.getItem(KEY) ?? ''
 
 async function api(path: string, init: RequestInit = {}) {
-	const res = await fetch(path, { ...init, headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
-	const body = await res.json().catch(() => ({ error: 'unreadable reply' }))
-	return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean }
+	// Every call gets a deadline. A fetch without one never settles — a phone
+	// changing networks or a sleeping laptop leaves the promise pending forever, and
+	// the send path awaits it with the button disabled, so the button stays dead and
+	// pressing it "does nothing" for the rest of the session.
+	try {
+		const res = await fetch(path, { ...init, signal: AbortSignal.timeout(20_000), headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
+		const body = await res.json().catch(() => ({ error: 'unreadable reply' }))
+		return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean }
+	} catch (e) {
+		const timedOut = e instanceof DOMException && e.name === 'TimeoutError'
+		return { status: 0, error: timedOut ? 'the machine did not answer in time' : 'could not reach guildhall' }
+	}
 }
 
 /** Ask for the token. Only reached when the server says the current one is wrong. */
@@ -251,6 +293,27 @@ function chrome(name: string) {
 	input.id = 'ask'
 	input.autocomplete = 'off'
 	input.placeholder = 'Type into this session…'
+	// The phone keyboard's return key says "send" and submits, instead of "return"
+	// and doing nothing anybody can see.
+	input.enterKeyHint = 'send'
+	// Submit on Enter explicitly rather than relying on the form's implicit
+	// submission. That relies on the browser finding the submit button, and it was
+	// reported not working on a phone; a handler that calls requestSubmit() cannot be
+	// defeated by whatever the implicit rules are doing.
+	input.addEventListener('keydown', (e) => {
+		if (e.key !== 'Enter' || e.shiftKey || e.isComposing) return
+		e.preventDefault()
+		form.requestSubmit()
+	})
+	// Re-measure around the keyboard appearing, not only when visualViewport says so.
+	// Focus is the one signal that is guaranteed to arrive, the keyboard animates in
+	// over a few hundred milliseconds, and re-measuring a handful of times costs two
+	// style writes each. Belt and braces for the case this panel most needs to
+	// survive: typing on a phone.
+	for (const ev of ['focus', 'blur'] as const)
+		input.addEventListener(ev, () => {
+			for (const delay of [0, 150, 350, 600]) setTimeout(trackViewport, delay)
+		})
 	// 16px, and not a pixel less. THIS is the zooming.
 	//
 	// iOS Safari zooms the whole page whenever you focus an input whose font-size is
@@ -273,8 +336,15 @@ function chrome(name: string) {
 		if (!text.trim()) return
 		input.value = ''
 		send.disabled = true
-		const r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text }) })
-		send.disabled = false
+		// `finally`, so a throw can never leave the button disabled forever. Combined
+		// with the deadline in api(), the worst case is now an error you can read
+		// rather than a control that has quietly stopped working.
+		let r: Awaited<ReturnType<typeof api>>
+		try {
+			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text }) })
+		} finally {
+			send.disabled = false
+		}
 		if (r.error) {
 			pre.textContent = `${r.error}\n\n${pre.textContent}`
 			input.value = text // give it back rather than losing what was typed
@@ -526,6 +596,10 @@ export function show(id: string, name: string) {
 	// Nothing scrolls behind a full-screen overlay, or a flick past the end of the
 	// scrollback drags the session list around underneath it.
 	document.body.classList.add('overflow-hidden')
+	// Sized BEFORE the branch, not after: the password form is full screen too, and
+	// putting this after the early return left that state anchored to the layout
+	// viewport — the one state where you most need the input to be reachable.
+	trackViewport()
 	if (!token()) return askForToken('This is behind a separate password from the passcode.')
 	const { input } = chrome(name)
 	refresh()
@@ -545,6 +619,10 @@ export function close() {
 	el.innerHTML = ''
 	el.style.maxWidth = ''
 	el.style.marginInline = ''
+	// hand the inline layout its sizing back, or a desktop panel keeps a phone's height
+	el.style.height = ''
+	el.style.top = ''
+	el.style.bottom = ''
 	document.body.classList.remove('overflow-hidden')
 	onClose()
 }
@@ -561,12 +639,17 @@ export function mountTerminal(host: HTMLElement, closed: () => void) {
 	let t = 0
 	addEventListener('resize', () => {
 		if (!openId) return
+		trackViewport()
 		clearTimeout(t)
 		t = setTimeout(() => {
 			repaintSoon()
 			refresh()
 		}, 120)
 	})
+	// The keyboard opening fires these and NOT `resize` on iOS, which is the whole
+	// point: without them the panel never learns the screen got shorter.
+	window.visualViewport?.addEventListener('resize', trackViewport)
+	window.visualViewport?.addEventListener('scroll', trackViewport)
 }
 
 export const isOpen = () => openId !== null
