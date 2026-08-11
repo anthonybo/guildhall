@@ -47,10 +47,21 @@ type Repo = {
 
 type Snapshot = { at: number; items: Item[]; repos: Repo[]; local: boolean; githubError?: string; cloudflareError?: string; error?: string; stale?: string }
 
+const DEPLOYS = 'guildhall.press.deploys'
+
 let el: HTMLElement
 let timer = 0
 let open = false
-let deploys = false
+/**
+ * Whether to read workflow runs and Cloudflare deploys too.
+ *
+ * Remembered, because it was a per-open choice that reset every time — so the
+ * question "what is deployed" needed the same two taps and a 17-second wait on
+ * every visit, and the view answered it with "deploys were not read" until you
+ * did. Off by default still: the local read is ~2s and the full one ~17s, because
+ * every Worker repo spawns its own wrangler.
+ */
+let deploys = localStorage.getItem(DEPLOYS) === '1'
 let onClose = () => {}
 
 /**
@@ -252,6 +263,7 @@ function render(snap: Snapshot) {
 	toggle.className = `ml-auto flex min-h-9 shrink-0 cursor-pointer items-center rounded border px-2.5 text-[0.72rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${deploys ? 'border-gold text-gold' : 'border-line text-muted hover:text-label'}`
 	toggle.addEventListener('click', () => {
 		deploys = !deploys
+		localStorage.setItem(DEPLOYS, deploys ? '1' : '0')
 		refresh()
 	})
 
@@ -286,22 +298,30 @@ function render(snap: Snapshot) {
 			note.textContent = snap.stale
 			body.append(note)
 		}
-		// Repos with something to report first. A panel of thirty rows saying nothing
-		// buries the two that matter, so the quiet ones collapse behind a count.
-		const busy = snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error)
-		const quiet = snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error))
 
-		body.append(heading('unpushed & dirty', busy.length))
-		if (busy.length) {
-			const ul = document.createElement('ul')
-			ul.className = 'm-0 list-none p-0'
-			for (const r of busy) ul.append(repoRow(r))
-			body.append(ul)
-		} else {
-			const p = document.createElement('p')
-			p.className = 'm-0 px-2.5 py-2 text-faint'
-			p.textContent = 'Everything is pushed and clean.'
-			body.append(p)
+		// The panel is drawn ONLY when its data arrived.
+		//
+		// It used to render regardless, so a server that could not supply it produced
+		// the heading "unpushed & dirty 0" and the sentence "Everything is pushed and
+		// clean" — while the terminal, looking at the same machine, showed thirteen
+		// dirty repositories. Absent data must never come out as a positive finding;
+		// silence is recoverable and a confident wrong answer is not.
+		const busy = snap.stale ? [] : snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error)
+		const quiet = snap.stale ? [] : snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error))
+
+		if (!snap.stale) {
+			body.append(heading('unpushed & dirty', busy.length))
+			if (busy.length) {
+				const ul = document.createElement('ul')
+				ul.className = 'm-0 list-none p-0'
+				for (const r of busy) ul.append(repoRow(r))
+				body.append(ul)
+			} else {
+				const p = document.createElement('p')
+				p.className = 'm-0 px-2.5 py-2 text-faint'
+				p.textContent = 'Everything is pushed and clean.'
+				body.append(p)
+			}
 		}
 
 		if (quiet.length) {

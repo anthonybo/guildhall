@@ -2855,10 +2855,11 @@ function mountTerminal(host, closed) {
 var isOpen = () => openId !== null;
 
 // web/press.ts
+var DEPLOYS = "guildhall.press.deploys";
 var el2;
 var timer2 = 0;
 var open = false;
-var deploys = false;
+var deploys = localStorage.getItem(DEPLOYS) === "1";
 var onClose2 = () => {
 };
 function hue(name) {
@@ -3006,6 +3007,7 @@ function render(snap) {
   toggle.className = `ml-auto flex min-h-9 shrink-0 cursor-pointer items-center rounded border px-2.5 text-[0.72rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${deploys ? "border-gold text-gold" : "border-line text-muted hover:text-label"}`;
   toggle.addEventListener("click", () => {
     deploys = !deploys;
+    localStorage.setItem(DEPLOYS, deploys ? "1" : "0");
     refresh2();
   });
   const x = document.createElement("button");
@@ -3035,19 +3037,21 @@ function render(snap) {
       note.textContent = snap.stale;
       body.append(note);
     }
-    const busy = snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
-    const quiet = snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
-    body.append(heading("unpushed & dirty", busy.length));
-    if (busy.length) {
-      const ul = document.createElement("ul");
-      ul.className = "m-0 list-none p-0";
-      for (const r of busy) ul.append(repoRow(r));
-      body.append(ul);
-    } else {
-      const p = document.createElement("p");
-      p.className = "m-0 px-2.5 py-2 text-faint";
-      p.textContent = "Everything is pushed and clean.";
-      body.append(p);
+    const busy = snap.stale ? [] : snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
+    const quiet = snap.stale ? [] : snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
+    if (!snap.stale) {
+      body.append(heading("unpushed & dirty", busy.length));
+      if (busy.length) {
+        const ul = document.createElement("ul");
+        ul.className = "m-0 list-none p-0";
+        for (const r of busy) ul.append(repoRow(r));
+        body.append(ul);
+      } else {
+        const p = document.createElement("p");
+        p.className = "m-0 px-2.5 py-2 text-faint";
+        p.textContent = "Everything is pushed and clean.";
+        body.append(p);
+      }
     }
     if (quiet.length) {
       const details2 = document.createElement("details");
