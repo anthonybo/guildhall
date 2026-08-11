@@ -2343,10 +2343,11 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
       for (let x = 0; x < cv2.w; x++) {
         const v = px[y * cv2.w + x];
         if (v < 0) continue;
+        const word2 = PACK(v);
         const left = x * sx;
         for (let by = 0; by < py; by++) {
           const from = (top + by) * w + left;
-          u32.fill(PACK(v), from, from + sx);
+          for (let i = 0; i < sx; i++) u32[from + i] = word2;
         }
       }
     }
@@ -2650,6 +2651,9 @@ var KEY2 = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
 var wrap = localStorage.getItem(WRAP) !== "exact";
 var lastSig = "";
+function repaintSoon() {
+  lastSig = "";
+}
 var fullScreen = () => window.matchMedia("(max-width: 880px)").matches;
 var openId = null;
 var openName = "";
@@ -2741,6 +2745,7 @@ function chrome(name) {
     wrap = !wrap;
     localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
     label();
+    repaintSoon();
     refresh();
   });
   const x = document.createElement("button");
@@ -2933,6 +2938,15 @@ function mountTerminal(host, closed) {
   onClose = closed;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && openId) close();
+  });
+  let t = 0;
+  addEventListener("resize", () => {
+    if (!openId) return;
+    clearTimeout(t);
+    t = setTimeout(() => {
+      repaintSoon();
+      refresh();
+    }, 120);
   });
 }
 var isOpen = () => openId !== null;

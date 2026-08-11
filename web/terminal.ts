@@ -35,6 +35,24 @@ let wrap = localStorage.getItem(WRAP) !== 'exact'
 let lastSig = ''
 
 /**
+ * Force the next poll to redraw even if the session has printed nothing.
+ *
+ * The repaint guard compares the grid, which is right for "has the session
+ * changed" and wrong for everything else, because `paint()` is also the only thing
+ * that applies the LAYOUT — type size, wrapping, height. Two cases were broken in
+ * the dangerous direction and both are exactly the phone-reading-an-idle-session
+ * case the guard was built for:
+ *
+ *  - Wrapped/Exact did nothing on a quiet screen. The button relabelled itself and
+ *    the text did not reflow until the session next printed.
+ *  - Rotating the phone never resized the type. Before the guard the 2s poll fixed
+ *    it within two seconds; after, it waited for output that may never come.
+ */
+function repaintSoon() {
+	lastSig = ''
+}
+
+/**
  * Whether the panel is the whole screen rather than a box in the page.
  *
  * The same 880px the stylesheet uses, read here because the layout maths has to
@@ -185,6 +203,8 @@ function chrome(name: string) {
 		wrap = !wrap
 		localStorage.setItem(WRAP, wrap ? 'wrap' : 'exact')
 		label()
+		// the grid has not changed — only how we draw it — so the guard has to be told
+		repaintSoon()
 		refresh()
 	})
 
@@ -534,6 +554,18 @@ export function mountTerminal(host: HTMLElement, closed: () => void) {
 	onClose = closed
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && openId) close()
+	})
+	// A rotation changes the width the type is sized from, and the grid does not
+	// change at all — so without this the screen keeps the old size until the session
+	// happens to print. Debounced because a rotation fires this repeatedly.
+	let t = 0
+	addEventListener('resize', () => {
+		if (!openId) return
+		clearTimeout(t)
+		t = setTimeout(() => {
+			repaintSoon()
+			refresh()
+		}, 120)
 	})
 }
 

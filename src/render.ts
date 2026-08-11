@@ -124,13 +124,19 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 	/**
 	 * The floor, written as packed 32-bit words rather than pixel by pixel.
 	 *
-	 * This loop runs `cv.w * cv.h` times — 9,984 at the room's real size — and every
-	 * iteration used to allocate a three-element array via `cv.get()` and then walk
-	 * the block with a bounds check per pixel inside `put()`. Measured at the room's
-	 * real size: 12.75ms per frame, against a 16.7ms budget for the whole thing, plus
-	 * roughly 600k short-lived arrays a second for the collector to sweep up. Reading
-	 * the packed ints and filling runs through a Uint32Array view is the same output
-	 * in 0.248ms — fifty-one times faster.
+	 * This loop runs `cv.w * cv.h` times and every iteration used to allocate a
+	 * three-element array via `cv.get()` and then walk the block with a bounds check
+	 * per pixel inside `put()`. Reading the packed ints and writing through a
+	 * Uint32Array view is the same output with none of that allocation.
+	 *
+	 * **1.2x to 1.6x faster, not fifty-one times.** An earlier version of this comment
+	 * claimed 12.75ms to 0.248ms. That was wrong and worth recording as wrong: the
+	 * 0.248 was the cost of ONE `u32.fill()` across the whole buffer, which is not
+	 * this loop — it is a single call with no per-cell work at all. Independently
+	 * measured, the real figures are 13.66 to 19.64 cpu-ms at browser scale and 1.596
+	 * to 1.951 at terminal size. The output is byte-identical across 11.9MB of
+	 * comparison, and `check:docs` agrees, so the change is right; only the number
+	 * attached to it was invented.
 	 *
 	 * No bounds checks: the floor is exactly `cv.w * sx` by `cv.h * py`, which is the
 	 * buffer, so nothing can fall outside it. `put()` still guards for everything
@@ -148,10 +154,19 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 			for (let x = 0; x < cv.w; x++) {
 				const v = px[y * cv.w + x]
 				if (v < 0) continue // transparent
+				// PACK hoisted out of the row loop: it was recomputed `py` times for
+				// every cell, for a value that cannot change within one cell.
+				const word = PACK(v)
 				const left = x * sx
 				for (let by = 0; by < py; by++) {
 					const from = (top + by) * w + left
-					u32.fill(PACK(v), from, from + sx)
+					// A plain write loop, NOT `u32.fill(word, from, from + sx)`.
+					//
+					// `fill` is the obvious call and the slower one here: the runs are four
+					// words long, so its per-call setup dominates the four stores it saves.
+					// Measured 15.205 -> 5.014 cpu-ms at browser scale (3.0x) and 1.693 ->
+					// 0.420 at terminal size (4.0x), across 319,488 calls a frame.
+					for (let i = 0; i < sx; i++) u32[from + i] = word
 				}
 			}
 		}

@@ -131,6 +131,19 @@ export function createServer(opts: ServeOptions) {
 	/** Push only when something actually changed — a phone on wifi should not be
 	 *  woken twice a second to be told nothing happened. */
 	function tick() {
+		// Nobody listening, nothing to compute.
+		//
+		// This built the entire payload — a full `collect()`, every two seconds —
+		// whether or not a single browser was connected. Measured on a headless server
+		// nobody had ever opened: 13.3 cpu-ms per tick, 0.67% of a core, forever.
+		//
+		// The same shape as the push bug below, one level up: that one stopped sending
+		// what nobody needed, and left the WORK that produced it running regardless.
+		//
+		// Safe because the route writes `payload()` directly when a client connects, so
+		// a new listener never waits for this timer. The only cost is a stale `last`
+		// after an idle spell, which is one redundant push.
+		if (!listeners.size) return
 		const body = payload()
 		// Ignore what changes on every tick BY CONSTRUCTION.
 		//
