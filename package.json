@@ -18,14 +18,16 @@
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web",
+		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web && npm run check:perf",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",
 		"format": "prettier --write .",
 		"docs": "sh tools/make-docs-images.sh",
 		"check:docs": "sh tools/check-docs-images.sh",
 		"check:web": "sh tools/check-web-bundle.sh",
-		"serve": "node tools/serve.mjs"
+		"serve": "node tools/serve.mjs",
+		"check:perf": "node tools/check-perf.mjs",
+		"hooks": "git config core.hooksPath .githooks"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

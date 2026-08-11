@@ -1,0 +1,16 @@
+#!/bin/sh
+# Tracked in the repo and activated by `core.hooksPath`, which `npm run hooks`
+# sets. `.git/hooks` is not version-controlled, so a hook that lives only there is
+# a hook that exists on one machine and silently protects nothing on any other.
+#
+# Fast enough to sit in front of every commit: ~10s, almost all of it three
+# benchmark runs. Skip it deliberately with `git commit --no-verify` when you mean
+# to — a hook nobody can bypass is a hook people delete.
+set -e
+
+echo "pre-commit: perf budget"
+node tools/check-perf.mjs
+
+echo "pre-commit: types and tests"
+npm run --silent check:types
+npm test --silent >/dev/null

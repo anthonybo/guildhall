@@ -54,6 +54,49 @@ tripled them while the bundle still served the old 1:1 plates.
 - Comments explain *why*, especially where a value was measured. Numbers that came
   from a measurement should say so, or the next person will "simplify" them away.
 
+## Staying lightweight
+
+This app watches a machine somebody else is trying to work on. It has no right to
+be expensive, and every cost it has ever had arrived the same way — unmeasured.
+
+**There is a budget, and it is enforced.** `npm run check:perf` prints each number
+against its ceiling; the pre-commit hook runs it. Activate the hook once per clone:
+
+```
+npm run hooks          # points core.hooksPath at .githooks/
+```
+
+Current gates, and what each is guarding against:
+
+| check | budget | why |
+|---|---|---|
+| terminal frame | 3.0 cpu-ms | was **5.6** — `drawPlates` called `choose()` for 11 plates every frame with arguments that never change, 77.6% of the frame |
+| `collect()` poll | 12 cpu-ms | catches a broken digest cache or a directory walk added to the hot path |
+| `renderRoom` @ browser scale | 16 cpu-ms | was **17.7**, which is over a 60fps budget by itself — the loop saturated a core and could not keep up |
+| `@keyframes` in built CSS | 1 | a perpetual animation costs ~15% of a core on a phone whether anyone is looking or not |
+| `web/app.js` | 170 KB | a phone downloads it over a tailnet |
+
+**Measure in CPU time, never wall clock.** This machine sits above load 10 with a
+dozen Claude sessions running, and wall clock under that load is noise — the same
+benchmark read anywhere from 2.4 to 17.7ms. CPU time held to ±3% across runs.
+
+**If you need to raise a budget, raise it in `tools/check-perf.mjs` and say why in
+the commit.** The number is a decision; moving it silently is how the old costs got
+in.
+
+*Costs that got in while nobody was watching, so you know the shape of the enemy:*
+
+- A cache TTL of 30s on a refresh that costs **9.76 CPU-seconds** — a git process
+  per repository — which is a third of a core, continuously, while a panel is open.
+  Nobody measured what the 30 seconds bought.
+- A "push only when something changed" guard comparing a payload that contained
+  `stale`, an age in milliseconds. It changed every tick by construction, so the
+  guard never matched once: 8KB every 2s to every client, forever, for an office
+  where nothing had happened in 35 hours.
+- `--bench` forcing images off, so the benchmark measured a renderer nobody runs
+  and stayed blind to the most expensive function in it. **A benchmark that
+  measures the wrong path is worse than none, because it is trusted.**
+
 ## Verifying
 
 **Measure on this machine before claiming anything.** Several confident diagnoses

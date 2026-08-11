@@ -123,14 +123,39 @@ export function createServer(opts: ServeOptions) {
 	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: BUILD, update: available(), client: clientStamp() })
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
+	/** When a message last went out, so the heartbeat below can be honest about ages. */
+	let lastPush = 0
 
 	/** Push only when something actually changed — a phone on wifi should not be
 	 *  woken twice a second to be told nothing happened. */
 	function tick() {
 		const body = payload()
-		const same = body.replace(/"at":\d+/, '') // compare without the timestamp
-		if (same === last) return
+		// Ignore what changes on every tick BY CONSTRUCTION.
+		//
+		// `at` was already excluded. `stale` was not, and it is an age in milliseconds
+		// — so it advanced by 2000 on every session every tick and this guard never
+		// once matched. An office where nothing had happened for a day and a half still
+		// pushed 8KB every two seconds to every client: ~350MB a day each, a phone
+		// radio woken 43,000 times a day to say nothing, and a full list rebuild in
+		// every browser. Measured by diffing consecutive messages — the only
+		// differences were `at` and eleven `stale` values.
+		//
+		// `stale` is ignored outright and a heartbeat keeps the ages honest.
+		//
+		// Quantising it to 30s buckets was tried first and barely helped: eleven
+		// sessions have eleven independent ages, so SOME bucket rolled over on nearly
+		// every tick — measured 12 pushes in 40s against 20 unfixed, where the aim was
+		// two. Ignoring it entirely would instead freeze the ages on screen, since the
+		// rows render from this number.
+		//
+		// So: push when something real changed, and otherwise every 30 seconds
+		// regardless. An idle office costs two messages a minute instead of thirty, and
+		// no age on screen is ever more than half a minute stale.
+		const same = body.replace(/"at":\d+/, '').replace(/"stale":\d+/g, '')
+		const due = Date.now() - lastPush > 30_000
+		if (same === last && !due) return
 		last = same
+		lastPush = Date.now()
 		for (const res of listeners) res.write(`data: ${body}\n\n`)
 	}
 	const timer = setInterval(tick, 2000)

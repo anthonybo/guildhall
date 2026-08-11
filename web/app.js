@@ -360,6 +360,18 @@ var Canvas = class {
     const v = this.px[y * this.w + x];
     return v < 0 ? null : [v >> 16 & 255, v >> 8 & 255, v & 255];
   }
+  /**
+   * The packed pixels, for a caller that walks all of them.
+   *
+   * `get()` allocates a three-element array per pixel, which is the right shape for
+   * reading one and the wrong shape for reading ten thousand: the room's floor loop
+   * did exactly that every frame and spent 12.75ms of a 16.7ms budget on it, most
+   * of it in allocation. Bulk readers take the ints and unpack them themselves —
+   * `0xRRGGBB`, negative meaning transparent.
+   */
+  pixels() {
+    return this.px;
+  }
   rect(x, y, w, h, c) {
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) this.set(x + i, y + j, c);
   }
@@ -2232,7 +2244,16 @@ function band(f) {
 var MIN_CHARS = 10;
 var MAX_SCALE = 4;
 var cut2 = (text, room) => text.length > room ? text.slice(0, room - 1) + "." : text;
+var picks = /* @__PURE__ */ new Map();
 function choose(text, wpx, hpx) {
+  const key = `${text}\0${wpx}x${hpx}`;
+  const held = picks.get(key);
+  if (held !== void 0) return held;
+  const fresh = pick(text, wpx, hpx);
+  picks.set(key, fresh);
+  return fresh;
+}
+function pick(text, wpx, hpx) {
   const cands = [];
   for (const font of LADDER) {
     const fits = Math.min(MAX_SCALE, Math.floor((wpx - 3) / band(font)));
@@ -2252,13 +2273,15 @@ function choose(text, wpx, hpx) {
   );
   if (!floor) return null;
   const grown = thick.filter((c) => c.font === floor.font && c.scale > floor.scale && c.scale <= floor.scale + 1 && c.room >= text.length).sort(thickest)[0];
-  const pick = grown ?? floor;
-  return { font: pick.font, text: cut2(text, pick.room), scale: pick.scale };
+  const pick2 = grown ?? floor;
+  return { font: pick2.font, text: cut2(text, pick2.room), scale: pick2.scale };
 }
 
 // src/render.ts
 var INK = [32, 34, 46];
 var NIGHT = [26, 28, 40];
+var LITTLE = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1;
+var PACK = LITTLE ? (v) => (4278190080 | (v & 255) << 16 | v & 65280 | v >> 16 & 255) >>> 0 : (v) => ((v & 16777215) << 8 | 255) >>> 0;
 function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   const w = cv2.w * sx;
   const h = cv2.rows * sy;
@@ -2283,10 +2306,10 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
         const gx = Math.min(g.w - 1, Math.floor(x * g.w / boxW));
         const c = g.grid[gy][gx];
         if (!c) continue;
-        const px = x0 + x;
+        const px2 = x0 + x;
         const py2 = y0 + y;
-        if (px < 0 || py2 < 0 || px >= w || py2 >= h) continue;
-        const i = (py2 * w + px) * 4;
+        if (px2 < 0 || py2 < 0 || px2 >= w || py2 >= h) continue;
+        const i = (py2 * w + px2) * 4;
         rgba[i] = c[0];
         rgba[i + 1] = c[1];
         rgba[i + 2] = c[2];
@@ -2295,10 +2318,27 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
     }
   };
   const py = sy / 2;
-  for (let y = 0; y < cv2.h; y++) {
-    for (let x = 0; x < cv2.w; x++) {
-      const c = cv2.get(x, y);
-      if (c) put(x * sx, y * py, sx, py, c);
+  const px = cv2.pixels();
+  if (Number.isInteger(sx) && Number.isInteger(py)) {
+    const u32 = new Uint32Array(rgba.buffer);
+    for (let y = 0; y < cv2.h; y++) {
+      const top = y * py;
+      for (let x = 0; x < cv2.w; x++) {
+        const v = px[y * cv2.w + x];
+        if (v < 0) continue;
+        const left = x * sx;
+        for (let by = 0; by < py; by++) {
+          const from = (top + by) * w + left;
+          u32.fill(PACK(v), from, from + sx);
+        }
+      }
+    }
+  } else {
+    for (let y = 0; y < cv2.h; y++) {
+      for (let x = 0; x < cv2.w; x++) {
+        const c = cv2.get(x, y);
+        if (c) put(x * sx, y * py, sx, py, c);
+      }
     }
   }
   for (const pr of scene.props) {
@@ -2309,8 +2349,8 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
     stamp(monitor(m.lit, frame2, m.seed, m.kind), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
   }
   for (const p of scene.plates) {
-    const pick = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);
-    if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy);
+    const pick2 = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);
+    if (pick2) stamp(plate(pick2.font, pick2.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick2.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy);
   }
   for (const b of scene.badges) {
     const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color;
@@ -3128,7 +3168,7 @@ async function refresh2() {
   } else if (settled2 !== true) {
     settled2 = true;
     clearInterval(timer2);
-    timer2 = setInterval(refresh2, 3e4);
+    timer2 = setInterval(refresh2, 6e4);
   }
 }
 function show2() {

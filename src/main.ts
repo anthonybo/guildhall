@@ -151,7 +151,20 @@ function syncServe() {
 		serveError = 'failed to start'
 	}
 }
-const IMAGES = supportsImages() && !ONCE && !BENCH && !GUARD
+/**
+ * `--bench` deliberately does NOT disable images.
+ *
+ * It used to, which made the benchmark measure a renderer nobody runs: with images
+ * off the frame takes the half-block path and never calls `drawPlates`,
+ * `drawMonitors`, `drawProps` or `drawImages` at all — and `drawPlates` was 77.6%
+ * of the real frame. So the one number anybody consulted before changing the
+ * renderer was blind to the most expensive thing in it, and stayed blind while a
+ * per-frame call that could be cached sat there for months.
+ *
+ * A benchmark that measures a path production does not take is worse than no
+ * benchmark, because it is trusted.
+ */
+const IMAGES = supportsImages() && !ONCE && !GUARD
 // observing should not change the machine's behaviour unless asked, but holding
 // sleep off while a build runs is the common case, so it is on unless refused
 // --once and --bench never hold anything; --demo arms it purely so the
@@ -858,6 +871,9 @@ function main() {
 		process.exit(0)
 	}
 	if (BENCH) {
+		// `quiet` still suppresses the WRITE — a benchmark must not scribble escape
+		// codes over the terminal it was launched from — but everything up to the write
+		// now runs, including the image layers and the diff.
 		quiet = true
 		layout()
 		const N = 200

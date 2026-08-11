@@ -454,7 +454,10 @@ async function refresh() {
 	} else if (settled !== true) {
 		settled = true
 		clearInterval(timer)
-		timer = setInterval(refresh, 30_000)
+		// A minute, matched against what a refresh costs on the machine: each one is
+		// ~9.76 CPU-seconds of git. Polling faster than the server's own two-minute
+		// cache only asks a question it already knows the answer to.
+		timer = setInterval(refresh, 60_000)
 	}
 }
 

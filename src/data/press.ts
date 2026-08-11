@@ -27,11 +27,25 @@ const LOCAL_TIMEOUT = 45_000
 /** The full read measures ~17s here and is dominated by wrangler process starts. */
 const FULL_TIMEOUT = 90_000
 
-/** How long a local answer stays good. Commits do not land faster than this. */
-const LOCAL_TTL = 30_000
+/**
+ * How long a local answer stays good.
+ *
+ * Two minutes, not thirty seconds. Measured: one `pressroom --json --local` costs
+ * **9.76 CPU-seconds** — 4.84 user, 4.92 sys, 55,571 involuntary context switches,
+ * because it spawns a git process per repository. At a thirty-second TTL that was
+ * roughly a third of one core, continuously, for as long as the panel stayed open.
+ *
+ * Nothing justified thirty seconds. Commits land when somebody commits, and the
+ * feed being two minutes behind is invisible; a machine a third of a core busier
+ * is not. I picked the original number without measuring what it bought.
+ */
+const LOCAL_TTL = 120_000
 
-/** Deploys are expensive and rare; asking every half minute would be absurd. */
-const FULL_TTL = 5 * 60_000
+/**
+ * Deploys are far more expensive: ~26 CPU-seconds, since every Worker repo spawns
+ * its own wrangler. Ten minutes puts that under 5% of a core while enabled.
+ */
+const FULL_TTL = 10 * 60_000
 
 /**
  * Newest items served. The raw snapshot runs to ~950KB, which is not a payload.
