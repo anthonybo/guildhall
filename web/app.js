@@ -3117,7 +3117,7 @@ function show2() {
   open = true;
   el2.hidden = false;
   document.body.classList.add("overflow-hidden");
-  el2.textContent = "";
+  render({ at: Date.now(), items: [], repos: [], local: !deploys });
   refresh2();
   clearInterval(timer2);
   timer2 = setInterval(refresh2, 3e4);

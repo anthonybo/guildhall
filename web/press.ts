@@ -415,7 +415,15 @@ export function show() {
 	// The page must not scroll behind a full-screen overlay: on a phone, dragging
 	// the feed would otherwise pull the list underneath it around as well.
 	document.body.classList.add('overflow-hidden')
-	el.textContent = ''
+	// Paint the chrome BEFORE the fetch, never after.
+	//
+	// This used to clear the panel and then await the request, so between the tap
+	// and the response there was a full-screen overlay with nothing in it and no
+	// Close button — no content, no explanation, and no way out. On a warm cache
+	// that gap is 5ms and invisible, which is why every test of mine missed it; on
+	// a cold one it is seconds, and with deploys on it can be much longer. A blank
+	// screen is indistinguishable from a broken app.
+	render({ at: Date.now(), items: [], repos: [], local: !deploys })
 	refresh()
 	clearInterval(timer)
 	// Slower than the session poll: commits do not land twice a second, and every
