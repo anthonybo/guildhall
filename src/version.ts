@@ -59,3 +59,52 @@ export const VERSION = read()
 export const COMMIT = readCommit()
 /** What to show a person: `0.2.0 · a1b2c3d`, or just the version outside a checkout. */
 export const BUILD = COMMIT ? `${VERSION} · ${COMMIT}` : VERSION
+
+/**
+ * The build string, re-read when the files it comes from change.
+ *
+ * `BUILD` above is frozen at import, which was wrong for anything long-lived. A
+ * release bumps package.json and moves the git ref but touches no source, so the
+ * headless service kept serving `0.2.39 · 1abe86a` to every browser after v0.3.0
+ * had shipped — the code was current and only the label was stale, which is the
+ * worst version of that bug because the label is the thing you check.
+ *
+ * Restarting the service to refresh a label would be silly, and the watcher
+ * deliberately ignores generated files so it would not have caught it anyway. So
+ * the label re-reads itself instead.
+ *
+ * Guarded by mtime so the common case is two stats and nothing else. Called from
+ * the stream tick, twice a second at most; measured too small to appear next to
+ * the 3.4ms that `collect()` costs on the same tick.
+ */
+let cached = BUILD
+let stamp = ''
+
+export function build(): string {
+	let dir = path.dirname(fileURLToPath(import.meta.url))
+	let now = ''
+	for (let i = 0; i < 4; i++) {
+		try {
+			const pkg = path.join(dir, 'package.json')
+			const p = fs.statSync(pkg)
+			// the git ref moves on every commit; HEAD itself only on a branch switch
+			let g = 0
+			try {
+				const head = path.join(dir, '.git', 'HEAD')
+				const h = fs.readFileSync(head, 'utf8').trim()
+				const ref = h.startsWith('ref:') ? path.join(dir, '.git', h.slice(5).trim()) : head
+				g = fs.statSync(ref).mtimeMs
+			} catch {}
+			now = `${p.mtimeMs}:${g}`
+			break
+		} catch {}
+		dir = path.dirname(dir)
+	}
+	if (now && now !== stamp) {
+		stamp = now
+		const v = read()
+		const c = readCommit()
+		cached = c ? `${v} · ${c}` : v
+	}
+	return cached
+}

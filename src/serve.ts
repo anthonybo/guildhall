@@ -24,7 +24,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { attempt, issue, lockedFor, triesLeft, valid } from './auth.ts'
 import { loginPage } from './login.ts'
-import { BUILD } from './version.ts'
+import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
@@ -120,7 +120,9 @@ export function createServer(opts: ServeOptions) {
 	const sessions = () => (opts.demo ? demoSessions() : collect())
 	/** The browser shows the same version and update mark the terminal does, so a
 	 *  stale phone tab is as visible as a stale terminal. */
-	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: BUILD, update: available(), client: clientStamp() })
+	// `build()`, not the frozen `BUILD`: this process outlives releases, and a
+	// browser that reads its version from here must not be told a stale one.
+	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: build(), update: available(), client: clientStamp() })
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 	/** When a message last went out, so the heartbeat below can be honest about ages. */

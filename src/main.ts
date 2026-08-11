@@ -36,7 +36,7 @@ import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
 import * as H from './help.ts'
 import * as awake from './awake.ts'
-import { BUILD } from './version.ts'
+import { BUILD, build } from './version.ts'
 import * as cfgStore from './config.ts'
 import { addresses, createServer } from './serve.ts'
 import { choose, plate } from './nameplate.ts'
@@ -465,7 +465,10 @@ function draw() {
 	const shareState = { on: !!server, port: cfg.port, error: serveError }
 	paint(
 		[
-			T.summary(sessions, cols, awakeState, undefined, shareState),
+			// build(), not the default frozen BUILD: this process is often left running
+			// for days across releases, and the header is exactly where you look to ask
+			// "is this the thing I just built?"
+			T.summary(sessions, cols, awakeState, build(), shareState),
 			...body.slice(0, rows - (remote ? 1 : 0)),
 			...(remote ? [remote] : []),
 			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState),
