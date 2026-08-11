@@ -98,9 +98,28 @@ export async function ask(workspace: string, text: string): Promise<Result> {
 	// separate turns, which is not what anyone typing into a box intends.
 	if (/[\r\n]/.test(body)) return { ok: false, error: 'send one line at a time' }
 	if (body.length > 4000) return { ok: false, error: 'too long' }
-	const typed = await run(['send', '--workspace', workspace, body])
-	if (!typed.ok) return typed
-	return run(['send-key', '--workspace', workspace, 'Enter'])
+	// One call, and the carriage return travels with the text.
+	//
+	// This was `send` followed by a separate `send-key Enter`: two processes, with
+	// a gap of a hundred milliseconds or so in between, and the reported failure was
+	// a message that arrived in Claude Code's prompt and just sat there unsubmitted —
+	// the text landing and the Enter not taking. Intermittent, which is what a race
+	// looks like from the outside. There is no gap to lose it in now.
+	//
+	// `terminal.input` rather than `send` for a second reason, and it is a bug in
+	// its own right: `send` INTERPRETS `\n`, `\r` and `\t` in the text it is given.
+	// Verified against a scratch shell — sending `X\nY` submits `X` and leaves `Y`
+	// behind on the next prompt. So any message containing a literal backslash-n was
+	// being split in half and its remainder run as a separate turn, which is exactly
+	// the failure the guard above is meant to prevent and could not see, because it
+	// looks for real newline characters and this is two ordinary ones. cmux offers no
+	// way to escape it. `terminal.input` takes the text raw and passes it through
+	// unread, so there is nothing to escape.
+	//
+	// Text and Enter are STILL one operation, which is the safety property that
+	// matters: no caller can reach a bare Enter, and a bare Enter is how you accept
+	// whatever prompt happens to be on screen — including a permission request.
+	return run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
 }
 
 /** Exposed for the tests: whether a key would be refused as an approval. */
