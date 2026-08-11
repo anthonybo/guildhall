@@ -18,6 +18,7 @@
  * said, filenames being edited and shell commands that were run.
  */
 import http from 'node:http'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -309,7 +310,28 @@ export function createServer(opts: ServeOptions) {
 			// passed through rather than re-encoded.
 			const out = await readGrid(target.workspace)
 			if (!out.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: out.error }))
-			return send(res, 200, MIME['.json'], out.text)
+			// Do not send a screen that has not changed.
+			//
+			// This grid is 68KB — measured, from a real cmux pane — and it went over the
+			// wire every two seconds whether or not a single character had moved. On a
+			// phone that is 34KB/s, continuously, to watch a session that is thinking.
+			//
+			// Worse than the bytes is what they occupy: at 40KB/s a read takes 2.1s
+			// against a 2s poll, so reads overlap, and a browser allows six connections
+			// to one host — one of which is permanently the event stream. Overlapping
+			// reads eat the rest, and then a send has nowhere to go and simply waits.
+			// That is the reported "I pressed Send and nothing happened".
+			//
+			// The same lesson as the stream's push guard, one layer down: compute it if
+			// you must, but do not SEND what nobody needs. An idle terminal now costs a
+			// couple of hundred bytes a poll instead of 68KB.
+			const tag = screenTag(out.text)
+			if (req.headers['if-none-match'] === tag) {
+				res.writeHead(304, { etag: tag, 'cache-control': 'no-store' }).end()
+				return
+			}
+			res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag }).end(out.text)
+			return
 		}
 
 		if (url.pathname === '/api/stream') {
@@ -337,6 +359,34 @@ export function createServer(opts: ServeOptions) {
 
 	server.on('close', () => clearInterval(timer))
 	return server
+}
+
+/**
+ * A fingerprint of what a screen will actually DRAW.
+ *
+ * Not a hash of the reply, which was the obvious thing and would never once have
+ * matched. Two reads of a terminal nobody has touched differ in exactly two
+ * fields — `render_revision` and `terminal_theme_revision`, cmux's own
+ * bookkeeping counters, which tick regardless — while every field the browser
+ * draws from is byte-identical. Hashing the envelope would have shipped a
+ * conditional request that could not fire, and looked like a saving.
+ *
+ * So the fingerprint covers exactly the six fields `paint()` reads and nothing
+ * else. Anything cmux adds later is ignored by default, which is the safe
+ * direction for a cache key: a new field that should have busted it costs a
+ * missed repaint on an otherwise identical screen, where including everything
+ * costs the whole optimisation.
+ *
+ * Falls back to the raw text if the reply is not what we expect. A screen that
+ * cannot be parsed is still a screen that must be delivered.
+ */
+export function screenTag(text: string) {
+	let key = text
+	try {
+		const g = JSON.parse(text).render_grid
+		if (g) key = JSON.stringify([g.rows, g.columns, g.styles, g.row_spans, g.terminal_foreground, g.terminal_background])
+	} catch {}
+	return `"${crypto.createHash('sha1').update(key).digest('base64url').slice(0, 22)}"`
 }
 
 /** The passcode screen, in whichever state applies. Never cached — a stale copy
