@@ -13,7 +13,7 @@ import type { Session } from '../src/data/types.ts'
 import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
-import { isOpen as terminalOpen, mountTerminal, show as showTerminal } from './terminal.ts'
+import { busy as terminalBusy, mountTerminal, show as showTerminal } from './terminal.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
 
@@ -94,13 +94,16 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 	// `web/` is served from disk with no-store, so a rebuild is live immediately —
 	// but only for a browser that asks again, and a tab left open on a phone never
 	// does. Without this, seeing a change meant walking to the machine, or at least
-	// remembering to pull-to-refresh. Deliberately not while the terminal or the
-	// press panel is open: a reload there would throw away a control token, a
-	// half-typed message, or a scroll position, and neither view is where you want
-	// the page to vanish from under you.
+	// remembering to pull-to-refresh. Held back only while there is something a
+	// reload would destroy: a message part-way through being typed, a send still in
+	// the air, or the press panel's scroll position. The control token is NOT one of
+	// those — it lives in sessionStorage and survives a reload, which is what the
+	// old guard got wrong when it held every update back for the whole time the
+	// terminal was open. That turned a terminal you could not close into one that
+	// also blocked the build which fixed closing it.
 	if (data.client) {
 		if (clientStamp === null) clientStamp = data.client
-		else if (data.client !== clientStamp && !terminalOpen() && !pressOpen()) return void location.reload()
+		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen()) return void location.reload()
 	}
 	sessions = data.sessions
 	setRoomSessions(sessions)

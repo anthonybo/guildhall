@@ -23,6 +23,7 @@
  * a terminal here, and a second name for one thing is only friction.
  */
 import { ago } from './dom.ts'
+import { lockPage, unlockPage } from './viewport.ts'
 
 type Item =
 	| { kind: 'commit'; repo: string; at: number; short: string; subject: string; author: string; files: number; insertions: number; deletions: number }
@@ -506,8 +507,10 @@ export function show() {
 	settled = false
 	el.hidden = false
 	// The page must not scroll behind a full-screen overlay: on a phone, dragging
-	// the feed would otherwise pull the list underneath it around as well.
-	document.body.classList.add('overflow-hidden')
+	// the feed would otherwise pull the list underneath it around as well. iOS
+	// ignores `overflow: hidden` here, which is why this is a shared helper and not
+	// a class — see viewport.ts.
+	lockPage('press')
 	// Paint the chrome BEFORE the fetch, never after.
 	//
 	// This used to clear the panel and then await the request, so between the tap
@@ -532,7 +535,7 @@ export function close() {
 	el.replaceChildren()
 	// or reopening would match the signature of a panel that no longer has any nodes
 	lastRender = ''
-	document.body.classList.remove('overflow-hidden')
+	unlockPage('press')
 	onClose()
 }
 

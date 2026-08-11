@@ -11,7 +11,8 @@
  * you are looking at it, and polling stops dead when the panel closes — which is
  * the behaviour a phone battery wants and a stream would not give.
  */
-import { linkParts } from './links.ts'
+import { type Grid, paint } from './grid.ts'
+import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
 
 const KEY = 'guildhall.control'
 const WRAP = 'guildhall.terminal.wrap'
@@ -50,66 +51,14 @@ let lastSig = ''
  */
 function repaintSoon() {
 	lastSig = ''
-}
-
-/**
- * Whether the panel is the whole screen rather than a box in the page.
- *
- * The same 880px the stylesheet uses, read here because the layout maths has to
- * agree with the layout — two breakpoints that drift are worse than one that is
- * slightly wrong.
- */
-const fullScreen = () => window.matchMedia('(max-width: 880px)').matches
-
-/**
- * Pin the full-screen panel to the VISUAL viewport, not the layout one.
- *
- * `position: fixed` with `inset-0` and `100dvh` anchors to the LAYOUT viewport. On
- * iOS that is the wrong box whenever the two disagree — which is most of the time
- * that matters: the on-screen keyboard shrinks the visual viewport and leaves the
- * layout viewport alone, and the URL bar sliding changes the offset between them.
- * `interactive-widget=resizes-content` is meant to fix exactly this and iOS does not
- * implement it, so the meta tag I added buys nothing here.
- *
- * The result was a panel taller than the screen, anchored above it: the input and
- * Send sat behind the keyboard, taps landed at coordinates that were no longer
- * where the buttons appeared to be, and nothing responded — including Close.
- * Rotating the phone forced a re-layout, which is why that got you out.
- *
- * visualViewport reports the box you can actually see and touch. Sizing to it is
- * the documented workaround for iOS, and it costs two listeners.
- */
-function trackViewport() {
-	const vv = window.visualViewport
-	if (!vv) return // no support: the CSS 100dvh fallback stands
-	if (!openId || !fullScreen()) {
-		el.style.height = ''
-		el.style.top = ''
-		el.style.bottom = ''
-		return
-	}
-	// ONLY override while something is actually eating the screen.
-	//
-	// Sizing to the visual viewport unconditionally was a regression: with no
-	// keyboard up, iOS still reports a visual viewport shorter than the layout one
-	// while the URL bar is showing, so the panel stopped filling the screen and left
-	// a strip at the bottom. `100dvh` in the stylesheet handles the ordinary case
-	// correctly and should be left to do it.
-	//
-	// 60px because the gap between the two viewports from browser chrome alone is
-	// tens of pixels, while a keyboard is hundreds. Anything in between is not worth
-	// moving the panel for.
-	const eaten = window.innerHeight - vv.height
-	if (eaten < 60 && vv.offsetTop < 2) {
-		el.style.height = ''
-		el.style.top = ''
-		el.style.bottom = ''
-		return
-	}
-	el.style.height = `${vv.height}px`
-	el.style.top = `${vv.offsetTop}px`
-	// `inset-0` sets bottom too, which would fight an explicit height
-	el.style.bottom = 'auto'
+	// The ETag has to go too, or the conditional request reintroduces exactly the
+	// bug this function exists to prevent, one layer further out. `lastSig` only
+	// gets consulted if a body arrives, and an unchanged screen no longer sends
+	// one — so on an idle session the server would answer 304, `poll()` would
+	// return before `paint()`, and Wrapped/Exact and rotation would go back to
+	// doing nothing until the session next printed. Forcing a repaint means asking
+	// for the bytes to repaint FROM.
+	lastTag = ''
 }
 
 let openId: string | null = null
@@ -118,7 +67,32 @@ let timer = 0
 let el: HTMLElement
 let onClose = () => {}
 
+/**
+ * Freeze the page behind the panel — but only when the panel is covering it.
+ *
+ * Full screen on a phone, nothing behind should move: a flick past the end of the
+ * scrollback would otherwise drag the session list around underneath, and on iOS
+ * the browser scrolls the page on its own initiative whenever an input takes
+ * focus, which is what put the terminal halfway down the screen.
+ *
+ * Above 880px the panel is INLINE — part of the page, below the list. Freezing
+ * the page there strands it: on a 779px window the panel starts at y=717 and its
+ * input sits at y=1377, off the bottom of a document that can no longer scroll.
+ * The old `overflow: hidden` had the same effect and the same excuse; it is a
+ * scroll lock for an overlay, and inline is not an overlay.
+ */
+function holdPage() {
+	if (fullScreen()) lockPage('terminal')
+	else unlockPage('terminal')
+}
+
 const token = () => sessionStorage.getItem(KEY) ?? ''
+
+/** The last screen's ETag, so an unchanged one is answered with 304 and no body.
+ *  Cleared when the panel closes, or reopening a session would ask about the
+ *  screen it was showing last time and be told, correctly, that nothing changed —
+ *  while the panel sat empty. */
+let lastTag = ''
 
 async function api(path: string, init: RequestInit = {}) {
 	// Every call gets a deadline. A fetch without one never settles — a phone
@@ -127,6 +101,10 @@ async function api(path: string, init: RequestInit = {}) {
 	// pressing it "does nothing" for the rest of the session.
 	try {
 		const res = await fetch(path, { ...init, signal: AbortSignal.timeout(20_000), headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
+		// 304 has no body by definition, and asking for one gets "unreadable reply" —
+		// an error message for the case where everything worked and nothing changed.
+		if (res.status === 304) return { status: 304 }
+		lastTag = res.headers.get('etag') ?? lastTag
 		const body = await res.json().catch(() => ({ error: 'unreadable reply' }))
 		return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean }
 	} catch (e) {
@@ -198,6 +176,66 @@ function askForToken(why: string) {
 }
 
 /**
+ * Wire a button so a finger cannot miss it, whatever the layout does next.
+ *
+ * A `click` is only delivered if the press and the release land on the same
+ * element — so anything that moves the button between them silently eats the tap,
+ * and the panel is full of things that move it: the keyboard closing, the
+ * viewport settling, a re-measure. That is a tap the person made, that the
+ * browser correctly discarded, and it reads exactly like a dead button.
+ *
+ * On touch, act on `pointerdown` instead. It fires before any of that can happen,
+ * and it bubbles to the panel's own re-measure AFTER this, so the press is
+ * already banked by the time anything moves. Mouse and keyboard keep `click`,
+ * where press-and-slide-off-to-cancel is a convention worth honouring and none of
+ * this applies.
+ */
+function tap(el: HTMLElement, run: () => void) {
+	let done = false
+	const once = () => {
+		if (done) return
+		done = true
+		run()
+	}
+	el.addEventListener('pointerdown', (e) => {
+		const pe = e as PointerEvent
+		if (pe.pointerType !== 'touch') return
+		// Acting on the press means this panel is GONE before the finger lifts, so the
+		// click that follows is delivered to whatever is underneath by then. Under
+		// Close is the page header, where the pressroom button sits at very nearly the
+		// same place — so closing the terminal opened pressroom, every time.
+		//
+		// Cancelling the press suppresses the compatibility mouse events it would
+		// otherwise synthesise, which is the documented way to stop that click.
+		pe.preventDefault()
+		eatNextClick()
+		once()
+	})
+	el.addEventListener('click', once)
+}
+
+/**
+ * Swallow one click, if the browser sends it anyway.
+ *
+ * Belt and braces behind `preventDefault` above: not every engine agrees about
+ * which compatibility events a cancelled `pointerdown` suppresses, and the cost of
+ * being wrong is a button the person never aimed at. Capture phase, so it is taken
+ * before it reaches whatever is now under the finger.
+ *
+ * Short-lived on purpose. The synthesised click follows the press within a few
+ * hundred milliseconds or never comes at all, and a listener left armed longer
+ * than that would eventually eat a tap somebody meant.
+ */
+function eatNextClick() {
+	const eat = (e: Event) => {
+		e.stopPropagation()
+		e.preventDefault()
+	}
+	addEventListener('click', eat, { capture: true, once: true })
+	setTimeout(() => removeEventListener('click', eat, { capture: true }), 400)
+}
+
+/**
  * The bar every state of this panel wears, including the ones that are not a
  * terminal.
  *
@@ -220,7 +258,7 @@ function titleBar(name: string, subtitle: string) {
 	x.title = 'Close the terminal (Esc)'
 	x.className =
 		'ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot'
-	x.addEventListener('click', close)
+	tap(x, close)
 	bar.append(title, live, x)
 	return bar
 }
@@ -281,7 +319,7 @@ function chrome(name: string) {
 	// where one sends and one closes is a mix-up waiting to happen. 5.41:1.
 	x.className =
 		'flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot'
-	x.addEventListener('click', close)
+	tap(x, close)
 	// Grouped so the pair stays right-aligned when the mode button is hidden — two
 	// separate `ml-auto`s would split the free space and strand them apart.
 	const tail = document.createElement('div')
@@ -324,14 +362,10 @@ function chrome(name: string) {
 		form.requestSubmit()
 	})
 	// Re-measure around the keyboard appearing, not only when visualViewport says so.
-	// Focus is the one signal that is guaranteed to arrive, the keyboard animates in
-	// over a few hundred milliseconds, and re-measuring a handful of times costs two
-	// style writes each. Belt and braces for the case this panel most needs to
-	// survive: typing on a phone.
-	for (const ev of ['focus', 'blur'] as const)
-		input.addEventListener(ev, () => {
-			for (const delay of [0, 150, 350, 600]) setTimeout(trackViewport, delay)
-		})
+	// Focus and blur are the two signals guaranteed to arrive; `settle` then watches
+	// until the animation each one starts has actually finished, which fixed sample
+	// points could not — see viewport.ts.
+	for (const ev of ['focus', 'blur'] as const) input.addEventListener(ev, settle)
 	// 16px, and not a pixel less. THIS is the zooming.
 	//
 	// iOS Safari zooms the whole page whenever you focus an input whose font-size is
@@ -351,9 +385,17 @@ function chrome(name: string) {
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
 		const text = input.value
-		if (!text.trim()) return
+		if (!text.trim() || sending) return
 		input.value = ''
+		// Say it is working, rather than going quiet.
+		//
+		// This used to only set `disabled`, which on a phone is indistinguishable from
+		// a button that did not register the tap — and the report was exactly that:
+		// "I clicked the send button and it did nothing". The word is the difference
+		// between waiting and being ignored.
+		sending = true
 		send.disabled = true
+		send.textContent = 'Sending…'
 		// `finally`, so a throw can never leave the button disabled forever. Combined
 		// with the deadline in api(), the worst case is now an error you can read
 		// rather than a control that has quietly stopped working.
@@ -361,23 +403,62 @@ function chrome(name: string) {
 		try {
 			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text }) })
 		} finally {
+			sending = false
 			send.disabled = false
+			send.textContent = 'Send'
 		}
 		if (r.error) {
 			pre.textContent = `${r.error}\n\n${pre.textContent}`
 			input.value = text // give it back rather than losing what was typed
 		}
 		refresh()
-		input.focus()
+		// NOT re-focused. This reply can arrive many seconds after the tap, by which
+		// time the keyboard has usually been dismissed — and focusing an input raises
+		// it again, from a timer, with no gesture behind it. That is what broke the
+		// view: the keyboard came back up unasked, moved the viewport under a panel
+		// that had already finished measuring, and left the terminal sitting halfway
+		// down the screen. Whoever still has the box focused keeps it; nobody has it
+		// forced back on them.
 	})
 
 	el.append(bar, pre, form)
 	return { pre, input }
 }
 
+/**
+ * A poll or a send is in flight. Neither may overlap itself, and a poll gives way
+ * to a send.
+ *
+ * The screen is 68KB — measured, not estimated — and it was fetched every two
+ * seconds by a bare `setInterval` with nothing checking whether the previous one
+ * had come back. On a desktop it always had. On a phone over a tailnet it often
+ * had not, so the polls stacked up, and a browser will only hold six connections
+ * to one host — one of which this client permanently spends on the event stream.
+ * Five outstanding screen reads is the whole budget, and the Send request then
+ * queues behind them rather than being sent.
+ *
+ * That is the delay: not the machine, which answers a send in about 200ms, but a
+ * request that had nowhere to go. Sitting on the disabled button for twenty
+ * seconds and then failing was the same bug reaching its deadline.
+ */
+let polling = false
+let sending = false
+
 async function refresh() {
+	if (!openId || polling || sending) return
+	polling = true
+	try {
+		await poll()
+	} finally {
+		polling = false
+	}
+}
+
+async function poll() {
 	if (!openId) return
-	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`)
+	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { 'if-none-match': lastTag } } : {})
+	// Nothing has changed, so there is nothing to draw and nothing was sent.
+	if (r.status === 304) return
 	if (r.status === 401) return askForToken('That password was not accepted.')
 	if (r.status === 403) return askForToken('Control is off, or this device is not on the machine or its tailnet.')
 	if (r.status === 429) return askForToken('Too many wrong tries — wait a moment.')
@@ -395,215 +476,11 @@ async function refresh() {
 	const sig = JSON.stringify(r.render_grid.row_spans)
 	if (sig === lastSig && pre.childElementCount) return
 	lastSig = sig
-	paint(pre, r.render_grid)
-}
-
-type Style = { foreground?: string; background?: string; bold?: boolean; faint?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean; inverse?: boolean; invisible?: boolean; id: number }
-type Span = { row: number; column: number; style_id: number; text: string }
-type Grid = { rows: number; columns: number; styles: Style[]; row_spans: Span[]; terminal_foreground?: string; terminal_background?: string }
-
-/**
- * Draw the grid.
- *
- * Spans carry a row, a column and a style id, so this places them rather than
- * concatenating them — which is what makes a status bar or a progress gauge land
- * where the terminal put it instead of drifting. Gaps between spans are padded
- * with spaces, because a terminal row is a fixed number of cells and a missing
- * one shifts everything after it.
- */
-/**
- * Width of one character as a fraction of the font size, measured once.
- *
- * Cached because it cannot change without the font changing, and measuring it
- * forces a layout — which is not something to do twice a second behind a poll.
- */
-/** Largest type this will use. Past about here a terminal stops reading as one. */
-const COMFORTABLE = 15
-
-/**
- * Smallest type this will shrink to before it gives up and scrolls sideways.
- *
- * A 193-column screen on a 390px phone wants about 3px to fit, which is not small
- * type so much as a texture; past the floor, scrolling is the better trade
- * because you can at least reach the words.
- *
- * 8 rather than 9 because a 70-column screen needs 8.68px to fit that same phone,
- * and a floor that rounded that up would make the common case scroll to save four
- * per cent of nothing.
- */
-const LEGIBLE = 8
-
-/**
- * Type size once the grid has been given up on and the rows are reflowed.
- *
- * No longer tied to the column count — the lines are wrapping anyway — so this is
- * just a readable size on a phone. 12px puts about 50 characters on a 390px
- * screen, which is a comfortable measure for prose.
- */
-const READABLE = 12
-
-/** The screen's own horizontal padding (px-3 both sides), which is not grid. */
-const PAD = 24
-
-/** One non-space character repeated a long way: a divider, not words. */
-const RULE = /^(\S)\1{7,}$/
-
-/**
- * Put `text` into `host`, turning any URLs into real links.
- *
- * Built as nodes rather than markup: this is whatever a session happened to
- * print, and it must never be able to become HTML. The anchor keeps the
- * terminal's own colour and adds an underline, so a link looks like a link
- * without losing whatever the colour already meant.
- */
-function fill(host: HTMLElement, text: string) {
-	const parts = linkParts(text)
-	// the overwhelmingly common case: no link, one text node, no allocation beyond it
-	if (parts.length === 1 && !parts[0]!.href) return void host.append(text)
-	for (const p of parts) {
-		if (!p.href) {
-			host.append(p.text)
-			continue
-		}
-		const a = document.createElement('a')
-		a.href = p.href
-		a.textContent = p.text
-		a.target = '_blank'
-		// noopener because the opened page must not get a handle on this one, and
-		// this page can type into somebody's terminal
-		a.rel = 'noopener noreferrer'
-		a.className = 'underline decoration-dotted underline-offset-2 hover:decoration-solid'
-		host.append(a)
-	}
-}
-
-let ratio = 0
-function advanceRatio(host: HTMLElement) {
-	if (ratio) return ratio
-	const probe = document.createElement('span')
-	probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font-size:100px'
-	probe.textContent = 'M'.repeat(100)
-	host.append(probe)
-	const w = probe.getBoundingClientRect().width
-	probe.remove()
-	// 100 chars at 100px, so the raw width is already the ratio x 10000
-	ratio = w > 0 ? w / 10000 : 0.6
-	return ratio
-}
-
-function paint(pre: HTMLElement, g: Grid) {
-	const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
-	const byId = new Map(g.styles.map((st) => [st.id, st]))
-	const rows = new Map<number, Span[]>()
-	for (const sp of g.row_spans) {
-		const list = rows.get(sp.row) ?? []
-		list.push(sp)
-		rows.set(sp.row, list)
-	}
-	pre.style.background = g.terminal_background ?? 'transparent'
-	pre.style.color = g.terminal_foreground ?? 'inherit'
-	// Fit the real column count to the real width. A terminal is only legible as a
-	// whole, so the type is sized to the grid rather than the grid to the type.
-	//
-	// The ratio is measured, not assumed: it varies by platform and by which font
-	// in the stack actually resolved, and getting it wrong either overflows the
-	// screen or leaves it in a pool of dead space. On this Mac the stack lands on
-	// ui-monospace at 0.602.
-	//
-	// Shrink to fit, never magnify to fill. These terminals run 70 to 193 columns
-	// depending on how the panes are split, so "use the whole window" and "stay
-	// readable" are the same instruction only when the grid happens to match the
-	// glass. Stretching a 70-column screen across 1541px needs 28px type, which is
-	// not full width so much as zoomed in — the columns to fill it do not exist.
-	// A wide grid shrinks until it fits; a narrow one stops at a comfortable size
-	// and is centred, which reads as deliberate rather than as a failure to fill.
-	//
-	// The panel is then narrowed to what the grid actually needs. Leaving it full
-	// width and centring the text only splits the dead space into two pools; a
-	// terminal window that is the size of its terminal reads as deliberate.
-	//
-	// The cap is cleared before measuring, or each pass would measure the width the
-	// previous pass constrained it to and walk the type down to nothing.
-	el.style.maxWidth = ''
-	el.style.marginInline = ''
-	const advance = advanceRatio(pre)
-	const usable = Math.max(200, pre.clientWidth - PAD)
-	const exact = Math.min(COMFORTABLE, usable / (g.columns * advance))
-	// Reflowing is only on the table when the grid cannot fit legibly, which on
-	// every desktop width is never — so this branch is, in practice, the phone.
-	const cramped = exact < LEGIBLE
-	const reflow = wrap && cramped
+	// The mode button is revealed from the measurement rather than from a
+	// breakpoint, so it appears exactly when it would do something — see paint().
 	const btn = document.getElementById('screenmode')
+	const cramped = paint(pre, r.render_grid, el, wrap)
 	if (btn) btn.hidden = !cramped
-	const size = reflow ? READABLE : Math.max(LEGIBLE, exact)
-	pre.style.fontSize = `${size.toFixed(2)}px`
-	pre.style.lineHeight = '1.25'
-	pre.style.whiteSpace = reflow ? 'pre-wrap' : 'pre'
-	// break-word, not break-all: a wrapped path or a long token should move whole
-	// rather than be sliced mid-word wherever the edge happens to fall
-	pre.style.overflowWrap = reflow ? 'break-word' : ''
-	// Take the whole height the window has left, rather than a flat 60vh. A cmux
-	// pane is 60 rows and 60vh of a laptop window showed 28 of them — less than
-	// half the session's screen on a view whose only job is to show that screen.
-	// Measured from the chrome around it rather than from the panel's own position,
-	// which moves as the page scrolls.
-	//
-	// Only when the panel is INLINE. Full screen on a phone it is a flex column, and
-	// `flex-1` already gives the screen exactly the space between the bar and the
-	// input — a maxHeight computed from `window.innerHeight` would fight that, and
-	// lose the moment the keyboard opens and changes the height it was computed from.
-	if (fullScreen()) {
-		pre.style.maxHeight = ''
-	} else {
-		const headerH = document.getElementById('bar')?.getBoundingClientRect().height ?? 0
-		const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH
-		const below = el.lastElementChild?.getBoundingClientRect().height ?? 0
-		pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
-	}
-	const needed = Math.ceil(g.columns * advance * size) + PAD + 2
-	if (needed < pre.clientWidth) {
-		el.style.maxWidth = `${needed}px`
-		el.style.marginInline = 'auto'
-	}
-
-	const out: HTMLElement[] = []
-	for (let r = 0; r < g.rows; r++) {
-		const line = document.createElement('div')
-		const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column)
-		let col = 0
-		for (const sp of spans) {
-			// Column gaps place a span where the terminal put it. Reflowed, they place
-			// nothing — the row is no longer a row — and a status bar's 40-space gaps
-			// would wrap into blank lines, so they collapse to a readable separation.
-			if (sp.column > col) line.append(reflow ? '  '.slice(0, Math.min(2, sp.column - col)) : ' '.repeat(sp.column - col))
-			const st = byId.get(sp.style_id)
-			const el = document.createElement('span')
-			// inverse swaps them, which is how a selected row or a cursor is drawn
-			const fg = st?.inverse ? (st?.background ?? g.terminal_background) : st?.foreground
-			const bg = st?.inverse ? (st?.foreground ?? g.terminal_foreground) : st?.background
-			if (fg) el.style.color = fg
-			if (bg && bg !== g.terminal_background) el.style.background = bg
-			if (st?.bold) el.style.fontWeight = '700'
-			if (st?.faint) el.style.opacity = '0.7'
-			if (st?.italic) el.style.fontStyle = 'italic'
-			if (st?.underline || st?.strikethrough) el.style.textDecoration = `${st.underline ? 'underline' : ''} ${st.strikethrough ? 'line-through' : ''}`.trim()
-			if (st?.invisible) el.style.visibility = 'hidden'
-			// A divider is one character repeated across the whole terminal, and
-			// reflowed it becomes four wrapped lines of dashes where the terminal drew
-			// one — so a rule is clipped to the width instead of wrapped. It reads as
-			// the line it was meant to be, and costs one row rather than four.
-			if (reflow && RULE.test(sp.text)) el.style.cssText += ';display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom'
-			// nodes, never innerHTML: this is whatever the terminal is showing, and it
-			// must not be able to become markup
-			fill(el, sp.text)
-			line.append(el)
-			col = sp.column + [...sp.text].length
-		}
-		if (!spans.length) line.append('\u00a0')
-		out.push(line)
-	}
-	pre.replaceChildren(...out)
-	if (atBottom) pre.scrollTop = pre.scrollHeight
 }
 
 /** Open the terminal for a session. */
@@ -611,13 +488,11 @@ export function show(id: string, name: string) {
 	openId = id
 	openName = name
 	el.hidden = false
-	// Nothing scrolls behind a full-screen overlay, or a flick past the end of the
-	// scrollback drags the session list around underneath it.
-	document.body.classList.add('overflow-hidden')
+	holdPage()
 	// Sized BEFORE the branch, not after: the password form is full screen too, and
 	// putting this after the early return left that state anchored to the layout
 	// viewport — the one state where you most need the input to be reachable.
-	trackViewport()
+	measure()
 	if (!token()) return askForToken('This is behind a separate password from the passcode.')
 	const { input } = chrome(name)
 	refresh()
@@ -631,6 +506,7 @@ export function show(id: string, name: string) {
 
 export function close() {
 	openId = null
+	lastTag = ''
 	clearInterval(timer)
 	timer = 0
 	el.hidden = true
@@ -641,7 +517,10 @@ export function close() {
 	el.style.height = ''
 	el.style.top = ''
 	el.style.bottom = ''
-	document.body.classList.remove('overflow-hidden')
+	// and the keyboard offset, or the panel reopens shifted down the screen with its
+	// hit region somewhere else again
+	el.style.transform = ''
+	unlockPage('terminal')
 	onClose()
 }
 
@@ -651,23 +530,45 @@ export function mountTerminal(host: HTMLElement, closed: () => void) {
 	document.addEventListener('keydown', (e) => {
 		if (e.key === 'Escape' && openId) close()
 	})
+	watch(host, isOpen)
 	// A rotation changes the width the type is sized from, and the grid does not
 	// change at all — so without this the screen keeps the old size until the session
 	// happens to print. Debounced because a rotation fires this repeatedly.
 	let t = 0
 	addEventListener('resize', () => {
 		if (!openId) return
-		trackViewport()
+		// A window dragged across 880px turns an overlay into an inline panel and back,
+		// so the hold has to be re-decided rather than kept from whichever side it was
+		// opened on — otherwise widening the window leaves the page frozen with a panel
+		// sitting in it that is no longer covering anything.
+		holdPage()
+		settle()
 		clearTimeout(t)
 		t = setTimeout(() => {
 			repaintSoon()
 			refresh()
 		}, 120)
 	})
-	// The keyboard opening fires these and NOT `resize` on iOS, which is the whole
-	// point: without them the panel never learns the screen got shorter.
-	window.visualViewport?.addEventListener('resize', trackViewport)
-	window.visualViewport?.addEventListener('scroll', trackViewport)
 }
 
 export const isOpen = () => openId !== null
+
+/**
+ * Whether reloading the page right now would throw away something you cannot get
+ * back: a half-typed message, or a send still in the air.
+ *
+ * The page reloads itself when a new build lands, and that was suppressed for the
+ * whole time this panel was open. The reasoning was that a reload costs the
+ * control token — it does not, that lives in sessionStorage and survives — and
+ * what it actually costs is whatever you had typed. So the guard is narrowed to
+ * exactly that.
+ *
+ * The trap this closes is a nasty one: a terminal you cannot close is a terminal
+ * that blocks the update containing the fix for not being able to close it. Being
+ * stuck was itself what kept you stuck.
+ */
+export const busy = () => {
+	if (!openId) return false
+	if (sending) return true
+	return !!(document.getElementById('ask') as HTMLInputElement | null)?.value.trim()
+}

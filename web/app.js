@@ -276,16 +276,16 @@ function paintList(list) {
   function row(s) {
     const look = LOOK[s.state];
     const li = document.createElement("li");
-    const busy = s.state === "working" || s.state === "shell";
+    const busy2 = s.state === "working" || s.state === "shell";
     const attn = needsAttention(s);
     li.className = [
       "row group grid cursor-pointer gap-x-2.5 gap-y-0.5 rounded-md border border-l-5 border-(--state) p-2.5 tint-panel",
       '[grid-template-columns:auto_1fr_auto_auto] [grid-template-areas:"lv_proj_meta_term""lv_doing_doing_term""detail_detail_detail_detail"]',
       "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-(--state)",
       attn ? "attn" : "border-state-soft",
-      busy ? "sweep" : ""
+      busy2 ? "sweep" : ""
     ].join(" ");
-    if (busy) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
+    if (busy2) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
     const card = cardOf(s.state);
     li.style.setProperty("--state", rgb(look.color));
     li.style.setProperty("--ink", paint(look.color, card));
@@ -1045,7 +1045,7 @@ var RoomBase = class {
     if (!this.isWalkable(ec, er, own)) return [];
     const key = (c, r) => `${c},${r}`;
     const prev = /* @__PURE__ */ new Map();
-    const seen = /* @__PURE__ */ new Set([key(sc, sr)]);
+    const seen2 = /* @__PURE__ */ new Set([key(sc, sr)]);
     let queue = [{ col: sc, row: sr }];
     while (queue.length) {
       const next = [];
@@ -1059,8 +1059,8 @@ var RoomBase = class {
           const c = cur.col + dc;
           const r = cur.row + dr;
           const k = key(c, r);
-          if (seen.has(k) || !this.isWalkable(c, r, own)) continue;
-          seen.add(k);
+          if (seen2.has(k) || !this.isWalkable(c, r, own)) continue;
+          seen2.add(k);
           prev.set(k, key(cur.col, cur.row));
           if (c === ec && r === er) {
             const out = [];
@@ -1279,8 +1279,8 @@ var SimBase = class extends RoomBase {
    * once, which is invisible next to the poll that produced the sessions.
    */
   settle(sessions3, seconds = 20) {
-    const step = 1 / 30;
-    for (let i = 0; i < Math.round(seconds / step); i++) this.update(step, sessions3);
+    const step2 = 1 / 30;
+    for (let i = 0; i < Math.round(seconds / step2); i++) this.update(step2, sessions3);
   }
   update(dt, sessions3) {
     this.ballT += dt * 1.6;
@@ -1709,9 +1709,9 @@ var Office = class extends SimBase {
       const seated = ch.state === "type" || ch.state === "act" && this.postureOf(ch) === "sit";
       const pose = seated ? "typing" : "walk";
       const rally = ch.activity?.kind === "pingpong";
-      const step = seated || rally || ch.state === "walk" ? ch.frame : 1;
+      const step2 = seated || rally || ch.state === "walk" ? ch.frame : 1;
       const y = Math.round(ch.y - CHAR_H + (seated ? SIT_SINK : 0));
-      out.push({ s, ch, facing: ch.dir, pose, step, x: Math.round(ch.x - CHAR_W / 2), y: y - (y & 1) });
+      out.push({ s, ch, facing: ch.dir, pose, step: step2, x: Math.round(ch.x - CHAR_W / 2), y: y - (y & 1) });
     }
     return out;
   }
@@ -1793,10 +1793,10 @@ var Office = class extends SimBase {
       const want = prefix.length + 27;
       const least = prefix.length + 6;
       const room = ([r, c]) => {
-        const step = c < p.x ? -1 : 1;
+        const step2 = c < p.x ? -1 : 1;
         let n2 = 0;
         while (n2 < want) {
-          const x = c + step * (n2 + 1);
+          const x = c + step2 * (n2 + 1);
           if (x < 0 || x >= cv2.w || this.blocked(r, x, 1, taken)) break;
           n2++;
         }
@@ -1916,14 +1916,14 @@ function pinBadge(g, colour) {
   return { w: g.w, h: g.h, grid };
 }
 var BLANK = { w: FRAME_W, h: FRAME_H, grid: Array.from({ length: FRAME_H }, () => new Array(FRAME_W).fill(null)) };
-function frameOf(palette, hueShift, facing, pose, step, badge2) {
+function frameOf(palette, hueShift, facing, pose, step2, badge2) {
   if (!sheets.length) return BLANK;
-  const key = `${palette}:${hueShift}:${facing}:${pose}:${step}:${badge2?.join("") ?? ""}`;
+  const key = `${palette}:${hueShift}:${facing}:${pose}:${step2}:${badge2?.join("") ?? ""}`;
   const hit = cache2.get(key);
   if (hit) return hit;
   const sheet = sheets[palette % sheets.length];
   const cycle = POSE_FRAMES[pose];
-  const frame2 = cycle[step % cycle.length];
+  const frame2 = cycle[step2 % cycle.length];
   const rowIdx = ROWS.indexOf(facing === "left" ? "right" : facing);
   let g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame2, facing === "left"), hueShift);
   if (badge2) g = pinBadge(g, badge2);
@@ -2663,6 +2663,185 @@ function linkParts(text) {
   return out;
 }
 
+// web/viewport.ts
+var fullScreen = () => window.matchMedia("(width < 880px)").matches;
+var KEYBOARD = 60;
+var savedScroll = 0;
+var holders = /* @__PURE__ */ new Set();
+function lockPage(who) {
+  if (!holders.size) {
+    savedScroll = window.scrollY;
+    const s = document.body.style;
+    s.position = "fixed";
+    s.top = `${-savedScroll}px`;
+    s.left = "0";
+    s.right = "0";
+    s.width = "100%";
+  }
+  holders.add(who);
+}
+function unlockPage(who) {
+  if (!holders.delete(who) || holders.size) return;
+  const s = document.body.style;
+  s.position = "";
+  s.top = "";
+  s.left = "";
+  s.right = "";
+  s.width = "";
+  window.scrollTo(0, savedScroll);
+}
+var host = null;
+var showing = () => false;
+function release() {
+  if (!host) return;
+  host.style.height = "";
+  host.style.top = "";
+  host.style.bottom = "";
+  host.style.transform = "";
+}
+function measure() {
+  if (!host) return;
+  const vv = window.visualViewport;
+  if (!vv || !showing() || !fullScreen()) return release();
+  if (window.innerHeight - vv.height < KEYBOARD) return release();
+  host.style.height = `${vv.height}px`;
+  host.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  host.style.bottom = "auto";
+}
+var raf = 0;
+var stable = 0;
+var seen = "";
+var until = 0;
+var STEADY = 3;
+var LIMIT = 1200;
+function settle() {
+  until = performance.now() + LIMIT;
+  stable = 0;
+  if (!raf) raf = requestAnimationFrame(step);
+}
+function step() {
+  raf = 0;
+  const vv = window.visualViewport;
+  const now = vv ? `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}` : "";
+  measure();
+  if (now === seen) stable++;
+  else {
+    stable = 0;
+    seen = now;
+  }
+  if (stable >= STEADY || performance.now() > until) return;
+  raf = requestAnimationFrame(step);
+}
+function watch(el3, open2) {
+  host = el3;
+  showing = open2;
+  el3.addEventListener("pointerdown", measure, { passive: true });
+  window.visualViewport?.addEventListener("resize", settle);
+  window.visualViewport?.addEventListener("scroll", measure);
+}
+
+// web/grid.ts
+var COMFORTABLE = 15;
+var LEGIBLE = 8;
+var READABLE = 12;
+var PAD = 24;
+var RULE = /^(\S)\1{7,}$/;
+function fill(host2, text) {
+  const parts = linkParts(text);
+  if (parts.length === 1 && !parts[0].href) return void host2.append(text);
+  for (const p of parts) {
+    if (!p.href) {
+      host2.append(p.text);
+      continue;
+    }
+    const a = document.createElement("a");
+    a.href = p.href;
+    a.textContent = p.text;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "underline decoration-dotted underline-offset-2 hover:decoration-solid";
+    host2.append(a);
+  }
+}
+var ratio = 0;
+function advanceRatio(host2) {
+  if (ratio) return ratio;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:100px";
+  probe.textContent = "M".repeat(100);
+  host2.append(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  ratio = w > 0 ? w / 1e4 : 0.6;
+  return ratio;
+}
+function paint2(pre, g, panel, wrap2) {
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+  const byId = new Map(g.styles.map((st) => [st.id, st]));
+  const rows = /* @__PURE__ */ new Map();
+  for (const sp of g.row_spans) {
+    const list = rows.get(sp.row) ?? [];
+    list.push(sp);
+    rows.set(sp.row, list);
+  }
+  pre.style.background = g.terminal_background ?? "transparent";
+  pre.style.color = g.terminal_foreground ?? "inherit";
+  panel.style.maxWidth = "";
+  panel.style.marginInline = "";
+  const advance = advanceRatio(pre);
+  const usable = Math.max(200, pre.clientWidth - PAD);
+  const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
+  const cramped = exact < LEGIBLE;
+  const reflow = wrap2 && cramped;
+  const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
+  pre.style.fontSize = `${size.toFixed(2)}px`;
+  pre.style.lineHeight = "1.25";
+  pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
+  pre.style.overflowWrap = reflow ? "break-word" : "";
+  if (fullScreen()) {
+    pre.style.maxHeight = "";
+  } else {
+    const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
+    const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
+    const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0;
+    pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
+  }
+  const needed = Math.ceil(g.columns * advance * size) + PAD + 2;
+  if (needed < pre.clientWidth) {
+    panel.style.maxWidth = `${needed}px`;
+    panel.style.marginInline = "auto";
+  }
+  const out = [];
+  for (let r = 0; r < g.rows; r++) {
+    const line = document.createElement("div");
+    const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
+    let col = 0;
+    for (const sp of spans) {
+      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
+      const st = byId.get(sp.style_id);
+      const cell = document.createElement("span");
+      const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
+      const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
+      if (fg) cell.style.color = fg;
+      if (bg && bg !== g.terminal_background) cell.style.background = bg;
+      if (st?.bold) cell.style.fontWeight = "700";
+      if (st?.faint) cell.style.opacity = "0.7";
+      if (st?.italic) cell.style.fontStyle = "italic";
+      if (st?.underline || st?.strikethrough) cell.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
+      if (st?.invisible) cell.style.visibility = "hidden";
+      if (reflow && RULE.test(sp.text)) cell.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
+      fill(cell, sp.text);
+      line.append(cell);
+      col = sp.column + [...sp.text].length;
+    }
+    if (!spans.length) line.append("\xA0");
+    out.push(line);
+  }
+  pre.replaceChildren(...out);
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+  return cramped;
+}
+
 // web/terminal.ts
 var KEY2 = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
@@ -2670,27 +2849,7 @@ var wrap = localStorage.getItem(WRAP) !== "exact";
 var lastSig = "";
 function repaintSoon() {
   lastSig = "";
-}
-var fullScreen = () => window.matchMedia("(max-width: 880px)").matches;
-function trackViewport() {
-  const vv = window.visualViewport;
-  if (!vv) return;
-  if (!openId || !fullScreen()) {
-    el.style.height = "";
-    el.style.top = "";
-    el.style.bottom = "";
-    return;
-  }
-  const eaten = window.innerHeight - vv.height;
-  if (eaten < 60 && vv.offsetTop < 2) {
-    el.style.height = "";
-    el.style.top = "";
-    el.style.bottom = "";
-    return;
-  }
-  el.style.height = `${vv.height}px`;
-  el.style.top = `${vv.offsetTop}px`;
-  el.style.bottom = "auto";
+  lastTag = "";
 }
 var openId = null;
 var openName = "";
@@ -2698,10 +2857,17 @@ var timer = 0;
 var el;
 var onClose = () => {
 };
+function holdPage() {
+  if (fullScreen()) lockPage("terminal");
+  else unlockPage("terminal");
+}
 var token = () => sessionStorage.getItem(KEY2) ?? "";
+var lastTag = "";
 async function api(path, init = {}) {
   try {
     const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+    if (res.status === 304) return { status: 304 };
+    lastTag = res.headers.get("etag") ?? lastTag;
     const body = await res.json().catch(() => ({ error: "unreadable reply" }));
     return { status: res.status, ...body };
   } catch (e) {
@@ -2744,6 +2910,30 @@ function askForToken(why) {
   el.append(wrap2);
   input.focus();
 }
+function tap(el3, run) {
+  let done = false;
+  const once = () => {
+    if (done) return;
+    done = true;
+    run();
+  };
+  el3.addEventListener("pointerdown", (e) => {
+    const pe = e;
+    if (pe.pointerType !== "touch") return;
+    pe.preventDefault();
+    eatNextClick();
+    once();
+  });
+  el3.addEventListener("click", once);
+}
+function eatNextClick() {
+  const eat = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  addEventListener("click", eat, { capture: true, once: true });
+  setTimeout(() => removeEventListener("click", eat, { capture: true }), 400);
+}
 function titleBar(name, subtitle) {
   const bar2 = document.createElement("div");
   bar2.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
@@ -2758,7 +2948,7 @@ function titleBar(name, subtitle) {
   x.textContent = "\u2715 Close";
   x.title = "Close the terminal (Esc)";
   x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  x.addEventListener("click", close);
+  tap(x, close);
   bar2.append(title, live2, x);
   return bar2;
 }
@@ -2795,7 +2985,7 @@ function chrome(name) {
   x.textContent = "\u2715 Close";
   x.title = "Close the terminal (Esc)";
   x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  x.addEventListener("click", close);
+  tap(x, close);
   const tail = document.createElement("div");
   tail.className = "ml-auto flex items-center gap-2";
   tail.append(mode, x);
@@ -2816,10 +3006,7 @@ function chrome(name) {
     e.preventDefault();
     form.requestSubmit();
   });
-  for (const ev of ["focus", "blur"])
-    input.addEventListener(ev, () => {
-      for (const delay of [0, 150, 350, 600]) setTimeout(trackViewport, delay);
-    });
+  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
   input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
   const send = document.createElement("button");
   send.type = "submit";
@@ -2829,14 +3016,18 @@ function chrome(name) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
-    if (!text.trim()) return;
+    if (!text.trim() || sending) return;
     input.value = "";
+    sending = true;
     send.disabled = true;
+    send.textContent = "Sending\u2026";
     let r;
     try {
       r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
     } finally {
+      sending = false;
       send.disabled = false;
+      send.textContent = "Send";
     }
     if (r.error) {
       pre.textContent = `${r.error}
@@ -2845,14 +3036,25 @@ ${pre.textContent}`;
       input.value = text;
     }
     refresh();
-    input.focus();
   });
   el.append(bar2, pre, form);
   return { pre, input };
 }
+var polling = false;
+var sending = false;
 async function refresh() {
+  if (!openId || polling || sending) return;
+  polling = true;
+  try {
+    await poll();
+  } finally {
+    polling = false;
+  }
+}
+async function poll() {
   if (!openId) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`);
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  if (r.status === 304) return;
   if (r.status === 401) return askForToken("That password was not accepted.");
   if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
   if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
@@ -2863,115 +3065,16 @@ async function refresh() {
   const sig = JSON.stringify(r.render_grid.row_spans);
   if (sig === lastSig && pre.childElementCount) return;
   lastSig = sig;
-  paint2(pre, r.render_grid);
-}
-var COMFORTABLE = 15;
-var LEGIBLE = 8;
-var READABLE = 12;
-var PAD = 24;
-var RULE = /^(\S)\1{7,}$/;
-function fill(host, text) {
-  const parts = linkParts(text);
-  if (parts.length === 1 && !parts[0].href) return void host.append(text);
-  for (const p of parts) {
-    if (!p.href) {
-      host.append(p.text);
-      continue;
-    }
-    const a = document.createElement("a");
-    a.href = p.href;
-    a.textContent = p.text;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "underline decoration-dotted underline-offset-2 hover:decoration-solid";
-    host.append(a);
-  }
-}
-var ratio = 0;
-function advanceRatio(host) {
-  if (ratio) return ratio;
-  const probe = document.createElement("span");
-  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:100px";
-  probe.textContent = "M".repeat(100);
-  host.append(probe);
-  const w = probe.getBoundingClientRect().width;
-  probe.remove();
-  ratio = w > 0 ? w / 1e4 : 0.6;
-  return ratio;
-}
-function paint2(pre, g) {
-  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
-  const byId = new Map(g.styles.map((st) => [st.id, st]));
-  const rows = /* @__PURE__ */ new Map();
-  for (const sp of g.row_spans) {
-    const list = rows.get(sp.row) ?? [];
-    list.push(sp);
-    rows.set(sp.row, list);
-  }
-  pre.style.background = g.terminal_background ?? "transparent";
-  pre.style.color = g.terminal_foreground ?? "inherit";
-  el.style.maxWidth = "";
-  el.style.marginInline = "";
-  const advance = advanceRatio(pre);
-  const usable = Math.max(200, pre.clientWidth - PAD);
-  const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
-  const cramped = exact < LEGIBLE;
-  const reflow = wrap && cramped;
   const btn = document.getElementById("screenmode");
+  const cramped = paint2(pre, r.render_grid, el, wrap);
   if (btn) btn.hidden = !cramped;
-  const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
-  pre.style.fontSize = `${size.toFixed(2)}px`;
-  pre.style.lineHeight = "1.25";
-  pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
-  pre.style.overflowWrap = reflow ? "break-word" : "";
-  if (fullScreen()) {
-    pre.style.maxHeight = "";
-  } else {
-    const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
-    const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
-    const below = el.lastElementChild?.getBoundingClientRect().height ?? 0;
-    pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
-  }
-  const needed = Math.ceil(g.columns * advance * size) + PAD + 2;
-  if (needed < pre.clientWidth) {
-    el.style.maxWidth = `${needed}px`;
-    el.style.marginInline = "auto";
-  }
-  const out = [];
-  for (let r = 0; r < g.rows; r++) {
-    const line = document.createElement("div");
-    const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
-    let col = 0;
-    for (const sp of spans) {
-      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
-      const st = byId.get(sp.style_id);
-      const el3 = document.createElement("span");
-      const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
-      const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
-      if (fg) el3.style.color = fg;
-      if (bg && bg !== g.terminal_background) el3.style.background = bg;
-      if (st?.bold) el3.style.fontWeight = "700";
-      if (st?.faint) el3.style.opacity = "0.7";
-      if (st?.italic) el3.style.fontStyle = "italic";
-      if (st?.underline || st?.strikethrough) el3.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
-      if (st?.invisible) el3.style.visibility = "hidden";
-      if (reflow && RULE.test(sp.text)) el3.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
-      fill(el3, sp.text);
-      line.append(el3);
-      col = sp.column + [...sp.text].length;
-    }
-    if (!spans.length) line.append("\xA0");
-    out.push(line);
-  }
-  pre.replaceChildren(...out);
-  if (atBottom) pre.scrollTop = pre.scrollHeight;
 }
 function show(id, name) {
   openId = id;
   openName = name;
   el.hidden = false;
-  document.body.classList.add("overflow-hidden");
-  trackViewport();
+  holdPage();
+  measure();
   if (!token()) return askForToken("This is behind a separate password from the passcode.");
   const { input } = chrome(name);
   refresh();
@@ -2981,6 +3084,7 @@ function show(id, name) {
 }
 function close() {
   openId = null;
+  lastTag = "";
   clearInterval(timer);
   timer = 0;
   el.hidden = true;
@@ -2990,29 +3094,35 @@ function close() {
   el.style.height = "";
   el.style.top = "";
   el.style.bottom = "";
-  document.body.classList.remove("overflow-hidden");
+  el.style.transform = "";
+  unlockPage("terminal");
   onClose();
 }
-function mountTerminal(host, closed) {
-  el = host;
+function mountTerminal(host2, closed) {
+  el = host2;
   onClose = closed;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && openId) close();
   });
+  watch(host2, isOpen);
   let t = 0;
   addEventListener("resize", () => {
     if (!openId) return;
-    trackViewport();
+    holdPage();
+    settle();
     clearTimeout(t);
     t = setTimeout(() => {
       repaintSoon();
       refresh();
     }, 120);
   });
-  window.visualViewport?.addEventListener("resize", trackViewport);
-  window.visualViewport?.addEventListener("scroll", trackViewport);
 }
 var isOpen = () => openId !== null;
+var busy = () => {
+  if (!openId) return false;
+  if (sending) return true;
+  return !!document.getElementById("ask")?.value.trim();
+};
 
 // web/press.ts
 var DEPLOYS = "guildhall.press.deploys";
@@ -3210,14 +3320,14 @@ function render(snap) {
       note.textContent = snap.stale;
       body.append(note);
     }
-    const busy = snap.stale ? [] : snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
+    const busy2 = snap.stale ? [] : snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
     const quiet = snap.stale ? [] : snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
     if (!snap.stale) {
-      body.append(heading("unpushed & dirty", busy.length));
-      if (busy.length) {
+      body.append(heading("unpushed & dirty", busy2.length));
+      if (busy2.length) {
         const ul = document.createElement("ul");
         ul.className = "m-0 list-none p-0";
-        for (const r of busy) ul.append(repoRow(r));
+        for (const r of busy2) ul.append(repoRow(r));
         body.append(ul);
       } else {
         const p = document.createElement("p");
@@ -3308,7 +3418,7 @@ function show2() {
   open = true;
   settled2 = false;
   el2.hidden = false;
-  document.body.classList.add("overflow-hidden");
+  lockPage("press");
   render({ at: Date.now(), items: [], repos: [], local: !deploys });
   refresh2();
   clearInterval(timer2);
@@ -3321,12 +3431,12 @@ function close2() {
   el2.hidden = true;
   el2.replaceChildren();
   lastRender = "";
-  document.body.classList.remove("overflow-hidden");
+  unlockPage("press");
   onClose2();
 }
 var isOpen2 = () => open;
-function mountPress(host, closed) {
-  el2 = host;
+function mountPress(host2, closed) {
+  el2 = host2;
   onClose2 = closed;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && open) close2();
@@ -3375,7 +3485,7 @@ var clientStamp = null;
 function apply(data) {
   if (data.client) {
     if (clientStamp === null) clientStamp = data.client;
-    else if (data.client !== clientStamp && !isOpen() && !isOpen2()) return void location.reload();
+    else if (data.client !== clientStamp && !busy() && !isOpen2()) return void location.reload();
   }
   sessions2 = data.sessions;
   setRoomSessions(sessions2);
