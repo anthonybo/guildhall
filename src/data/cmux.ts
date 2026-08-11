@@ -30,9 +30,26 @@ export function cmuxMap() {
 	}
 	for (const win of st.windows ?? []) {
 		;(win.tabManager?.workspaces ?? []).forEach((ws: any, i: number) => {
+			const at = { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator }
 			for (const pn of ws.panels ?? []) {
-				const agent = pn.terminal?.agent
-				if (agent?.sessionId) m.set(agent.sessionId, { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator })
+				const t = pn.terminal
+				// `terminal.agent` is not the panel's identity, it is its *attachment*:
+				// cmux drops the whole object once its hooks stop hearing from the agent
+				// (`wasAgentRunning: false`) even though the process is alive and the tab
+				// is right there. Measured on this machine: of 13 panels holding an agent,
+				// the 11 with `wasAgentRunning: true` had both fields and the 2 with it
+				// false had only `resumeBinding` — one of them a busy `claude --resume`
+				// with a live pid. Reading `agent` alone silently lost those two tabs.
+				//
+				// `resumeBinding.checkpointId` is the id cmux itself would resume, and in
+				// all 11 panels carrying both it was byte-identical to `agent.sessionId`,
+				// so it is the same fact with a longer shelf life. `agent` still wins when
+				// present: a binding outlives the attachment, so it is the staler of the
+				// two if a session ever moves panels.
+				const live = t?.agent?.sessionId
+				const resumable = t?.resumeBinding?.checkpointId
+				if (live) m.set(live, at)
+				else if (resumable && !m.has(resumable)) m.set(resumable, at)
 			}
 		})
 	}
