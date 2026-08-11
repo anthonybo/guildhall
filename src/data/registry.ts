@@ -13,6 +13,61 @@ import { SESS_DIR } from './paths.ts'
 import { agentSessions, refreshAgents } from './agents.ts'
 import type { Registry } from './types.ts'
 
+/**
+ * Job ids already known to own real work, so the check below runs once per job
+ * instead of once per poll. A job never reverts to being a spare — claiming one
+ * rewrites its registry entry with a fresh job id — so caching only the positive
+ * answer cannot go stale.
+ */
+const startedJobs = new Set<string>()
+
+/**
+ * A pre-warmed background process that no job has claimed yet.
+ *
+ * The daemon keeps a spare Claude Code running so that starting a background job
+ * feels instant. On this machine that spare writes a registry entry that looks
+ * exactly like a session's — a pid, a sessionId, a cwd, `kind: "bg"` — but nobody
+ * asked for it, it holds no conversation, and `claude agents --json` does not list
+ * it. Left in, it is a permanently idle row named after its own job id, sitting in
+ * whichever project the spare happened to inherit.
+ *
+ * **Not argv.** A spare that HAS been claimed still shows `claude bg-spare …` as
+ * its command line for the rest of its life, because argv is fixed at exec. While
+ * this was written the busiest session in the room was running under exactly that
+ * command line — a real job the daemon logged as `bg claimed-spare 6bb3d548` —
+ * next to a genuine spare whose argv looked like an ordinary session. Sniffing the
+ * command line gets both of them backwards.
+ *
+ * The signal used instead is the job directory Claude Code writes per background
+ * job: `~/.claude/jobs/<jobId>/` gains `timeline.jsonl` and `state.json` once the
+ * job owns work, and a spare's gains neither. Checked against the supported
+ * lookup on this machine: the jobs with those files are exactly the ones
+ * `claude agents --json` reports, and the one without is exactly the one it omits.
+ *
+ * Every clause has to agree before anything is dropped, because a missing session
+ * is invisible while a spurious one is merely annoying. A job that has been named,
+ * or is doing anything at all, is kept whatever is on disk. That leaves one gap,
+ * deliberately: for the few seconds between a job being spawned and its timeline
+ * appearing (measured at 9s here) a brand-new job is indistinguishable from a
+ * spare by any signal that exists, so it stays hidden until it writes something.
+ * It then appears and never disappears again.
+ */
+function isSpare(d: Registry, jobsDir: string): boolean {
+	if (d.kind !== 'bg' || !d.jobId) return false
+	if (startedJobs.has(d.jobId)) return false
+	const known = () => {
+		startedJobs.add(d.jobId as string)
+		return false
+	}
+	// a job is auto-named within a turn or two; a spare answers to its own id forever
+	if (d.name && d.name !== d.jobId) return known()
+	// and a spare has nothing to be busy about
+	if (d.status && d.status !== 'idle') return known()
+	const dir = path.join(jobsDir, d.jobId)
+	if (fs.existsSync(path.join(dir, 'timeline.jsonl')) || fs.existsSync(path.join(dir, 'state.json'))) return known()
+	return true
+}
+
 /** EPERM means the process exists but belongs to someone else — still alive. */
 const isAlive = (pid: number) => {
 	try {
@@ -90,11 +145,14 @@ function fromFiles(dir: string): Registry[] {
 		return []
 	}
 	const found: Registry[] = []
+	// jobs sit beside sessions in the same tree, so a test can point both at a fixture
+	const jobsDir = path.join(dir, '..', 'jobs')
 	for (const f of files) {
 		if (!/^\d+\.json$/.test(f)) continue
 		try {
 			const d = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')) as Registry
-			if (d.pid && isAlive(d.pid)) found.push(d)
+			// the supported lookup already omits spares, so this is the file path's job alone
+			if (d.pid && !isSpare(d, jobsDir) && isAlive(d.pid)) found.push(d)
 		} catch {}
 	}
 	const starts = procStarts(found.map((d) => d.pid))

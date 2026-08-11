@@ -24,7 +24,7 @@ import { levelFor, xpOf } from './data/score.ts'
 import { prune, settle } from './data/settle.ts'
 import { stateOf } from './data/state.ts'
 import { transcriptIndex } from './data/transcript.ts'
-import type { Digest, Session } from './data/types.ts'
+import type { Digest, Registry, Session } from './data/types.ts'
 
 export type { Digest, Registry, Session, State } from './data/types.ts'
 export { RANK } from './data/types.ts'
@@ -140,7 +140,57 @@ export function collect(): Session[] {
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
 	})
-	return disambiguate(out)
+	return disambiguate(fold(out, registry))
+}
+
+/**
+ * Fold a parked session into the background job that took its conversation.
+ *
+ * Backgrounding an interactive session does not end it. The terminal process
+ * stays alive and gains `parkedJobId`, naming the job that now owns the
+ * conversation, and that job runs on under its own pid with its own registry
+ * entry. Both are genuinely live, so both were listed — two rows for one
+ * conversation. On this machine those were two of the three `tidepool` rows, and
+ * the job's transcript carried 962 references to the terminal's session id,
+ * which is the handoff made visible: one conversation, copied forward.
+ *
+ * The job's row is the one kept, because that is where the work now is — the
+ * parked terminal's transcript stops dead at the moment of the handoff, so its
+ * row would sit there claiming to be working on something it left minutes ago.
+ * What the terminal has that the job does not is the cmux tab, so that is carried
+ * across; otherwise folding would cost the only way to go and look at it.
+ *
+ * Linked by job id rather than pid, because a job respawns — it did so mid-
+ * investigation, keeping its id and taking a new pid.
+ *
+ * Only folds when the named job is actually present. If it finished, or never
+ * became live, the parked row stays exactly as it was rather than vanishing.
+ */
+export function fold(list: Session[], registry: Registry[]): Session[] {
+	const rowOfJob = new Map<string, string>()
+	let anyParked = false
+	for (const r of registry) {
+		if (r.jobId) rowOfJob.set(r.jobId, r.sessionId)
+		if (r.parkedJobId) anyParked = true
+	}
+	if (!anyParked) return list
+	const bySession = new Map(list.map((s) => [s.id, s]))
+	const drop = new Set<string>()
+	for (const r of registry) {
+		if (!r.parkedJobId) continue
+		const target = rowOfJob.get(r.parkedJobId)
+		if (!target || target === r.sessionId) continue
+		const parked = bySession.get(r.sessionId)
+		const job = bySession.get(target)
+		if (!parked || !job) continue
+		if (job.tab === undefined) {
+			job.tab = parked.tab
+			job.workspace = parked.workspace
+			job.unread = parked.unread
+		}
+		drop.add(r.sessionId)
+	}
+	return drop.size ? list.filter((s) => !drop.has(s.id)) : list
 }
 
 /**

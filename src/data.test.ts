@@ -1,9 +1,91 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { collect, levelFor, transcriptIndex, xpForLevel, xpOf } from './data.ts'
+import { collect, fold, levelFor, liveSessions, transcriptIndex, xpForLevel, xpOf } from './data.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tierOf } from './theme.ts'
+import type { Registry, Session } from './data/types.ts'
+
+/** A session row with only the fields these tests care about spelled out. */
+const row = (id: string, over: Partial<Session> = {}): Session => ({
+	id,
+	pid: 1,
+	name: id,
+	proj: 'tidepool',
+	cwd: '/x/projects',
+	state: 'working',
+	stale: 0,
+	title: '',
+	doing: '',
+	short: '',
+	last: '',
+	ctxUsed: 0,
+	ctxLimit: 200_000,
+	unread: false,
+	palette: 0,
+	hueShift: 0,
+	toolKind: 'think',
+	turns: 0,
+	level: 1,
+	xp: 0,
+	...over,
+})
+
+test('a session parked into a background job is one row, not two', () => {
+	// Backgrounding a session does not end it: the terminal stays alive carrying
+	// `parkedJobId`, and the job runs on under its own pid. Both are live, so both
+	// were listed — one conversation, two rows. Two of the three `tidepool` rows
+	// were exactly this pair, and the job's transcript held 962 references to the
+	// terminal's session id, which is the handoff made visible.
+	const registry: Registry[] = [
+		{ pid: 8300, sessionId: 'terminal', cwd: '/x/projects', kind: 'interactive', parkedJobId: 'job1' },
+		{ pid: 6300, sessionId: 'job', cwd: '/x/projects', kind: 'bg', jobId: 'job1' },
+	]
+	const out = fold([row('terminal', { pid: 8300, tab: 1, workspace: 'W-1' }), row('job', { pid: 6300 })], registry)
+	assert.deepEqual(
+		out.map((s) => s.id),
+		['job'],
+		'the parked terminal was kept alongside the job that took its work',
+	)
+	// the terminal owns the cmux tab and the job has none, so folding must carry it
+	// across or it costs the only way to go and look at the session
+	assert.equal(out[0].tab, 1, 'folding lost the cmux tab')
+	assert.equal(out[0].workspace, 'W-1', 'folding lost the cmux workspace')
+})
+
+test('a parked session whose job is gone is kept', () => {
+	// The job finished, or never became live. Dropping the terminal here would make
+	// a real session invisible, which is the expensive direction to be wrong in.
+	const registry: Registry[] = [{ pid: 8300, sessionId: 'terminal', cwd: '/x/projects', kind: 'interactive', parkedJobId: 'job1' }]
+	const out = fold([row('terminal', { pid: 8300, tab: 1 })], registry)
+	assert.deepEqual(
+		out.map((s) => s.id),
+		['terminal'],
+	)
+})
+
+test('collect never lists a parked session beside the job that took its work', () => {
+	// Guards the wiring rather than the function: fold() can be perfect and still
+	// not be called. Only asserts when something is actually parked right now.
+	const reg = liveSessions()
+	const jobs = new Set(reg.map((r) => r.jobId).filter(Boolean))
+	const parked = reg.filter((r) => r.parkedJobId && jobs.has(r.parkedJobId)).map((r) => r.sessionId)
+	if (!parked.length) return
+	const ids = new Set(collect().map((s) => s.id))
+	for (const id of parked) assert.ok(!ids.has(id), `${id} is parked into a live job and was listed anyway`)
+})
+
+test('nothing is folded when nothing is parked', () => {
+	const registry: Registry[] = [
+		{ pid: 1, sessionId: 'a', cwd: '/x', kind: 'interactive' },
+		{ pid: 2, sessionId: 'b', cwd: '/x', kind: 'bg', jobId: 'job1' },
+	]
+	const out = fold([row('a', { pid: 1 }), row('b', { pid: 2 })], registry)
+	assert.deepEqual(
+		out.map((s) => s.id),
+		['a', 'b'],
+	)
+})
 
 test('no two live sessions collapse onto a container directory name', () => {
 	const list = collect()

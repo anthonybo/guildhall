@@ -164,4 +164,10 @@ export type Registry = {
 	updatedAt?: number
 	statusUpdatedAt?: number
 	kind?: string
+	/** The background job this process runs, when `kind` is `bg`. Also the name of
+	 *  its directory under `~/.claude/jobs`. */
+	jobId?: string
+	/** Set on an interactive entry that has handed its conversation to a background
+	 *  job: the work now happens in the process whose `jobId` is this. */
+	parkedJobId?: string
 }
