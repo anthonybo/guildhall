@@ -14,7 +14,12 @@ process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildh
 import { createServer } from './serve.ts'
 import { resetControlThrottle, setControlPass } from './controlauth.ts'
 
-const PASS = 'a good long control phrase'
+// Named so it can never be mistaken for a real one, and so nobody has to wonder
+// whether a password is in this repository. The old value read like a plausible
+// passphrase, and when a stray script wrote it into the live config the question
+// "is my password on GitHub" became reasonable to ask. A fixture should be
+// obviously a fixture.
+const PASS = 'TEST-ONLY-not-a-real-passphrase' // allow-secret: a test fixture, and it says so
 setControlPass(PASS)
 import { issue } from './auth.ts'
 

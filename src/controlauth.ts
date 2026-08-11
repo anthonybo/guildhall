@@ -64,8 +64,27 @@ const derive = (pass: string, salt: Buffer) => crypto.scryptSync(pass, salt, KEY
 
 export type SetResult = { ok: true } | { ok: false; why: string }
 
-/** Store a new control passphrase. Rejects anything too short to be one. */
-export function setControlPass(pass: string): SetResult {
+/**
+ * Store a new control passphrase.
+ *
+ * `live` is required to write the real config, and only the key handler that a
+ * person typed into passes it. Any other caller — a benchmark, a throwaway `tsx -e`,
+ * anything that merely imports this module — is refused.
+ *
+ * That guard is here because its absence cost an alarming hour. A one-off script
+ * called this to set up a throttle experiment, and because nothing stopped it, it
+ * silently replaced the real password with a test string. The only protection at
+ * the time was convention: the test files set `GUILDHALL_CONFIG_DIR` to a temp
+ * directory before importing. Convention is not a safety mechanism — it protects
+ * whoever remembered it and nobody else.
+ */
+export function setControlPass(pass: string, opts: { live?: boolean } = {}): SetResult {
+	// A test or a script pointed at its own directory can write freely; there is no
+	// live credential there to lose.
+	const sandboxed = !!process.env.GUILDHALL_CONFIG_DIR
+	if (!sandboxed && !opts.live) {
+		return { ok: false, why: 'refusing to overwrite the real password from a script — pass { live: true } from the key handler, or set GUILDHALL_CONFIG_DIR' }
+	}
 	const p = pass.trim()
 	if (p.length < MIN_LENGTH) return { ok: false, why: `too short — ${MIN_LENGTH} characters or more` }
 	// A phrase made of one repeated character is long without being hard, and

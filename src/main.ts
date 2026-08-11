@@ -643,7 +643,9 @@ function onKey(b: Buffer) {
 			if (key === '\x1b') ((ctlPass = null), (ctlNote = 'left as it was'))
 			else if (key === '\x7f' || key === '\b') ctlPass = ctlPass.slice(0, -1)
 			else if (key === '\r' || key === '\n') {
-				const r = setControlPass(ctlPass)
+				// `live` only here: a person is at the keyboard and just typed it. Every
+				// other caller is refused, so no script can replace the real credential.
+				const r = setControlPass(ctlPass, { live: true })
 				ctlNote = r.ok ? 'saved — every device must enter it again' : r.why
 				if (r.ok) ctlPass = null
 			} else if (key.length === 1 && key >= ' ' && key <= '~') ctlPass += key

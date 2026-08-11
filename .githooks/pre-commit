@@ -8,6 +8,11 @@
 # to — a hook nobody can bypass is a hook people delete.
 set -e
 
+# Secrets first: it is instant, and it is the one failure that cannot be undone by
+# a follow-up commit. Once a credential is pushed it is public whatever happens next.
+echo "pre-commit: secrets"
+node tools/check-secrets.mjs
+
 echo "pre-commit: perf budget"
 node tools/check-perf.mjs
 

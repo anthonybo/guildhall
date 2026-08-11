@@ -54,6 +54,36 @@ tripled them while the bundle still served the old 1:1 plates.
 - Comments explain *why*, especially where a value was measured. Numbers that came
   from a measurement should say so, or the next person will "simplify" them away.
 
+## Never commit a credential
+
+`npm run check:secrets` scans the staged diff and the pre-commit hook runs it
+first, because it is the one failure a later commit cannot undo — once a secret is
+pushed it is public whatever happens next.
+
+It matches private keys, this project's own `scrypt$…` hash format, GitHub/AWS/Slack
+tokens, and any secret-shaped name assigned a string literal. It reads only ADDED
+lines, so it never blocks unrelated work in a file that already contains something
+questionable. If a match is genuinely not a credential, put `allow-secret: <why>` on
+the line — the reason is required, so the exemption is a decision rather than a
+habit.
+
+**Real secrets live in `~/.config/guildhall/`, never in this repo.** The control
+password is stored there as an scrypt hash, mode 0600, and no code path puts it in
+the working tree.
+
+**`setControlPass` refuses to write the live config unless the caller passes
+`{ live: true }`,** which only the key handler a person typed into does. Anything
+that merely imports the module is refused.
+
+*Why all of this exists:* a throwaway script called `setControlPass` to set up a
+throttle experiment and silently replaced the real password with a test string. The
+only protection at the time was convention — the test files set
+`GUILDHALL_CONFIG_DIR` to a temp directory before importing — which protects
+whoever remembered it and nobody else. Because the test string looked like a
+plausible passphrase and lived in a public repo, "is my password on GitHub?" became
+a reasonable question, and answering it took far too long. **Test fixtures are now
+named so they cannot be mistaken for real credentials** (`TEST-ONLY-…`).
+
 ## Staying lightweight
 
 This app watches a machine somebody else is trying to work on. It has no right to

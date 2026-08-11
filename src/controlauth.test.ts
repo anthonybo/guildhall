@@ -10,7 +10,7 @@ process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildh
 import { MIN_LENGTH, controlAllowed, controlAttempt, controlLockedFor, controlReachable, hasControlPass, resetControlThrottle, setControlPass } from './controlauth.ts'
 import { refuses } from './control.ts'
 
-const GOOD = 'correct horse battery'
+const GOOD = 'TEST-ONLY-correct-horse-battery' // allow-secret: a test fixture, and it says so
 
 test('a passphrase is stored hashed, never in plain text', () => {
 	// The file lives in a config directory that gets backed up and sometimes
