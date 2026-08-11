@@ -34,6 +34,15 @@ let wrap = localStorage.getItem(WRAP) !== 'exact'
 /** The last screen drawn, so an unchanged one is not rebuilt under your selection. */
 let lastSig = ''
 
+/**
+ * Whether the panel is the whole screen rather than a box in the page.
+ *
+ * The same 880px the stylesheet uses, read here because the layout maths has to
+ * agree with the layout — two breakpoints that drift are worse than one that is
+ * slightly wrong.
+ */
+const fullScreen = () => window.matchMedia('(max-width: 880px)').matches
+
 let openId: string | null = null
 let openName = ''
 let timer = 0
@@ -70,6 +79,13 @@ function askForToken(why: string) {
 	// the panel was sized to a terminal; a password form is not one
 	el.style.maxWidth = ''
 	el.style.marginInline = ''
+	// A way out, first.
+	//
+	// Full screen on a phone, this branch had no Close button at all — so a stale or
+	// wrong token produced a password form filling the display with no exit but a
+	// page reload. Same trap as the blank loading state, in a different branch, and
+	// found only by opening it with a bad token rather than a good one.
+	el.append(titleBar(openName, 'password needed'))
 	const wrap = document.createElement('div')
 	wrap.className = 'p-4'
 	const h = document.createElement('p')
@@ -84,7 +100,10 @@ function askForToken(why: string) {
 	input.autocomplete = 'off'
 	input.spellcheck = false
 	input.placeholder = 'the password you set'
-	input.className = 'w-full rounded border border-line bg-bg px-2 py-1.5 font-mono text-label'
+	// 16px here too — the rule applies to every input, and this is the first one a
+	// phone ever meets. Fixing only the message box would have left the very first
+	// tap zooming the page.
+	input.className = 'min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
 	const go = document.createElement('button')
 	go.type = 'button'
 	go.textContent = 'Unlock'
@@ -98,6 +117,34 @@ function askForToken(why: string) {
 	wrap.append(h, p, input, go)
 	el.append(wrap)
 	input.focus()
+}
+
+/**
+ * The bar every state of this panel wears, including the ones that are not a
+ * terminal.
+ *
+ * Extracted because the password branch did not have one, and full screen on a
+ * phone that meant no way out. Any state this panel can be in has to carry its own
+ * exit — that is the rule the missing cases kept breaking.
+ */
+function titleBar(name: string, subtitle: string) {
+	const bar = document.createElement('div')
+	bar.className = 'flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2'
+	const title = document.createElement('span')
+	title.className = 'truncate font-bold text-label'
+	title.textContent = name
+	const live = document.createElement('span')
+	live.className = 'shrink-0 text-[0.72rem] text-faint'
+	live.textContent = subtitle
+	const x = document.createElement('button')
+	x.type = 'button'
+	x.textContent = '✕ Close'
+	x.title = 'Close the terminal (Esc)'
+	x.className =
+		'ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot'
+	x.addEventListener('click', close)
+	bar.append(title, live, x)
+	return bar
 }
 
 function chrome(name: string) {
@@ -170,7 +217,12 @@ function chrome(name: string) {
 	// Size and height are both set in paint(), from the real grid and the real
 	// window, because a terminal you have to scroll to read one line of is barely
 	// a terminal.
-	pre.className = 'm-0 overflow-auto px-3 py-2 whitespace-pre'
+	// `min-h-0 flex-1` so the screen takes the space between the bar and the input
+	// and nothing else — without it a flex child refuses to shrink below its content
+	// and pushes the input off the bottom of the phone.
+	// overscroll-contain stops a flick at the end of the scrollback from dragging the
+	// page behind it, which is what makes a web view feel like a web page.
+	pre.className = 'm-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre'
 	pre.textContent = 'reading…'
 
 	const form = document.createElement('form')
@@ -179,11 +231,21 @@ function chrome(name: string) {
 	input.id = 'ask'
 	input.autocomplete = 'off'
 	input.placeholder = 'Type into this session…'
-	input.className = 'flex-1 rounded border border-line bg-bg px-2 py-1.5 font-mono text-label'
+	// 16px, and not a pixel less. THIS is the zooming.
+	//
+	// iOS Safari zooms the whole page whenever you focus an input whose font-size is
+	// under 16px — an accessibility behaviour, not a bug, and it cannot be turned off
+	// in any way worth having. The page inherits 15px from `body`, so every tap on
+	// this box zoomed the terminal in and left you to pinch back out afterwards.
+	//
+	// The alternatives are worse. `maximum-scale=1` is ignored by iOS on purpose, and
+	// `touch-action: pan-y` does suppress it but takes pinch-zoom with it, which on a
+	// view whose whole problem is small text is the wrong thing to remove.
+	input.className = 'min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
 	const send = document.createElement('button')
 	send.type = 'submit'
 	send.textContent = 'Send'
-	send.className = 'cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg'
+	send.className = 'min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg'
 	form.append(input, send)
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
@@ -377,10 +439,19 @@ function paint(pre: HTMLElement, g: Grid) {
 	// half the session's screen on a view whose only job is to show that screen.
 	// Measured from the chrome around it rather than from the panel's own position,
 	// which moves as the page scrolls.
-	const headerH = document.getElementById('bar')?.getBoundingClientRect().height ?? 0
-	const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH
-	const below = el.lastElementChild?.getBoundingClientRect().height ?? 0
-	pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
+	//
+	// Only when the panel is INLINE. Full screen on a phone it is a flex column, and
+	// `flex-1` already gives the screen exactly the space between the bar and the
+	// input — a maxHeight computed from `window.innerHeight` would fight that, and
+	// lose the moment the keyboard opens and changes the height it was computed from.
+	if (fullScreen()) {
+		pre.style.maxHeight = ''
+	} else {
+		const headerH = document.getElementById('bar')?.getBoundingClientRect().height ?? 0
+		const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH
+		const below = el.lastElementChild?.getBoundingClientRect().height ?? 0
+		pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
+	}
 	const needed = Math.ceil(g.columns * advance * size) + PAD + 2
 	if (needed < pre.clientWidth) {
 		el.style.maxWidth = `${needed}px`
@@ -432,12 +503,18 @@ export function show(id: string, name: string) {
 	openId = id
 	openName = name
 	el.hidden = false
+	// Nothing scrolls behind a full-screen overlay, or a flick past the end of the
+	// scrollback drags the session list around underneath it.
+	document.body.classList.add('overflow-hidden')
 	if (!token()) return askForToken('This is behind a separate password from the passcode.')
 	const { input } = chrome(name)
 	refresh()
 	clearInterval(timer)
 	timer = setInterval(refresh, 2000)
-	input.focus()
+	// Deliberately NOT focused on a phone. Focusing raises the keyboard immediately,
+	// so opening a terminal to read what a session said would cost half the screen
+	// before you had read a word of it. Tap the box when you actually want to type.
+	if (!fullScreen()) input.focus()
 }
 
 export function close() {
@@ -448,6 +525,7 @@ export function close() {
 	el.innerHTML = ''
 	el.style.maxWidth = ''
 	el.style.marginInline = ''
+	document.body.classList.remove('overflow-hidden')
 	onClose()
 }
 

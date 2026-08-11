@@ -2633,6 +2633,7 @@ var KEY2 = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
 var wrap = localStorage.getItem(WRAP) !== "exact";
 var lastSig = "";
+var fullScreen = () => window.matchMedia("(max-width: 880px)").matches;
 var openId = null;
 var openName = "";
 var timer = 0;
@@ -2651,6 +2652,7 @@ function askForToken(why) {
   el.innerHTML = "";
   el.style.maxWidth = "";
   el.style.marginInline = "";
+  el.append(titleBar(openName, "password needed"));
   const wrap2 = document.createElement("div");
   wrap2.className = "p-4";
   const h = document.createElement("p");
@@ -2664,7 +2666,7 @@ function askForToken(why) {
   input.autocomplete = "off";
   input.spellcheck = false;
   input.placeholder = "the password you set";
-  input.className = "w-full rounded border border-line bg-bg px-2 py-1.5 font-mono text-label";
+  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
   const go = document.createElement("button");
   go.type = "button";
   go.textContent = "Unlock";
@@ -2678,6 +2680,24 @@ function askForToken(why) {
   wrap2.append(h, p, input, go);
   el.append(wrap2);
   input.focus();
+}
+function titleBar(name, subtitle) {
+  const bar2 = document.createElement("div");
+  bar2.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "shrink-0 text-[0.72rem] text-faint";
+  live2.textContent = subtitle;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  x.addEventListener("click", close);
+  bar2.append(title, live2, x);
+  return bar2;
 }
 function chrome(name) {
   el.innerHTML = "";
@@ -2718,7 +2738,7 @@ function chrome(name) {
   bar2.append(title, live2, tail);
   const pre = document.createElement("pre");
   pre.id = "screen";
-  pre.className = "m-0 overflow-auto px-3 py-2 whitespace-pre";
+  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
   pre.textContent = "reading\u2026";
   const form = document.createElement("form");
   form.className = "flex gap-2 border-t border-line p-2";
@@ -2726,11 +2746,11 @@ function chrome(name) {
   input.id = "ask";
   input.autocomplete = "off";
   input.placeholder = "Type into this session\u2026";
-  input.className = "flex-1 rounded border border-line bg-bg px-2 py-1.5 font-mono text-label";
+  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
   const send = document.createElement("button");
   send.type = "submit";
   send.textContent = "Send";
-  send.className = "cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
+  send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
   form.append(input, send);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -2826,10 +2846,14 @@ function paint(pre, g) {
   pre.style.lineHeight = "1.25";
   pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
   pre.style.overflowWrap = reflow ? "break-word" : "";
-  const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
-  const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
-  const below = el.lastElementChild?.getBoundingClientRect().height ?? 0;
-  pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
+  if (fullScreen()) {
+    pre.style.maxHeight = "";
+  } else {
+    const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
+    const above = (el.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
+    const below = el.lastElementChild?.getBoundingClientRect().height ?? 0;
+    pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
+  }
   const needed = Math.ceil(g.columns * advance * size) + PAD + 2;
   if (needed < pre.clientWidth) {
     el.style.maxWidth = `${needed}px`;
@@ -2868,12 +2892,13 @@ function show(id, name) {
   openId = id;
   openName = name;
   el.hidden = false;
+  document.body.classList.add("overflow-hidden");
   if (!token()) return askForToken("This is behind a separate password from the passcode.");
   const { input } = chrome(name);
   refresh();
   clearInterval(timer);
   timer = setInterval(refresh, 2e3);
-  input.focus();
+  if (!fullScreen()) input.focus();
 }
 function close() {
   openId = null;
@@ -2883,6 +2908,7 @@ function close() {
   el.innerHTML = "";
   el.style.maxWidth = "";
   el.style.marginInline = "";
+  document.body.classList.remove("overflow-hidden");
   onClose();
 }
 function mountTerminal(host, closed) {

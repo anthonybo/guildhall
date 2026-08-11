@@ -4,7 +4,12 @@
 		<meta charset="utf-8" />
 		<!-- viewport-fit=cover so the page reaches under a phone's rounded corners,
 		     with safe-area insets doing the actual keeping-out-of-the-way -->
-		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+		<!-- interactive-widget=resizes-content: the on-screen keyboard shrinks the
+		     viewport rather than sliding the page up under itself, so a full-screen
+		     terminal keeps its input above the keyboard instead of behind it.
+		     Deliberately NO maximum-scale: iOS ignores it, and suppressing zoom on a
+		     view made of small text is the wrong thing to take away. -->
+		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
 		<meta name="color-scheme" content="dark" />
 		<meta name="theme-color" content="#191722" />
 		<!-- added to a phone home screen this opens without browser chrome -->
@@ -90,7 +95,16 @@
 
 		<!-- The live terminal for one session, with a box to type into it. Empty
 		     until a row's terminal button is pressed, and built by terminal.ts. -->
-		<section id="terminal" class="mt-2.5 overflow-hidden border-gold/50 bg-panel max-[560px]:border-y min-[560px]:mx-3.5 min-[560px]:rounded-md min-[560px]:border" hidden></section>
+		<!-- On a phone this is the whole screen, not a panel in a page. A terminal you
+		     are reading IS the task, and sharing the glass with a list you are not
+		     looking at costs the rows that matter. Above 880px it stays inline, where
+		     there is room for both. `dvh` rather than `vh` so the on-screen keyboard
+		     shrinks it instead of pushing the input under the keyboard. -->
+		<section
+			id="terminal"
+			class="overflow-hidden border-gold/50 bg-panel max-[880px]:fixed max-[880px]:inset-0 max-[880px]:z-[6] max-[880px]:flex max-[880px]:h-[100dvh] max-[880px]:flex-col max-[880px]:pt-[env(safe-area-inset-top)] max-[880px]:pb-[env(safe-area-inset-bottom)] min-[880px]:mx-3.5 min-[880px]:mt-2.5 min-[880px]:rounded-md min-[880px]:border"
+			hidden
+		></section>
 
 		<!-- Commits, pushes, workflow runs and Cloudflare deploys, read from pressroom.
 		     Over the page rather than in it: full screen on a phone, a drawer down the
