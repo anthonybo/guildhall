@@ -49,6 +49,18 @@ const CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="cr
 	<rect x="3" y="13" width="10" height="1"/>
 </svg>`
 
+/**
+ * The icon, parsed once and cloned per row.
+ *
+ * `innerHTML = CRT` re-ran the HTML parser over ~450 bytes for every workspace row
+ * on every repaint. Small — about 0.1ms a repaint — but it is pure waste for markup
+ * that is a constant, and cloning a parsed node is what `<template>` exists for.
+ */
+const crtTemplate = document.createElement('template')
+crtTemplate.innerHTML = CRT
+
+const crtIcon = () => crtTemplate.content.firstElementChild!.cloneNode(true)
+
 const WEIGHT: Record<string, number> = {
 	error: 0.26,
 	needs: 0.22,
@@ -68,6 +80,30 @@ const PANEL: RGB = [34, 31, 46]
 const FAINT: RGB = [129, 136, 146]
 const MUTED: RGB = [138, 138, 138]
 /** the background a given band's card and heading actually end up with */
+/**
+ * `readable()` answers, remembered.
+ *
+ * Lifting a colour to a contrast floor is a binary search, and every row asked for
+ * five of them on every repaint — measured at 1.06 cpu-ms for eleven rows on this
+ * Mac, so roughly 3-5ms on the phone this is mostly read from. The inputs are very
+ * nearly fixed: seven session states, two greys, one red, and a hue per project.
+ * There is no reason to solve the same search twice.
+ *
+ * Keyed on the exact arguments, so a new project colour or a new state simply adds
+ * an entry rather than returning somebody else's answer.
+ */
+const inks = new Map<string, string>()
+
+function paint(fg: RGB, bg: RGB, target?: number): string {
+	const key = `${fg}|${bg}|${target ?? ''}`
+	let v = inks.get(key)
+	if (v === undefined) {
+		v = rgb(target === undefined ? readable(fg, bg) : readable(fg, bg, target))
+		inks.set(key, v)
+	}
+	return v
+}
+
 const cardOf = (state: string) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, PANEL)
 const bandOf = (state: string) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, BG)
 
@@ -204,19 +240,19 @@ export function paintList(list: Session[]) {
 		// to clear a contrast floor on any of them.
 		const card = cardOf(s.state)
 		li.style.setProperty('--state', rgb(look.color))
-		li.style.setProperty('--ink', rgb(readable(look.color, card)))
-		li.style.setProperty('--hot', rgb(readable([255, 95, 95], card)))
+		li.style.setProperty('--ink', paint(look.color, card))
+		li.style.setProperty('--hot', paint([255, 95, 95], card))
 		// The two greys, lifted the same way. They are the worst offenders by far —
 		// the meta row measured 2.15 against a needs-you card, which is where this
 		// whole exercise started. The second one aims higher than the floor on
 		// purpose: lifting both to exactly 4.5 would land them on the same colour
 		// and flatten the hierarchy between what a session is doing and its numbers.
-		li.style.setProperty('--dim', rgb(readable(FAINT, card)))
-		li.style.setProperty('--soft', rgb(readable(MUTED, card, 5.5)))
+		li.style.setProperty('--dim', paint(FAINT, card))
+		li.style.setProperty('--soft', paint(MUTED, card, 5.5))
 		li.style.setProperty('--tint', tintOf(s.state))
 		li.style.setProperty('--tier', rgb(tierOf(s.level).color))
 		// the project's own colour, the same hue as its carpet in the room
-		li.style.setProperty('--proj', rgb(readable(hues.get(s.proj) ?? look.color, card)))
+		li.style.setProperty('--proj', paint(hues.get(s.proj) ?? look.color, card))
 		const pct = s.ctxLimit ? Math.round((s.ctxUsed / s.ctxLimit) * 100) : 0
 		// `proj` carries a chevron that rotates when the row opens, so it is obvious
 		// there is more behind it. `doing` brightens on an attn row because that is
@@ -265,7 +301,7 @@ export function paintList(list: Session[]) {
 			term.title = `Open ${s.proj}'s terminal`
 			term.className =
 				'[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold'
-			term.innerHTML = CRT
+			term.append(crtIcon())
 			// stopPropagation: this opens a terminal, not the row's own detail
 			term.addEventListener('click', (e) => {
 				e.stopPropagation()

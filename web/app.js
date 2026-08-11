@@ -170,6 +170,9 @@ var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="cris
 	<rect x="6" y="11" width="4" height="2" opacity=".55"/>
 	<rect x="3" y="13" width="10" height="1"/>
 </svg>`;
+var crtTemplate = document.createElement("template");
+crtTemplate.innerHTML = CRT;
+var crtIcon = () => crtTemplate.content.firstElementChild.cloneNode(true);
 var WEIGHT = {
   error: 0.26,
   needs: 0.22,
@@ -184,6 +187,16 @@ var BG = [25, 23, 34];
 var PANEL = [34, 31, 46];
 var FAINT = [129, 136, 146];
 var MUTED = [138, 138, 138];
+var inks = /* @__PURE__ */ new Map();
+function paint(fg, bg, target) {
+  const key = `${fg}|${bg}|${target ?? ""}`;
+  let v = inks.get(key);
+  if (v === void 0) {
+    v = rgb(target === void 0 ? readable(fg, bg) : readable(fg, bg, target));
+    inks.set(key, v);
+  }
+  return v;
+}
 var cardOf = (state) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, PANEL);
 var bandOf = (state) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, BG);
 var BANDS = [
@@ -275,13 +288,13 @@ function paintList(list) {
     if (busy) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
     const card = cardOf(s.state);
     li.style.setProperty("--state", rgb(look.color));
-    li.style.setProperty("--ink", rgb(readable(look.color, card)));
-    li.style.setProperty("--hot", rgb(readable([255, 95, 95], card)));
-    li.style.setProperty("--dim", rgb(readable(FAINT, card)));
-    li.style.setProperty("--soft", rgb(readable(MUTED, card, 5.5)));
+    li.style.setProperty("--ink", paint(look.color, card));
+    li.style.setProperty("--hot", paint([255, 95, 95], card));
+    li.style.setProperty("--dim", paint(FAINT, card));
+    li.style.setProperty("--soft", paint(MUTED, card, 5.5));
     li.style.setProperty("--tint", tintOf(s.state));
     li.style.setProperty("--tier", rgb(tierOf(s.level).color));
-    li.style.setProperty("--proj", rgb(readable(hues.get(s.proj) ?? look.color, card)));
+    li.style.setProperty("--proj", paint(hues.get(s.proj) ?? look.color, card));
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
 			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
@@ -308,7 +321,7 @@ function paintList(list) {
       term.type = "button";
       term.title = `Open ${s.proj}'s terminal`;
       term.className = "[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
-      term.innerHTML = CRT;
+      term.append(crtIcon());
       term.addEventListener("click", (e) => {
         e.stopPropagation();
         onTerminal?.(s.id, s.proj);
@@ -2807,7 +2820,7 @@ async function refresh() {
   const sig = JSON.stringify(r.render_grid.row_spans);
   if (sig === lastSig && pre.childElementCount) return;
   lastSig = sig;
-  paint(pre, r.render_grid);
+  paint2(pre, r.render_grid);
 }
 var COMFORTABLE = 15;
 var LEGIBLE = 8;
@@ -2843,7 +2856,7 @@ function advanceRatio(host) {
   ratio = w > 0 ? w / 1e4 : 0.6;
   return ratio;
 }
-function paint(pre, g) {
+function paint2(pre, g) {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
   const byId = new Map(g.styles.map((st) => [st.id, st]));
   const rows = /* @__PURE__ */ new Map();
@@ -2959,6 +2972,7 @@ var el2;
 var timer2 = 0;
 var open = false;
 var settled2 = false;
+var lastRender = "";
 var deploys = localStorage.getItem(DEPLOYS) === "1";
 var onClose2 = () => {
 };
@@ -3090,6 +3104,15 @@ function heading(text, count) {
   return h;
 }
 function render(snap) {
+  const sig = JSON.stringify([snap.items, snap.repos, snap.local, snap.error, snap.stale, snap.githubError, snap.cloudflareError, !!snap.loading, deploys]);
+  if (sig === lastRender && el2.childElementCount) {
+    const meta2 = el2.querySelector(".press-meta");
+    if (meta2) meta2.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;
+    return;
+  }
+  lastRender = sig;
+  const priorScroll = el2.querySelector(".press-body")?.scrollTop ?? 0;
+  const priorOpen = el2.querySelector("details")?.open ?? false;
   const wrap2 = document.createElement("div");
   wrap2.className = "flex h-full min-h-0 flex-col";
   const bar2 = document.createElement("div");
@@ -3098,7 +3121,7 @@ function render(snap) {
   title.className = "font-bold tracking-[0.06em] text-gold";
   title.textContent = "PRESSROOM";
   const meta = document.createElement("span");
-  meta.className = "truncate text-[0.72rem] text-faint";
+  meta.className = "press-meta truncate text-[0.72rem] text-faint";
   meta.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;
   const toggle = document.createElement("button");
   toggle.type = "button";
@@ -3119,7 +3142,7 @@ function render(snap) {
   bar2.append(title, meta, toggle, x);
   wrap2.append(bar2);
   const body = document.createElement("div");
-  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
+  body.className = "press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
   if (snap.error) {
     const p = document.createElement("p");
     p.className = "m-0 px-2.5 py-8 text-center text-muted";
@@ -3154,15 +3177,15 @@ function render(snap) {
       }
     }
     if (quiet.length) {
-      const details2 = document.createElement("details");
+      const details3 = document.createElement("details");
       const sum = document.createElement("summary");
       sum.className = "cursor-pointer px-2 py-1 text-[0.72rem] text-faint hover:text-label";
       sum.textContent = `${quiet.length} clean ${quiet.length === 1 ? "repo" : "repos"}`;
       const ul = document.createElement("ul");
       ul.className = "m-0 list-none p-0";
       for (const r of quiet) ul.append(repoRow(r));
-      details2.append(sum, ul);
-      body.append(details2);
+      details3.append(sum, ul);
+      body.append(details3);
     }
     body.append(heading("feed", snap.items.length));
     if (snap.local) {
@@ -3185,6 +3208,9 @@ function render(snap) {
   }
   wrap2.append(body);
   el2.replaceChildren(wrap2);
+  body.scrollTop = priorScroll;
+  const details2 = el2.querySelector("details");
+  if (details2) details2.open = priorOpen;
 }
 function normalise(snap) {
   return {
@@ -3244,6 +3270,7 @@ function close2() {
   timer2 = 0;
   el2.hidden = true;
   el2.replaceChildren();
+  lastRender = "";
   document.body.classList.remove("overflow-hidden");
   onClose2();
 }

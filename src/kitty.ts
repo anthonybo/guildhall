@@ -83,6 +83,13 @@ export function upscale(grid: (RGB | null)[][], factor: number) {
  *  glyphs and the image support both come from the terminal, not the font. */
 export function supportsImages() {
 	if (process.env.GUILDHALL_NO_IMAGES) return false
+	// Force it on regardless of what launched us. The benchmark needs this: it keys
+	// on TERM_PROGRAM, which is unset under a GUI git client, a CI runner, tmux or
+	// VS Code's terminal — so `npm run bench` there silently measured the half-block
+	// path that production never takes, which is the exact failure the bench flag was
+	// changed to avoid, arriving from the other direction. A gate that measures a
+	// different renderer depending on who invoked it is not a gate.
+	if (process.env.GUILDHALL_FORCE_IMAGES) return true
 	if (process.env.KITTY_WINDOW_ID) return true
 	const p = (process.env.TERM_PROGRAM ?? '').toLowerCase()
 	return p === 'ghostty' || p === 'kitty' || p === 'wezterm'

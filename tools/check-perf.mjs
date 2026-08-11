@@ -87,7 +87,11 @@ checks.push({
 				// Reading only stdout here produced a silent NaN, which the budget then
 				// reported as a breach: a check that cannot measure must say so loudly,
 				// not fail closed with a number nobody can explain.
-				const r = spawnSync('npm', ['run', '--silent', 'bench'], { cwd: ROOT, encoding: 'utf8' })
+				// Images forced ON, or the measured path depends on who invoked the hook: a
+				// GUI git client, CI, tmux and VS Code's terminal all have no TERM_PROGRAM,
+				// take the half-block branch, and read 3.1-3.8 against a 4.0 ceiling. Same
+				// number, different renderer, failing for weather rather than a regression.
+				const r = spawnSync('npm', ['run', '--silent', 'bench'], { cwd: ROOT, encoding: 'utf8', env: { ...process.env, GUILDHALL_FORCE_IMAGES: '1' } })
 				const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
 				const m = /([\d.]+) ms\/frame/.exec(out)
 				if (!m) throw new Error(`bench printed no frame time: ${out.trim().split('\n').pop()}`)

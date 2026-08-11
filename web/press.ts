@@ -60,6 +60,8 @@ let timer = 0
 let open = false
 /** Whether the fast open-time poll has been handed back to the slow watching one. */
 let settled = false
+/** What the panel currently shows, so an unchanged poll does not rebuild 3,800 nodes. */
+let lastRender = ''
 /**
  * Whether to read workflow runs and Cloudflare deploys too.
  *
@@ -261,6 +263,38 @@ function heading(text: string, count?: number) {
 }
 
 function render(snap: Snapshot) {
+	/**
+	 * Rebuild only when something that is drawn has changed.
+	 *
+	 * This threw away and rebuilt the entire panel on every poll — up to 600 feed
+	 * rows of six elements each plus the repo table, about 3,800 nodes. While a read
+	 * is in flight the poll is 1.2s, so a cold deploys read did twenty back-to-back
+	 * rebuilds of all of it, on the slowest device in the picture, each one
+	 * discarding your scroll position and any open section.
+	 *
+	 * The signature deliberately covers the view flags as well as the data. Guarding
+	 * on the data alone is the mistake that broke the terminal's Wrapped toggle: the
+	 * grid had not changed, so nothing redrew, and the button did nothing on exactly
+	 * the idle screen it exists for. `deploys` changes what is drawn without changing
+	 * what arrived, so it belongs in the key.
+	 *
+	 * `at` is excluded on purpose — it moves every poll by construction and would
+	 * defeat the guard entirely, which is the same trap the SSE push had. The one
+	 * label that depends on it is refreshed in place below instead.
+	 */
+	const sig = JSON.stringify([snap.items, snap.repos, snap.local, snap.error, snap.stale, snap.githubError, snap.cloudflareError, !!snap.loading, deploys])
+	if (sig === lastRender && el.childElementCount) {
+		const meta = el.querySelector('.press-meta')
+		if (meta) meta.textContent = snap.error ? '' : `${snap.repos.length} repos · ${ago(Date.now() - snap.at)}`
+		return
+	}
+	lastRender = sig
+
+	// Keep where you were reading, and what you had open, across a rebuild that does
+	// happen. Losing your place in a 600-row feed is the whole cost of a repaint.
+	const priorScroll = el.querySelector('.press-body')?.scrollTop ?? 0
+	const priorOpen = (el.querySelector('details') as HTMLDetailsElement | null)?.open ?? false
+
 	const wrap = document.createElement('div')
 	wrap.className = 'flex h-full min-h-0 flex-col'
 
@@ -271,7 +305,10 @@ function render(snap: Snapshot) {
 	title.className = 'font-bold tracking-[0.06em] text-gold'
 	title.textContent = 'PRESSROOM'
 	const meta = document.createElement('span')
-	meta.className = 'truncate text-[0.72rem] text-faint'
+	// `press-meta` is a handle, not a style: the guard above refreshes this one label
+	// in place when it skips the rebuild, because it is the only thing on screen that
+	// depends on the clock rather than on the data.
+	meta.className = 'press-meta truncate text-[0.72rem] text-faint'
 	meta.textContent = snap.error ? '' : `${snap.repos.length} repos · ${ago(Date.now() - snap.at)}`
 
 	const toggle = document.createElement('button')
@@ -297,7 +334,7 @@ function render(snap: Snapshot) {
 
 	/* ── body ── */
 	const body = document.createElement('div')
-	body.className = 'min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]'
+	body.className = 'press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]'
 
 	if (snap.error) {
 		const p = document.createElement('p')
@@ -379,6 +416,9 @@ function render(snap: Snapshot) {
 
 	wrap.append(body)
 	el.replaceChildren(wrap)
+	body.scrollTop = priorScroll
+	const details = el.querySelector('details') as HTMLDetailsElement | null
+	if (details) details.open = priorOpen
 }
 
 /**
@@ -490,6 +530,8 @@ export function close() {
 	timer = 0
 	el.hidden = true
 	el.replaceChildren()
+	// or reopening would match the signature of a panel that no longer has any nodes
+	lastRender = ''
 	document.body.classList.remove('overflow-hidden')
 	onClose()
 }
