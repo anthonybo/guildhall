@@ -33,8 +33,17 @@ const LOCAL_TTL = 30_000
 /** Deploys are expensive and rare; asking every half minute would be absurd. */
 const FULL_TTL = 5 * 60_000
 
-/** Newest items served. The raw snapshot runs to ~950KB, which is not a payload. */
-const KEEP = 150
+/**
+ * Newest items served. The raw snapshot runs to ~950KB, which is not a payload.
+ *
+ * 600 to match pressroom's own `DEFAULT_CAP`, because "the same as the terminal"
+ * is the whole point of this view. At 150 the cap was silently a different
+ * product: a global newest-first slice, so two busy repositories — guildhall with
+ * 50 events and tidepool with 44 — crowded the feed down to 8 of 32 repos, and
+ * everything else looked like it had never been committed to. The terminal reads
+ * 40 commits per repo and keeps 600, which is why it showed work this did not.
+ */
+const KEEP = 600
 
 type Cached = { at: number; snap: PressSnapshot }
 
