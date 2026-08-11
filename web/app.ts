@@ -13,7 +13,7 @@ import type { Session } from '../src/data/types.ts'
 import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
-import { mountTerminal, show as showTerminal } from './terminal.ts'
+import { isOpen as terminalOpen, mountTerminal, show as showTerminal } from './terminal.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
 
@@ -80,7 +80,28 @@ function paintCounts(list: Session[]) {
 	)
 }
 
-function apply(data: { sessions: Session[]; at: number; version?: string; update?: string | null }) {
+/**
+ * The client fingerprint this page was loaded with, if the server has told us.
+ *
+ * Held rather than compared to a constant, because the page cannot know its own
+ * build — it learns it from the first message and then watches for it to change.
+ */
+let clientStamp: string | null = null
+
+function apply(data: { sessions: Session[]; at: number; version?: string; update?: string | null; client?: string }) {
+	// Reload when the browser client on disk has been rebuilt.
+	//
+	// `web/` is served from disk with no-store, so a rebuild is live immediately —
+	// but only for a browser that asks again, and a tab left open on a phone never
+	// does. Without this, seeing a change meant walking to the machine, or at least
+	// remembering to pull-to-refresh. Deliberately not while the terminal or the
+	// press panel is open: a reload there would throw away a control token, a
+	// half-typed message, or a scroll position, and neither view is where you want
+	// the page to vanish from under you.
+	if (data.client) {
+		if (clientStamp === null) clientStamp = data.client
+		else if (data.client !== clientStamp && !terminalOpen() && !pressOpen()) return void location.reload()
+	}
 	sessions = data.sessions
 	setRoomSessions(sessions)
 	// same treatment as the terminal: grey when current, and an arrow in the
@@ -216,12 +237,11 @@ function showRoom() {
 /* ── wiring ── */
 
 mountTerminal($<HTMLElement>('#terminal'), () => {})
-mountPress($<HTMLElement>('#press'))
-
-// The press view is a second thing to look at, not a second app: one button in
-// the header opens it, and it sits above the list rather than replacing the page,
-// so a glance at what shipped never costs you the session you were watching.
+// One button in the header opens it, and the panel itself owns closing — it is a
+// full screen on a phone and a drawer on a desktop, so the way out has to be
+// inside it rather than back up in a header you may have scrolled past.
 const pressBtn = $<HTMLButtonElement>('#pressbtn')
+mountPress($<HTMLElement>('#press'), () => pressBtn.setAttribute('aria-expanded', 'false'))
 pressBtn.addEventListener('click', () => {
 	const opening = !pressOpen()
 	opening ? showPress() : closePress()

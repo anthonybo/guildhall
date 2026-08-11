@@ -249,10 +249,10 @@ function paintList(list) {
     head.children[0].textContent = band2.label;
     head.children[1].textContent = String(members.length);
     nodes.push(head);
-    nodes.push(...members.map(row2));
+    nodes.push(...members.map(row));
   }
   listEl.replaceChildren(...nodes);
-  function row2(s) {
+  function row(s) {
     const look = LOOK[s.state];
     const li = document.createElement("li");
     const busy = s.state === "working" || s.state === "shell";
@@ -399,15 +399,15 @@ var Canvas = class {
    *  Needed by the documentation renderer, which composites the pixel layer as a
    *  raster and re-draws these as real glyphs on top — a nameplate flattened into
    *  half blocks is unreadable at any size. */
-  cellAt(col, row2) {
-    return this.overlay[row2]?.[col] ?? null;
+  cellAt(col, row) {
+    return this.overlay[row]?.[col] ?? null;
   }
-  text(col, row2, s, f, b, bold = false) {
-    if (row2 < 0 || row2 >= this.rows) return;
+  text(col, row, s, f, b, bold = false) {
+    if (row < 0 || row >= this.rows) return;
     for (const [i, ch] of [...s].entries()) {
       const c = col + i;
       if (c < 0 || c >= this.w) continue;
-      this.overlay[row2][c] = { ch, fg: f, bg: b, bold };
+      this.overlay[row][c] = { ch, fg: f, bg: b, bold };
     }
   }
   render() {
@@ -814,19 +814,19 @@ function addFacilities(room, bandRows, firstFree) {
   }
   let sb = 0;
   for (let i = 0; i < wish.length && sb < socialBands.length; ) {
-    const row2 = socialBands[sb];
+    const row = socialBands[sb];
     let lo = 2;
     let hi = room.cols - 3;
     for (let side = 0; side < 2 && i < wish.length; side++) {
       const f = FACILITIES[wish[i]];
-      if (!f || hi - lo + 1 < f.w + (side === 0 ? 2 : 0) || row2 + f.h > room.rows - 1) {
+      if (!f || hi - lo + 1 < f.w + (side === 0 ? 2 : 0) || row + f.h > room.rows - 1) {
         i++;
         side--;
         if (i >= wish.length) break;
         continue;
       }
       const c0 = side === 0 ? lo : hi - f.w + 1;
-      placeFacility(room, f, c0, row2, `${wish[i]}@${row2}`);
+      placeFacility(room, f, c0, row, `${wish[i]}@${row}`);
       if (side === 0) lo = c0 + f.w + 2;
       else hi = c0 - 1;
       i++;
@@ -993,14 +993,14 @@ var RoomBase = class {
   colourOf(proj) {
     return this.zoneColor.get(proj) ?? ROOFS[0];
   }
-  isOpen(col, row2) {
-    if (row2 < 0 || col < 0 || row2 >= this.rows || col >= this.cols) return false;
-    return this.grid[row2][col] === "floor";
+  isOpen(col, row) {
+    if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false;
+    return this.grid[row][col] === "floor";
   }
-  isWalkable(col, row2, own) {
-    if (row2 < 0 || col < 0 || row2 >= this.rows || col >= this.cols) return false;
-    if (this.grid[row2][col] !== "floor") return false;
-    const k = `${col},${row2}`;
+  isWalkable(col, row, own) {
+    if (row < 0 || col < 0 || row >= this.rows || col >= this.cols) return false;
+    if (this.grid[row][col] !== "floor") return false;
+    const k = `${col},${row}`;
     return !this.seatTiles.has(k) || k === own;
   }
   findPath(sc, sr, ec, er, own) {
@@ -1204,8 +1204,8 @@ var RoomBase = class {
     ch.activity = null;
     ch.chatWanted = false;
   }
-  reserve(ch, col, row2) {
-    const k = `${col},${row2}`;
+  reserve(ch, col, row) {
+    const k = `${col},${row}`;
     const holder = this.dest.get(k);
     if (holder && holder !== ch.id) return false;
     this.unreserve(ch);
@@ -1512,9 +1512,9 @@ var SimBase = class extends RoomBase {
    * walking — the reference allows that too — but they must never come to rest
    * on the same tile, so the target is claimed before the path is taken.
    */
-  walkTo(ch, col, row2, own) {
-    if (!this.reserve(ch, col, row2)) return false;
-    const path = this.findPath(ch.col, ch.row, col, row2, own);
+  walkTo(ch, col, row, own) {
+    if (!this.reserve(ch, col, row)) return false;
+    const path = this.findPath(ch.col, ch.row, col, row, own);
     if (!path.length) {
       this.unreserve(ch);
       return false;
@@ -1589,10 +1589,10 @@ var Office = class extends SimBase {
     this.imageSpans.clear();
     const block = (x, y, w, hRows) => {
       for (let i = 0; i < hRows; i++) {
-        const row2 = (y >> 1) + i;
-        const arr = this.imageSpans.get(row2) ?? [];
+        const row = (y >> 1) + i;
+        const arr = this.imageSpans.get(row) ?? [];
         arr.push([x, x + w]);
-        this.imageSpans.set(row2, arr);
+        this.imageSpans.set(row, arr);
       }
     };
     this.monitors = [];
@@ -1699,7 +1699,7 @@ var Office = class extends SimBase {
   horizontalPlates(cv2) {
     const named = /* @__PURE__ */ new Set();
     const claimed = /* @__PURE__ */ new Map();
-    const blocks = (row2) => claimed.get(row2) ?? [];
+    const blocks = (row) => claimed.get(row) ?? [];
     for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
       if (named.has(pod.proj)) continue;
       named.add(pod.proj);
@@ -1731,10 +1731,10 @@ var Office = class extends SimBase {
   labels(cv2, placed, selected, showAll = true) {
     for (const p of placed) {
       for (let i = 0; i < CHAR_H / 2; i++) {
-        const row2 = (p.y >> 1) + i;
-        const arr = this.imageSpans.get(row2) ?? [];
+        const row = (p.y >> 1) + i;
+        const arr = this.imageSpans.get(row) ?? [];
         arr.push([p.x, p.x + CHAR_W]);
-        this.imageSpans.set(row2, arr);
+        this.imageSpans.set(row, arr);
       }
     }
     const taken = /* @__PURE__ */ new Map();
@@ -1744,9 +1744,9 @@ var Office = class extends SimBase {
       const sel = s.id === selected;
       const urgent = s.state === "needs" || s.state === "error";
       if (!urgent && !sel) continue;
-      const row2 = p.y >> 1;
-      const rows = [...Array(CHAR_H / 2).keys()].map((i) => row2 + i);
-      rows.push(row2 - 1, row2 + CHAR_H / 2);
+      const row = p.y >> 1;
+      const rows = [...Array(CHAR_H / 2).keys()].map((i) => row + i);
+      rows.push(row - 1, row + CHAR_H / 2);
       const spots = [];
       for (const r of rows) spots.push([r, p.x + CHAR_W], [r, p.x - 1]);
       const free = spots.filter(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
@@ -1783,8 +1783,8 @@ var Office = class extends SimBase {
     }
   }
   /** Is this run free of other text and of any image? */
-  blocked(row2, col, len, taken) {
-    const spans = [...taken.get(row2) ?? [], ...this.imageSpans.get(row2) ?? []];
+  blocked(row, col, len, taken) {
+    const spans = [...taken.get(row) ?? [], ...this.imageSpans.get(row) ?? []];
     return spans.some((r) => col < r[1] && col + len > r[0]);
   }
 };
@@ -1816,13 +1816,13 @@ function extract(img, rowIdx, frame2, flip) {
   const y0 = rowIdx * FRAME_H;
   const grid = [];
   for (let y = 0; y < FRAME_H; y++) {
-    const row2 = [];
+    const row = [];
     for (let x = 0; x < FRAME_W; x++) {
       const sx = flip ? x0 + (FRAME_W - 1 - x) : x0 + x;
       const i = ((y0 + y) * img.w + sx) * 4;
-      row2.push(img.rgba[i + 3] < 128 ? null : [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]]);
+      row.push(img.rgba[i + 3] < 128 ? null : [img.rgba[i], img.rgba[i + 1], img.rgba[i + 2]]);
     }
-    grid.push(row2);
+    grid.push(row);
   }
   return { w: FRAME_W, h: FRAME_H, grid };
 }
@@ -1847,7 +1847,7 @@ function hueRotate(g, deg) {
     w: g.w,
     h: g.h,
     grid: g.grid.map(
-      (row2) => row2.map(
+      (row) => row.map(
         (p) => p ? [
           clamp(p[0] * m[0] + p[1] * m[1] + p[2] * m[2]),
           clamp(p[0] * m[3] + p[1] * m[4] + p[2] * m[5]),
@@ -1859,12 +1859,12 @@ function hueRotate(g, deg) {
 }
 var cache2 = /* @__PURE__ */ new Map();
 function pinBadge(g, colour) {
-  const grid = g.grid.map((row2) => [...row2]);
+  const grid = g.grid.map((row) => [...row]);
   const top = Math.round(g.h * 0.58);
   for (let y = top; y < Math.min(g.h, top + 6); y++) {
-    const row2 = grid[y];
-    const first = row2.findIndex((c) => c);
-    const last2 = row2.reduce((acc, c, i) => c ? i : acc, -1);
+    const row = grid[y];
+    const first = row.findIndex((c) => c);
+    const last2 = row.reduce((acc, c, i) => c ? i : acc, -1);
     if (first < 0 || last2 - first < 3) continue;
     const x = first + 1;
     const edge = [24, 26, 34];
@@ -2852,111 +2852,245 @@ function mountTerminal(host, closed) {
     if (e.key === "Escape" && openId) close();
   });
 }
+var isOpen = () => openId !== null;
 
 // web/press.ts
 var el2;
 var timer2 = 0;
 var open = false;
 var deploys = false;
-var scrollOnRender = false;
+var onClose2 = () => {
+};
+function hue(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
+  return `oklch(0.82 0.13 ${h})`;
+}
+function ciLook(ci) {
+  if (ci.status !== "completed") return { glyph: "\u25D4", tone: "text-gold", say: `${ci.workflow} ${ci.status}` };
+  switch (ci.conclusion) {
+    case "success":
+      return { glyph: "\u2714", tone: "text-(--work)", say: `${ci.workflow} passed` };
+    case "failure":
+    case "timed_out":
+      return { glyph: "\u2716", tone: "text-hot", say: `${ci.workflow} ${ci.conclusion === "failure" ? "failed" : "timed out"}` };
+    case "cancelled":
+    case "skipped":
+      return { glyph: "\u2298", tone: "text-faint", say: `${ci.workflow} ${ci.conclusion}` };
+    default:
+      return { glyph: "\xB7", tone: "text-faint", say: `${ci.workflow} ${ci.conclusion ?? ci.status}` };
+  }
+}
 var MARK = {
   commit: { glyph: "\u25CF", tone: "text-(--work)" },
-  push: { glyph: "\u2191", tone: "text-gold" },
+  push: { glyph: "\u21E7", tone: "text-gold" },
   run: { glyph: "\u2699", tone: "text-muted" },
-  deploy: { glyph: "\u25B2", tone: "text-(--work)" }
+  deploy: { glyph: "\u2601", tone: "text-(--work)" }
 };
 function describe(i) {
   if (i.kind === "commit") return i.subject;
-  if (i.kind === "push") return `pushed ${i.branch} to ${i.remote}${i.forced ? " \u2014 forced" : ""}${i.count ? ` \xB7 ${i.count} commit${i.count === 1 ? "" : "s"}` : ""}`;
-  if (i.kind === "run") return `${i.workflow} \xB7 ${i.conclusion ?? i.status}`;
-  return `deployed ${i.hostname ?? i.worker}${i.env ? ` (${i.env})` : ""} \xB7 via ${i.source}`;
+  if (i.kind === "push") return `pushed ${i.branch} \u2192 ${i.remote}${i.forced ? "  \xB7  forced" : ""}${i.count ? `  \xB7  ${i.count} commit${i.count === 1 ? "" : "s"}` : ""}`;
+  if (i.kind === "run") return `${i.workflow}  \xB7  ${i.conclusion ?? i.status}`;
+  return `deployed ${i.hostname ?? i.worker}${i.env ? `  \xB7  ${i.env}` : ""}  \xB7  via ${i.source}`;
 }
 var failed = (i) => i.kind === "run" && (i.conclusion === "failure" || i.conclusion === "timed_out");
-function row(i) {
+function repoRow(r) {
   const li = document.createElement("li");
-  li.className = `grid grid-cols-[1.2rem_minmax(5rem,8rem)_1fr_auto] items-baseline gap-x-2.5 gap-y-0.5 border-b border-line/60 px-3.5 py-2 max-[560px]:grid-cols-[1.2rem_1fr_auto]`;
-  const mark = MARK[i.kind];
-  li.innerHTML = `
-		<span class="${mark.tone} text-center text-[0.8rem] max-[560px]:col-start-1 max-[560px]:row-start-1" title="${i.kind}">${mark.glyph}</span>
-		<span class="repo truncate font-bold text-[0.82rem] text-label max-[560px]:col-start-2 max-[560px]:row-start-1"></span>
-		<span class="what truncate text-[0.84rem] ${failed(i) ? "text-hot" : "text-muted"} max-[560px]:col-start-2 max-[560px]:col-end-4 max-[560px]:row-start-2"></span>
-		<span class="text-[0.74rem] whitespace-nowrap text-faint tabular-nums max-[560px]:col-start-3 max-[560px]:row-start-1">${ago(Date.now() - i.at)}</span>`;
-  li.querySelector(".repo").textContent = i.repo;
-  li.querySelector(".what").textContent = describe(i);
+  li.className = "flex items-baseline gap-2 px-2 py-[0.15rem] whitespace-nowrap hover:bg-line/40";
+  const tint = hue(r.label);
+  const bar2 = document.createElement("span");
+  bar2.textContent = "\u2502";
+  bar2.style.color = tint;
+  const name = document.createElement("span");
+  name.className = "w-[9rem] shrink-0 truncate font-bold max-[560px]:w-[6.5rem]";
+  name.style.color = tint;
+  name.textContent = r.label;
+  if (r.error) {
+    const err = document.createElement("span");
+    err.className = "truncate text-hot";
+    err.textContent = r.error;
+    li.append(bar2, name, err);
+    return li;
+  }
+  const branch = document.createElement("span");
+  branch.className = "w-[7rem] shrink-0 truncate text-faint max-[720px]:hidden";
+  branch.textContent = r.branch ?? "";
+  const sync = document.createElement("span");
+  sync.className = `w-[4.5rem] shrink-0 tabular-nums ${r.ahead ? "font-bold text-gold" : "text-faint"}`;
+  sync.textContent = [r.ahead ? `\u2191${r.ahead}` : "", r.behind ? `\u2193${r.behind}` : ""].filter(Boolean).join(" ");
+  if (r.ahead) sync.title = `${r.ahead} commit${r.ahead === 1 ? "" : "s"} not pushed anywhere`;
+  const work = document.createElement("span");
+  work.className = `w-[4.5rem] shrink-0 tabular-nums ${r.changed ? "text-gold" : "text-faint"}`;
+  work.textContent = [r.changed ? `\u25CF${r.changed}` : "", r.untracked ? `?${r.untracked}` : ""].filter(Boolean).join(" ");
+  if (r.changed || r.untracked) work.title = `${r.changed} changed, ${r.untracked} untracked`;
+  const ci = document.createElement("span");
+  ci.className = "w-4 shrink-0 text-center";
+  if (r.ci) {
+    const look = ciLook(r.ci);
+    ci.textContent = look.glyph;
+    ci.className += ` ${look.tone}`;
+    ci.title = look.say;
+  }
+  const live2 = document.createElement("span");
+  live2.className = "w-4 shrink-0 text-center";
+  if (r.live) {
+    live2.textContent = r.live.rollback ? "\u21BA" : "\u2601";
+    live2.className += r.live.rollback ? " text-gold" : " text-(--work)";
+    live2.title = `${r.live.rollback ? "rolled back" : "live"}: ${r.live.hostname ?? r.live.worker}`;
+  }
+  const when = document.createElement("span");
+  when.className = "ml-auto shrink-0 tabular-nums text-faint";
+  when.textContent = r.lastCommitAt ? ago(Date.now() - r.lastCommitAt) : "";
+  li.append(bar2, name, branch, sync, work, ci, live2, when);
+  if (!r.upstream && !r.unborn) {
+    const note = document.createElement("span");
+    note.className = "shrink-0 pl-2 text-faint max-[560px]:hidden";
+    note.textContent = "no upstream";
+    li.append(note);
+  }
   return li;
+}
+function feedRow(i) {
+  const li = document.createElement("li");
+  li.className = "flex items-baseline gap-2 px-2 py-[0.15rem] whitespace-nowrap hover:bg-line/40";
+  const mark = MARK[i.kind];
+  const tint = hue(i.repo);
+  const glyph = document.createElement("span");
+  glyph.className = `w-3 shrink-0 text-center ${mark.tone}`;
+  glyph.textContent = mark.glyph;
+  glyph.title = i.kind;
+  const when = document.createElement("span");
+  when.className = "w-[2.6rem] shrink-0 text-right tabular-nums text-faint";
+  when.textContent = ago(Date.now() - i.at);
+  const bar2 = document.createElement("span");
+  bar2.textContent = "\u2502";
+  bar2.style.color = tint;
+  const repo = document.createElement("span");
+  repo.className = "w-[9rem] shrink-0 truncate max-[560px]:w-[6.5rem]";
+  repo.style.color = tint;
+  repo.textContent = i.repo;
+  const sha = document.createElement("span");
+  sha.className = "w-[4.5rem] shrink-0 tabular-nums text-faint max-[720px]:hidden";
+  sha.textContent = i.kind === "deploy" ? "" : i.short;
+  const what = document.createElement("span");
+  what.className = `truncate ${failed(i) ? "text-hot" : i.kind === "commit" ? "text-label" : "text-muted"}`;
+  what.textContent = describe(i);
+  li.append(glyph, when, bar2, repo, sha, what);
+  return li;
+}
+function heading(text, count) {
+  const h = document.createElement("div");
+  h.className = "sticky top-0 z-[1] flex items-center gap-2 bg-panel px-2 py-1 text-[0.72rem] tracking-[0.14em] text-gold uppercase";
+  const label = document.createElement("span");
+  label.textContent = count === void 0 ? text : `${text} ${count}`;
+  const rule = document.createElement("span");
+  rule.className = "h-px flex-1 bg-line";
+  h.append(label, rule);
+  return h;
 }
 function render(snap) {
   const wrap2 = document.createElement("div");
+  wrap2.className = "flex h-full min-h-0 flex-col";
   const bar2 = document.createElement("div");
-  bar2.className = "flex flex-wrap items-center gap-2 border-b border-line px-3.5 py-2";
+  bar2.className = "flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2";
   const title = document.createElement("span");
-  title.className = "font-bold text-label";
-  title.textContent = "Commits & deploys";
+  title.className = "font-bold tracking-[0.06em] text-gold";
+  title.textContent = "SHIPPED";
   const meta = document.createElement("span");
-  meta.className = "text-[0.74rem] text-faint";
-  meta.textContent = snap.error ? "" : `${snap.repos} repositories \xB7 read ${ago(Date.now() - snap.at)}`;
+  meta.className = "truncate text-[0.72rem] text-faint";
+  meta.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.textContent = deploys ? "Deploys on" : "Include deploys";
-  toggle.title = deploys ? "Also reading GitHub Actions and Cloudflare \u2014 slower" : "Also read workflow runs and Cloudflare deploys (takes ~17s the first time)";
-  toggle.className = `ml-auto flex min-h-9 cursor-pointer items-center rounded border px-3 text-[0.74rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${deploys ? "border-gold text-gold" : "border-line text-muted hover:text-label"}`;
+  toggle.textContent = deploys ? "deploys on" : "+ deploys";
+  toggle.title = deploys ? "Reading GitHub Actions and Cloudflare too" : "Also read workflow runs and Cloudflare deploys (~17s the first time)";
+  toggle.className = `ml-auto flex min-h-9 shrink-0 cursor-pointer items-center rounded border px-2.5 text-[0.72rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${deploys ? "border-gold text-gold" : "border-line text-muted hover:text-label"}`;
   toggle.addEventListener("click", () => {
     deploys = !deploys;
     refresh2();
   });
-  bar2.append(title, meta, toggle);
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close (Esc)";
+  x.className = "flex min-h-9 shrink-0 cursor-pointer items-center rounded border border-hot bg-transparent px-2.5 text-[0.72rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  x.addEventListener("click", close2);
+  bar2.append(title, meta, toggle, x);
   wrap2.append(bar2);
+  const body = document.createElement("div");
+  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
   if (snap.error) {
     const p = document.createElement("p");
-    p.className = "m-0 px-3.5 py-6 text-center text-[0.84rem] text-muted";
+    p.className = "m-0 px-2.5 py-8 text-center text-muted";
     p.textContent = snap.error;
-    wrap2.append(p);
-  } else if (!snap.items.length) {
+    body.append(p);
+  } else if (!snap.repos.length && !snap.items.length) {
     const p = document.createElement("p");
-    p.className = "m-0 px-3.5 py-6 text-center text-faint";
-    p.textContent = deploys ? "Reading \u2014 deploys take about 17 seconds." : "Nothing yet.";
-    wrap2.append(p);
+    p.className = "m-0 px-2.5 py-8 text-center text-faint";
+    p.textContent = deploys ? "Reading \u2014 deploys take about 17 seconds." : "Reading\u2026";
+    body.append(p);
   } else {
+    const busy = snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
+    const quiet = snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
+    body.append(heading("unpushed & dirty", busy.length));
+    if (busy.length) {
+      const ul = document.createElement("ul");
+      ul.className = "m-0 list-none p-0";
+      for (const r of busy) ul.append(repoRow(r));
+      body.append(ul);
+    } else {
+      const p = document.createElement("p");
+      p.className = "m-0 px-2.5 py-2 text-faint";
+      p.textContent = "Everything is pushed and clean.";
+      body.append(p);
+    }
+    if (quiet.length) {
+      const details2 = document.createElement("details");
+      const sum = document.createElement("summary");
+      sum.className = "cursor-pointer px-2 py-1 text-[0.72rem] text-faint hover:text-label";
+      sum.textContent = `${quiet.length} clean ${quiet.length === 1 ? "repo" : "repos"}`;
+      const ul = document.createElement("ul");
+      ul.className = "m-0 list-none p-0";
+      for (const r of quiet) ul.append(repoRow(r));
+      details2.append(sum, ul);
+      body.append(details2);
+    }
+    body.append(heading("feed", snap.items.length));
     if (snap.local) {
       const note = document.createElement("p");
-      note.className = "m-0 border-b border-line/60 px-3.5 py-1.5 text-[0.72rem] text-faint";
+      note.className = "m-0 px-2.5 py-1 text-[0.72rem] text-faint";
       note.textContent = "Commits and pushes only \u2014 deploys were not read.";
-      wrap2.append(note);
+      body.append(note);
     }
     for (const err of [snap.githubError, snap.cloudflareError]) {
       if (!err) continue;
       const p = document.createElement("p");
-      p.className = "m-0 border-b border-line/60 px-3.5 py-1.5 text-[0.72rem] text-hot";
+      p.className = "m-0 px-2.5 py-1 text-[0.72rem] text-hot";
       p.textContent = err;
-      wrap2.append(p);
+      body.append(p);
     }
-    const ul = document.createElement("ul");
-    ul.className = "m-0 list-none p-0";
-    for (const i of snap.items) ul.append(row(i));
-    wrap2.append(ul);
+    const feed2 = document.createElement("ul");
+    feed2.className = "m-0 list-none p-0";
+    for (const i of snap.items) feed2.append(feedRow(i));
+    body.append(feed2);
   }
+  wrap2.append(body);
   el2.replaceChildren(wrap2);
-  if (scrollOnRender) {
-    scrollOnRender = false;
-    el2.style.scrollMarginTop = `${(document.getElementById("bar")?.getBoundingClientRect().height ?? 0) + 8}px`;
-    requestAnimationFrame(() => el2.scrollIntoView({ block: "start" }));
-  }
 }
 async function refresh2() {
   if (!open) return;
   try {
     const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`);
-    if (!res.ok) return render({ at: Date.now(), items: [], repos: 0, local: true, error: `the server said ${res.status}` });
+    if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: `the server said ${res.status}` });
     render(await res.json());
   } catch {
-    render({ at: Date.now(), items: [], repos: 0, local: true, error: "could not reach guildhall" });
+    render({ at: Date.now(), items: [], repos: [], local: true, error: "could not reach guildhall" });
   }
 }
 function show2() {
   open = true;
   el2.hidden = false;
-  el2.textContent = "Reading\u2026";
-  scrollOnRender = true;
+  document.body.classList.add("overflow-hidden");
+  el2.textContent = "";
   refresh2();
   clearInterval(timer2);
   timer2 = setInterval(refresh2, 3e4);
@@ -2967,10 +3101,16 @@ function close2() {
   timer2 = 0;
   el2.hidden = true;
   el2.replaceChildren();
+  document.body.classList.remove("overflow-hidden");
+  onClose2();
 }
-var isOpen = () => open;
-function mountPress(host) {
+var isOpen2 = () => open;
+function mountPress(host, closed) {
   el2 = host;
+  onClose2 = closed;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && open) close2();
+  });
 }
 
 // web/app.ts
@@ -3011,7 +3151,12 @@ function paintCounts(list) {
     })
   );
 }
+var clientStamp = null;
 function apply(data) {
+  if (data.client) {
+    if (clientStamp === null) clientStamp = data.client;
+    else if (data.client !== clientStamp && !isOpen() && !isOpen2()) return void location.reload();
+  }
   sessions2 = data.sessions;
   setRoomSessions(sessions2);
   if (data.version) {
@@ -3088,10 +3233,10 @@ function showRoom() {
 }
 mountTerminal($("#terminal"), () => {
 });
-mountPress($("#press"));
 var pressBtn = $("#pressbtn");
+mountPress($("#press"), () => pressBtn.setAttribute("aria-expanded", "false"));
 pressBtn.addEventListener("click", () => {
-  const opening = !isOpen();
+  const opening = !isOpen2();
   opening ? show2() : close2();
   pressBtn.setAttribute("aria-expanded", String(opening));
 });

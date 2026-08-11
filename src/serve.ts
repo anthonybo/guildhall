@@ -120,7 +120,7 @@ export function createServer(opts: ServeOptions) {
 	const sessions = () => (opts.demo ? demoSessions() : collect())
 	/** The browser shows the same version and update mark the terminal does, so a
 	 *  stale phone tab is as visible as a stale terminal. */
-	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: BUILD, update: available() })
+	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: BUILD, update: available(), client: clientStamp() })
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 
@@ -307,6 +307,31 @@ function login(res: http.ServerResponse, code: number, state: Parameters<typeof 
 
 function send(res: http.ServerResponse, code: number, type: string, body: string | Buffer) {
 	res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }).end(body)
+}
+
+/**
+ * A fingerprint of the browser client, so a tab can tell it has gone stale.
+ *
+ * `web/` is read from disk on every request, which means a rebuild is live the
+ * moment it lands — but only to a browser that asks again, and a phone left open
+ * on the sofa never does. So the fingerprint rides the feed the page is already
+ * listening to, and the page reloads itself when it changes.
+ *
+ * Size and mtime rather than a hash of the contents: this is called on every
+ * stream tick, hashing a 100KB bundle twice a second to detect a change that
+ * happens twice a day is a poor trade, and stat is enough to notice a rebuild.
+ */
+function clientStamp() {
+	let stamp = ''
+	for (const name of ['app.js', 'app.css', 'index.html']) {
+		try {
+			const s = fs.statSync(path.join(ROOT, 'web', name))
+			stamp += `${s.size}:${Math.round(s.mtimeMs)};`
+		} catch {
+			stamp += 'missing;'
+		}
+	}
+	return stamp
 }
 
 /** Static files, confined to web/ and assets/ — never an arbitrary path. */

@@ -90,9 +90,18 @@
 		     until a row's terminal button is pressed, and built by terminal.ts. -->
 		<section id="terminal" class="mt-2.5 overflow-hidden border-gold/50 bg-panel max-[560px]:border-y min-[560px]:mx-3.5 min-[560px]:rounded-md min-[560px]:border" hidden></section>
 
-		<!-- Commits, pushes, workflow runs and Cloudflare deploys on one timeline,
-		     read from pressroom. Empty until the header button asks for it. -->
-		<section id="press" class="mt-2.5 overflow-hidden border-line bg-panel max-[560px]:border-y min-[560px]:mx-3.5 min-[560px]:rounded-md min-[560px]:border" hidden></section>
+		<!-- Commits, pushes, workflow runs and Cloudflare deploys, read from pressroom.
+		     Over the page rather than in it: full screen on a phone, a drawer down the
+		     right on a desktop. Inline it was something you scrolled past on the way
+		     somewhere else. Empty until the header button asks for it.
+		     The insets keep it clear of the notch and the home indicator, since at
+		     this size it is the whole window. -->
+		<section
+			id="press"
+			class="fixed inset-0 z-[5] flex flex-col border-line bg-panel pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-[0_0_60px_rgb(0_0_0/60%)] min-[880px]:inset-y-0 min-[880px]:right-0 min-[880px]:left-auto min-[880px]:w-[min(52rem,72vw)] min-[880px]:border-l"
+			aria-label="Commits and deploys"
+			hidden
+		></section>
 
 		<ul id="list" class="list m-0 grid list-none gap-2 px-3.5 pt-2.5"></ul>
 

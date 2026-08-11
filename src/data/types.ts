@@ -90,10 +90,41 @@ export type PressItem =
 	| { kind: 'run'; repo: string; at: number; short: string; workflow: string; branch: string; status: string; conclusion: string | null; url: string; durationMs: number | null }
 	| { kind: 'deploy'; repo: string; at: number; worker: string; hostname: string | null; env: string | null; source: string }
 
+/**
+ * A repository as the panel above the feed shows it.
+ *
+ * `ahead` is the number that earns its place: every project here deploys by
+ * pushing, so three commits ahead of the upstream is three commits of work that
+ * exist on this laptop and nowhere else. That is the single most useful thing a
+ * glance at this can tell you, and it is what the web view was missing entirely.
+ */
+export type PressRepo = {
+	label: string
+	branch?: string
+	/** Null upstream means nothing to be ahead OF, which is worth saying out loud. */
+	upstream?: string | null
+	ahead: number
+	behind: number
+	/** Tracked files with any change at all, counted once each. */
+	changed: number
+	untracked: number
+	/** Before the first commit, when there is no HEAD to compare against. */
+	unborn?: boolean
+	/** Newest workflow run for this repo: did the pipeline pass. */
+	ci?: { conclusion: string | null; status: string; workflow: string; url: string }
+	/** Newest Cloudflare deploy: is it live, and was it a rollback. */
+	live?: { hostname: string | null; worker: string; rollback: boolean; at: number }
+	/** Commit date of the newest commit, for ordering and for the age column. */
+	lastCommitAt?: number
+	/** git failed for this repo — shown in place of the numbers rather than thrown. */
+	error?: string
+}
+
 export type PressSnapshot = {
 	at: number
 	items: PressItem[]
-	repos: number
+	/** The panel above the feed. Was a bare count, which said nothing. */
+	repos: PressRepo[]
 	/** True when runs and deploys were never asked for, rather than absent. */
 	local: boolean
 	githubError?: string

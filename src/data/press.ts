@@ -19,7 +19,7 @@
  * and refreshes freely; deploys are fetched only when something asks for them.
  */
 import { execFile } from 'node:child_process'
-import type { PressItem, PressSnapshot } from './types.ts'
+import type { PressItem, PressRepo, PressSnapshot } from './types.ts'
 
 /** Generous: the local read measures ~2s, but a cold page cache is much slower. */
 const LOCAL_TIMEOUT = 45_000
@@ -51,12 +51,12 @@ function run(full: boolean): Promise<PressSnapshot> {
 				// ENOENT is the interesting one and deserves an answer rather than a
 				// stack trace: pressroom is a separate tool and may simply not be here.
 				const missing = /ENOENT|not found/i.test(detail)
-				return resolve({ at: Date.now(), items: [], repos: 0, local: !full, error: missing ? 'pressroom is not installed — `npm link` it from ~/projects/pressroom' : detail.slice(0, 200) })
+				return resolve({ at: Date.now(), items: [], repos: [], local: !full, error: missing ? 'pressroom is not installed — `npm link` it from ~/projects/pressroom' : detail.slice(0, 200) })
 			}
 			try {
 				resolve(shape(JSON.parse(stdout), full))
 			} catch {
-				resolve({ at: Date.now(), items: [], repos: 0, local: !full, error: 'pressroom returned something unreadable' })
+				resolve({ at: Date.now(), items: [], repos: [], local: !full, error: 'pressroom returned something unreadable' })
 			}
 		})
 	})
@@ -73,17 +73,67 @@ const ms = (iso: string | undefined) => (iso ? Date.parse(iso) || 0 : 0)
  * a deploy has no commit at all.
  */
 function shape(raw: any, full: boolean): PressSnapshot {
-	if (raw?.version !== 1) return { at: Date.now(), items: [], repos: 0, local: !full, error: `unknown pressroom schema (version ${raw?.version})` }
+	if (raw?.version !== 1) return { at: Date.now(), items: [], repos: [], local: !full, error: `unknown pressroom schema (version ${raw?.version})` }
 	const items: PressItem[] = []
 	for (const c of raw.commits ?? []) items.push({ kind: 'commit', repo: c.repo, at: ms(c.committed), short: c.short, subject: c.subject, author: c.author, files: c.files, insertions: c.insertions, deletions: c.deletions })
 	for (const p of raw.pushes ?? []) items.push({ kind: 'push', repo: p.repo, at: ms(p.at), short: p.short, remote: p.remote, branch: p.branch, count: p.count, forced: p.forced })
 	for (const r of raw.runs ?? []) items.push({ kind: 'run', repo: r.repo, at: ms(r.updatedAt) || ms(r.startedAt), short: r.short, workflow: r.workflow, branch: r.branch, status: r.status, conclusion: r.conclusion, url: r.url, durationMs: r.durationMs })
 	for (const d of raw.deploys ?? []) items.push({ kind: 'deploy', repo: d.repo, at: ms(d.at), worker: d.worker, hostname: d.hostname, env: d.env, source: d.source })
 	items.sort((a, b) => b.at - a.at)
+
+	// The newest run and the newest deploy per repo. Both, side by side: a run has
+	// an outcome and a Cloudflare deploy does not, and a repo can be green-and-live,
+	// red-and-live (the failure came after), or live with no pipeline at all —
+	// several here deploy straight from the laptop with wrangler.
+	const newestRun = new Map<string, any>()
+	const newestDeploy = new Map<string, any>()
+	for (const r of raw.runs ?? []) {
+		const at = ms(r.updatedAt) || ms(r.startedAt)
+		const held = newestRun.get(r.repo)
+		if (!held || at > held.at) newestRun.set(r.repo, { at, run: r })
+	}
+	for (const d of raw.deploys ?? []) {
+		const at = ms(d.at)
+		const held = newestDeploy.get(d.repo)
+		if (!held || at > held.at) newestDeploy.set(d.repo, { at, deploy: d })
+	}
+
+	const statuses = raw.statuses ?? {}
+	const errors = raw.errors ?? {}
+	const lastCommit = new Map<string, number>()
+	for (const c of raw.commits ?? []) {
+		const at = ms(c.committed)
+		if (at > (lastCommit.get(c.repo) ?? 0)) lastCommit.set(c.repo, at)
+	}
+
+	const repos: PressRepo[] = (raw.repos ?? []).map((r: any) => {
+		const st = statuses[r.label] ?? {}
+		const run = newestRun.get(r.label)?.run
+		const dep = newestDeploy.get(r.label)?.deploy
+		return {
+			label: r.label,
+			branch: st.branch ?? undefined,
+			upstream: st.upstream ?? null,
+			ahead: st.ahead ?? 0,
+			behind: st.behind ?? 0,
+			changed: st.changed ?? 0,
+			untracked: st.untracked ?? 0,
+			unborn: !!st.unborn,
+			ci: run ? { conclusion: run.conclusion ?? null, status: run.status, workflow: run.workflow, url: run.url } : undefined,
+			live: dep ? { hostname: dep.hostname ?? null, worker: dep.worker, rollback: /rollback/i.test(String(dep.triggeredBy ?? '')), at: ms(dep.at) } : undefined,
+			lastCommitAt: lastCommit.get(r.label),
+			error: st.error ?? errors[r.label] ?? undefined,
+		}
+	})
+	// Anything with work that exists nowhere else first, then by recency. The panel
+	// is read top-down and the interesting rows must not be buried in alphabetical
+	// order among thirty repositories that have nothing to report.
+	repos.sort((a, b) => Number(!!b.ahead) - Number(!!a.ahead) || b.changed - a.changed || (b.lastCommitAt ?? 0) - (a.lastCommitAt ?? 0) || a.label.localeCompare(b.label))
+
 	return {
 		at: Date.now(),
 		items: items.slice(0, KEEP),
-		repos: (raw.repos ?? []).length,
+		repos,
 		local: !!raw.local,
 		githubError: raw.githubError ?? undefined,
 		cloudflareError: raw.cloudflareError ?? undefined,
@@ -112,5 +162,5 @@ export async function press(full = false): Promise<PressSnapshot> {
 		// nothing cached yet, so there is no stale answer to prefer over waiting
 		if (!held) return job
 	}
-	return held ? held.snap : { at: Date.now(), items: [], repos: 0, local: !full, error: 'still reading' }
+	return held ? held.snap : { at: Date.now(), items: [], repos: [], local: !full, error: 'still reading' }
 }
