@@ -314,6 +314,10 @@ function paintList(list) {
       away.textContent = `\u2192 ${s.away}`;
       away.title = `Started in ${s.proj}, currently working in ${s.away}`;
       away.classList.remove("hidden");
+    } else if (s.distinct) {
+      away.textContent = s.distinct;
+      away.title = `More than one session is called ${s.proj}; this is ${s.distinct}`;
+      away.classList.remove("hidden");
     }
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
     if (s.workspace) {
@@ -2672,6 +2676,13 @@ function trackViewport() {
   const vv = window.visualViewport;
   if (!vv) return;
   if (!openId || !fullScreen()) {
+    el.style.height = "";
+    el.style.top = "";
+    el.style.bottom = "";
+    return;
+  }
+  const eaten = window.innerHeight - vv.height;
+  if (eaten < 60 && vv.offsetTop < 2) {
     el.style.height = "";
     el.style.top = "";
     el.style.bottom = "";

@@ -279,6 +279,12 @@ export function paintList(list: Session[]) {
 			away.textContent = `→ ${s.away}`
 			away.title = `Started in ${s.proj}, currently working in ${s.away}`
 			away.classList.remove('hidden')
+		} else if (s.distinct) {
+			// Another live session answers to this same name, so the row says which one
+			// it is. Only ever set when the name really is shared — see disambiguate().
+			away.textContent = s.distinct
+			away.title = `More than one session is called ${s.proj}; this is ${s.distinct}`
+			away.classList.remove('hidden')
 		}
 		li.querySelector('.doing')!.textContent = s.doing || s.last || '—'
 

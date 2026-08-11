@@ -88,6 +88,24 @@ function trackViewport() {
 		el.style.bottom = ''
 		return
 	}
+	// ONLY override while something is actually eating the screen.
+	//
+	// Sizing to the visual viewport unconditionally was a regression: with no
+	// keyboard up, iOS still reports a visual viewport shorter than the layout one
+	// while the URL bar is showing, so the panel stopped filling the screen and left
+	// a strip at the bottom. `100dvh` in the stylesheet handles the ordinary case
+	// correctly and should be left to do it.
+	//
+	// 60px because the gap between the two viewports from browser chrome alone is
+	// tens of pixels, while a keyboard is hundreds. Anything in between is not worth
+	// moving the panel for.
+	const eaten = window.innerHeight - vv.height
+	if (eaten < 60 && vv.offsetTop < 2) {
+		el.style.height = ''
+		el.style.top = ''
+		el.style.bottom = ''
+		return
+	}
 	el.style.height = `${vv.height}px`
 	el.style.top = `${vv.offsetTop}px`
 	// `inset-0` sets bottom too, which would fight an explicit height

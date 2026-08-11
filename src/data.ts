@@ -92,7 +92,7 @@ export function collect(): Session[] {
 			.map((s) => s.sessionId),
 	)
 
-	return registry.map((s) => {
+	const out = registry.map((s) => {
 		const file = idx.get(s.sessionId)
 		const d: Digest = file ? digest(file) : {}
 		const tab = tabs.get(s.sessionId)
@@ -140,4 +140,31 @@ export function collect(): Session[] {
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
 	})
+	return disambiguate(out)
+}
+
+/**
+ * Give rows that share a name a way to be told apart.
+ *
+ * A project name is a good label and not an identity: three live sessions can all
+ * be `tidepool` — one whose directory it is, and two rooted at the container whose
+ * tool calls keep landing there. Three identical rows is a list you cannot act on,
+ * and it is not hypothetical; it happened with `pressroom` too.
+ *
+ * The tab is the discriminator worth showing when there is one — it is what you
+ * would actually type to get there. Falling back to the session id's first four
+ * characters is dull, but it is the only thing guaranteed to be unique, and a dull
+ * unique label beats an elegant ambiguous one.
+ *
+ * Only set when a name really is shared, so the ordinary one-session-per-project
+ * case stays clean.
+ */
+function disambiguate(list: Session[]): Session[] {
+	const counts = new Map<string, number>()
+	for (const s of list) counts.set(s.proj, (counts.get(s.proj) ?? 0) + 1)
+	for (const s of list) {
+		if ((counts.get(s.proj) ?? 0) < 2) continue
+		s.distinct = s.tab ? `⌘${s.tab}` : s.id.slice(0, 4)
+	}
+	return list
 }

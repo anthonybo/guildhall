@@ -127,7 +127,9 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 export function detail(s: Session | undefined, total: number) {
 	if (!s) return ['', '']
 	const ctx = s.ctxUsed ? `${tokens(s.ctxUsed)}/${tokens(s.ctxLimit)} context` : 'no context yet'
-	const meta = `${s.proj}${s.away ? ` → ${s.away}` : ''}${s.tab ? ` · ⌘${s.tab}` : ''} · lv${s.level} ${tierOf(s.level).name} · ${s.turns} turns · ${ctx}`
+	// `distinct` only appears when another live session answers to the same name, so
+	// the detail line can say which of them you are looking at.
+	const meta = `${s.proj}${s.away ? ` → ${s.away}` : s.distinct ? ` ${s.distinct}` : ''}${s.tab ? ` · ⌘${s.tab}` : ''} · lv${s.level} ${tierOf(s.level).name} · ${s.turns} turns · ${ctx}`
 	return [
 		clip(`${fg(C.gold)}◆ ${fg(C.label)}${bold}${cut(s.title, Math.max(20, total - width(meta) - 6))}${R}  ${fg(C.faint)}${meta}${R}`, total),
 		clip(`${fg(C.muted)}  ${cut(s.doing || s.last || '—', total - 4)}${R}`, total),

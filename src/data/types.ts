@@ -25,6 +25,16 @@ export type Session = {
 	 * of silently becoming a different-looking session. See settle.ts.
 	 */
 	away?: string
+	/**
+	 * A short discriminator, set only when another live session shares this name.
+	 *
+	 * Three sessions can legitimately resolve to `tidepool` — one living in the
+	 * directory and two rooted at the container whose tool calls keep touching it —
+	 * and three identical rows with no way to tell them apart is a list you cannot
+	 * act on. Absent for the overwhelmingly common case of one session per project,
+	 * so nothing is decorated that does not need to be.
+	 */
+	distinct?: string
 	cwd: string
 	state: State
 	/** why it is blocked, when it is: "permission prompt", "input needed", … */
