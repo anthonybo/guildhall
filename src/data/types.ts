@@ -130,6 +130,14 @@ export type PressSnapshot = {
 	githubError?: string
 	cloudflareError?: string
 	error?: string
+	/**
+	 * A read is in flight and this is the best answer so far.
+	 *
+	 * Distinct from `error`, which is terminal and empties the view. Before this
+	 * existed, "still reading" was sent as an error and a poll arriving mid-read
+	 * wiped the panel — a working request presented as a failure.
+	 */
+	loading?: boolean
 }
 
 /** A registry entry exactly as Claude Code writes it. */

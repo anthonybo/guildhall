@@ -45,27 +45,50 @@ const FULL_TTL = 5 * 60_000
  */
 const KEEP = 600
 
-type Cached = { at: number; snap: PressSnapshot }
+/** A failure is remembered only briefly: a `gh` blip must not outlive its cause. */
+const ERROR_TTL = 15_000
+
+/** `until`, not `at`: an error and a success do not deserve the same shelf life. */
+type Cached = { until: number; snap: PressSnapshot }
 
 const cache = new Map<'local' | 'full', Cached>()
 const inFlight = new Set<'local' | 'full'>()
+
+/**
+ * Why a read failed, in words, from the error object rather than from stderr.
+ *
+ * This used to regex the first line of stderr for /ENOENT|not found/, which got
+ * the common case right and two others wrong: a missing `gh` or `wrangler` says
+ * "command not found" and was reported as "pressroom is not installed", and a
+ * killed process reported only "Command failed". `err.code` and `err.killed` say
+ * what actually happened, so they are consulted first.
+ */
+function why(err: { code?: string | number; killed?: boolean; message?: string }, stderr: string, full: boolean) {
+	if (err.code === 'ENOENT') return 'pressroom is not installed — `npm link` it from ~/projects/pressroom'
+	if (err.killed) return `pressroom took longer than ${Math.round((full ? FULL_TIMEOUT : LOCAL_TIMEOUT) / 1000)}s and was stopped`
+	const lines = stderr
+		.split('\n')
+		.map((l) => l.trim())
+		.filter(Boolean)
+	// The LAST line, not the first: pressroom writes progress to stderr, and the
+	// first line was masking the actual failure underneath it.
+	const detail = lines[lines.length - 1] || err.message || 'pressroom failed'
+	return detail.slice(0, 200)
+}
 
 function run(full: boolean): Promise<PressSnapshot> {
 	const args = ['--json']
 	if (!full) args.push('--local')
 	return new Promise((resolve) => {
 		execFile('pressroom', args, { timeout: full ? FULL_TIMEOUT : LOCAL_TIMEOUT, maxBuffer: 64 << 20, windowsHide: true }, (err, stdout, stderr) => {
-			if (err) {
-				const detail = (stderr || err.message || 'pressroom failed').trim().split('\n')[0] ?? 'pressroom failed'
-				// ENOENT is the interesting one and deserves an answer rather than a
-				// stack trace: pressroom is a separate tool and may simply not be here.
-				const missing = /ENOENT|not found/i.test(detail)
-				return resolve({ at: Date.now(), items: [], repos: [], local: !full, error: missing ? 'pressroom is not installed — `npm link` it from ~/projects/pressroom' : detail.slice(0, 200) })
-			}
+			if (err) return resolve({ at: Date.now(), items: [], repos: [], local: !full, error: why(err, stderr, full) })
 			try {
 				resolve(shape(JSON.parse(stdout), full))
 			} catch {
-				resolve({ at: Date.now(), items: [], repos: [], local: !full, error: 'pressroom returned something unreadable' })
+				// A timeout can also land here: node destroys the pipes, so the callback
+				// arrives with err null and stdout truncated. Say so rather than blaming
+				// pressroom's output format.
+				resolve({ at: Date.now(), items: [], repos: [], local: !full, error: stdout.length ? 'pressroom returned something unreadable' : 'pressroom returned nothing' })
 			}
 		})
 	})
@@ -150,26 +173,56 @@ function shape(raw: any, full: boolean): PressSnapshot {
 }
 
 /**
- * The current answer, refreshing behind your back when it has gone stale.
+ * The current answer. Always immediate — it never waits for a read.
  *
- * Never waits for a refresh it did not have to start. A 17-second full read must
- * not become 17 seconds of a spinning browser, so a stale-but-real answer is
- * served immediately and the fresh one arrives on the next poll. Only the very
- * first call has nothing to hand back and has to wait.
+ * The old version claimed as much and only delivered it per cache key. `local` and
+ * `full` are separate entries, and a request for `full` consulted only `full`: so
+ * the FIRST `?deploys=1` after every process start returned the unresolved 17-90s
+ * promise while a complete `local` snapshot sat in the other slot, unused. And the
+ * browser remembers the deploys choice per device, so one person's panel took two
+ * seconds and another's took ninety — the classic "works on my machine", with the
+ * difference stored in someone else's localStorage.
+ *
+ * Now nothing blocks. A read is kicked off when the answer is stale, and the
+ * caller gets, in order of preference: this key's answer, the other key's answer,
+ * or an empty one flagged `loading` so the client can say "reading" and poll
+ * faster until it lands. A full read also warms `local`, since it computed every
+ * local fact on the way.
  */
 export async function press(full = false): Promise<PressSnapshot> {
 	const key = full ? 'full' : 'local'
 	const held = cache.get(key)
-	const stale = !held || Date.now() - held.at > (full ? FULL_TTL : LOCAL_TTL)
-	if (stale && !inFlight.has(key)) {
+	if ((!held || Date.now() > held.until) && !inFlight.has(key)) {
 		inFlight.add(key)
-		const job = run(full).then((snap) => {
-			cache.set(key, { at: Date.now(), snap })
-			inFlight.delete(key)
-			return snap
-		})
-		// nothing cached yet, so there is no stale answer to prefer over waiting
-		if (!held) return job
+		// `finally` rather than deleting in `then`: if the body ever threw, the key
+		// stayed in flight forever and this function could never refresh it again —
+		// the whole feature dead for the life of the process. The `catch` is there for
+		// the same reason, since an unhandled rejection takes the terminal app down
+		// with it under node's defaults.
+		void run(full)
+			.then((snap) => {
+				const ttl = snap.error ? ERROR_TTL : full ? FULL_TTL : LOCAL_TTL
+				cache.set(key, { until: Date.now() + ttl, snap })
+				// A full read already did the local work; warming both means toggling
+				// deploys back off does not pay a second cold start.
+				if (full && !snap.error) cache.set('local', { until: Date.now() + LOCAL_TTL, snap })
+			})
+			.catch(() => {})
+			.finally(() => inFlight.delete(key))
 	}
-	return held ? held.snap : { at: Date.now(), items: [], repos: [], local: !full, error: 'still reading' }
+	// A cold full read leaves nothing to show for ~26 seconds, so start the cheap one
+	// alongside it. The local half is 2 seconds of git and answers the same feed; the
+	// deploys arrive later and fill in. Without this, asking for more information got
+	// you less of it for half a minute.
+	if (full && !cache.has('local') && !inFlight.has('local')) void press(false)
+
+	if (held) return held.snap
+	// Whatever the other read knows is a great deal better than nothing: the feed is
+	// identical either way, and only the runs and deploys are missing.
+	const other = cache.get(full ? 'local' : 'full')
+	if (other) return { ...other.snap, loading: true }
+	// Deliberately NOT an `error`. "still reading" went out in the error field, and
+	// the client treats any error as terminal — so a poll that landed during a read
+	// wiped the panel to two muted words instead of saying it was still working.
+	return { at: Date.now(), items: [], repos: [], local: !full, loading: true }
 }

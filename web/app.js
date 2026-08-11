@@ -2856,9 +2856,12 @@ var isOpen = () => openId !== null;
 
 // web/press.ts
 var DEPLOYS = "guildhall.press.deploys";
+var LOCAL_WAIT = 2e4;
+var FULL_WAIT = 1e5;
 var el2;
 var timer2 = 0;
 var open = false;
+var settled2 = false;
 var deploys = localStorage.getItem(DEPLOYS) === "1";
 var onClose2 = () => {
 };
@@ -2871,7 +2874,7 @@ function ciLook(ci) {
   if (ci.status !== "completed") return { glyph: "\u25D4", tone: "text-gold", say: `${ci.workflow} ${ci.status}` };
   switch (ci.conclusion) {
     case "success":
-      return { glyph: "\u2714", tone: "text-(--work)", say: `${ci.workflow} passed` };
+      return { glyph: "\u2714", tone: "text-ok", say: `${ci.workflow} passed` };
     case "failure":
     case "timed_out":
       return { glyph: "\u2716", tone: "text-hot", say: `${ci.workflow} ${ci.conclusion === "failure" ? "failed" : "timed out"}` };
@@ -2883,10 +2886,10 @@ function ciLook(ci) {
   }
 }
 var MARK = {
-  commit: { glyph: "\u25CF", tone: "text-(--work)" },
+  commit: { glyph: "\u25CF", tone: "text-ok" },
   push: { glyph: "\u21E7", tone: "text-gold" },
   run: { glyph: "\u2699", tone: "text-muted" },
-  deploy: { glyph: "\u2601", tone: "text-(--work)" }
+  deploy: { glyph: "\u2601", tone: "text-ok" }
 };
 function describe(i) {
   if (i.kind === "commit") return i.subject;
@@ -2936,7 +2939,7 @@ function repoRow(r) {
   live2.className = "w-4 shrink-0 text-center";
   if (r.live) {
     live2.textContent = r.live.rollback ? "\u21BA" : "\u2601";
-    live2.className += r.live.rollback ? " text-gold" : " text-(--work)";
+    live2.className += r.live.rollback ? " text-gold" : " text-ok";
     live2.title = `${r.live.rollback ? "rolled back" : "live"}: ${r.live.hostname ?? r.live.worker}`;
   }
   const when = document.createElement("span");
@@ -3028,7 +3031,7 @@ function render(snap) {
   } else if (!snap.repos.length && !snap.items.length) {
     const p = document.createElement("p");
     p.className = "m-0 px-2.5 py-8 text-center text-faint";
-    p.textContent = deploys ? "Reading \u2014 deploys take about 17 seconds." : "Reading\u2026";
+    p.textContent = snap.loading ? deploys ? "Reading \u2014 deploys take about 17 seconds." : "Reading\u2026" : "Nothing to show.";
     body.append(p);
   } else {
     if (snap.stale) {
@@ -3095,6 +3098,7 @@ function normalise(snap) {
     githubError: snap?.githubError ?? void 0,
     cloudflareError: snap?.cloudflareError ?? void 0,
     error: snap?.error ?? void 0,
+    loading: !!snap?.loading,
     // A note, deliberately not an error: the feed is the same in both versions and
     // is worth drawing. Saying "the server is older" and then showing nothing
     // would throw away the half that works.
@@ -3105,16 +3109,31 @@ async function refresh2() {
   if (!open) return;
   let snap;
   try {
-    const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`);
-    if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: `the server said ${res.status}` });
+    const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`, { signal: AbortSignal.timeout(deploys ? FULL_WAIT : LOCAL_WAIT) });
+    if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? "The passcode changed \u2014 reload to sign in again." : `the server said ${res.status}` });
     snap = await res.json();
-  } catch {
-    return render({ at: Date.now(), items: [], repos: [], local: true, error: "could not reach guildhall" });
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    return render({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? "guildhall did not answer in time \u2014 the machine may be asleep." : "could not reach guildhall" });
   }
-  render(normalise(snap));
+  const shaped = normalise(snap);
+  try {
+    render(shaped);
+  } catch (e) {
+    render({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
+  }
+  if (shaped.loading) {
+    clearInterval(timer2);
+    timer2 = setInterval(refresh2, 1200);
+  } else if (settled2 !== true) {
+    settled2 = true;
+    clearInterval(timer2);
+    timer2 = setInterval(refresh2, 3e4);
+  }
 }
 function show2() {
   open = true;
+  settled2 = false;
   el2.hidden = false;
   document.body.classList.add("overflow-hidden");
   render({ at: Date.now(), items: [], repos: [], local: !deploys });

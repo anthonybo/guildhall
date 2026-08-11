@@ -45,13 +45,21 @@ type Repo = {
 	error?: string
 }
 
-type Snapshot = { at: number; items: Item[]; repos: Repo[]; local: boolean; githubError?: string; cloudflareError?: string; error?: string; stale?: string }
+type Snapshot = { at: number; items: Item[]; repos: Repo[]; local: boolean; githubError?: string; cloudflareError?: string; error?: string; stale?: string; loading?: boolean }
 
 const DEPLOYS = 'guildhall.press.deploys'
+
+/** Local reads are ~2s server-side; anything past this is not coming. */
+const LOCAL_WAIT = 20_000
+
+/** The deploys read is ~17s and spawns a wrangler per Worker repo, so it gets room. */
+const FULL_WAIT = 100_000
 
 let el: HTMLElement
 let timer = 0
 let open = false
+/** Whether the fast open-time poll has been handed back to the slow watching one. */
+let settled = false
 /**
  * Whether to read workflow runs and Cloudflare deploys too.
  *
@@ -90,7 +98,7 @@ function ciLook(ci: NonNullable<Repo['ci']>) {
 	if (ci.status !== 'completed') return { glyph: '◔', tone: 'text-gold', say: `${ci.workflow} ${ci.status}` }
 	switch (ci.conclusion) {
 		case 'success':
-			return { glyph: '✔', tone: 'text-(--work)', say: `${ci.workflow} passed` }
+			return { glyph: '✔', tone: 'text-ok', say: `${ci.workflow} passed` }
 		case 'failure':
 		case 'timed_out':
 			return { glyph: '✖', tone: 'text-hot', say: `${ci.workflow} ${ci.conclusion === 'failure' ? 'failed' : 'timed out'}` }
@@ -102,11 +110,21 @@ function ciLook(ci: NonNullable<Repo['ci']>) {
 	}
 }
 
+/**
+ * `text-ok`, not `text-(--work)`.
+ *
+ * `--work` is the room's "a session is working" green and is defined only in the
+ * login page's own inline CSS — it does not exist in the app stylesheet at all, so
+ * every glyph written that way rendered with no colour and inherited grey. The
+ * design survived because the glyphs carry their state without colour, which is
+ * also why it went unnoticed: it looked deliberate. `--color-ok` is real, 5.97:1
+ * on the panel.
+ */
 const MARK: Record<Item['kind'], { glyph: string; tone: string }> = {
-	commit: { glyph: '●', tone: 'text-(--work)' },
+	commit: { glyph: '●', tone: 'text-ok' },
 	push: { glyph: '⇧', tone: 'text-gold' },
 	run: { glyph: '⚙', tone: 'text-muted' },
-	deploy: { glyph: '☁', tone: 'text-(--work)' },
+	deploy: { glyph: '☁', tone: 'text-ok' },
 }
 
 function describe(i: Item): string {
@@ -173,7 +191,7 @@ function repoRow(r: Repo) {
 	live.className = 'w-4 shrink-0 text-center'
 	if (r.live) {
 		live.textContent = r.live.rollback ? '↺' : '☁'
-		live.className += r.live.rollback ? ' text-gold' : ' text-(--work)'
+		live.className += r.live.rollback ? ' text-gold' : ' text-ok'
 		live.title = `${r.live.rollback ? 'rolled back' : 'live'}: ${r.live.hostname ?? r.live.worker}`
 	}
 
@@ -287,9 +305,12 @@ function render(snap: Snapshot) {
 		p.textContent = snap.error
 		body.append(p)
 	} else if (!snap.repos.length && !snap.items.length) {
+		// "Reading" only when a read is actually in flight. It used to be the message
+		// for any empty answer, so a finished-but-empty read said "Reading…" forever
+		// and looked like a hang rather than an answer.
 		const p = document.createElement('p')
 		p.className = 'm-0 px-2.5 py-8 text-center text-faint'
-		p.textContent = deploys ? 'Reading — deploys take about 17 seconds.' : 'Reading…'
+		p.textContent = snap.loading ? (deploys ? 'Reading — deploys take about 17 seconds.' : 'Reading…') : 'Nothing to show.'
 		body.append(p)
 	} else {
 		if (snap.stale) {
@@ -383,6 +404,7 @@ function normalise(snap: any): Snapshot {
 		githubError: snap?.githubError ?? undefined,
 		cloudflareError: snap?.cloudflareError ?? undefined,
 		error: snap?.error ?? undefined,
+		loading: !!snap?.loading,
 		// A note, deliberately not an error: the feed is the same in both versions and
 		// is worth drawing. Saying "the server is older" and then showing nothing
 		// would throw away the half that works.
@@ -400,17 +422,45 @@ async function refresh() {
 	// error is worse than no error, because it sends you looking at the wrong thing.
 	let snap: Snapshot
 	try {
-		const res = await fetch(`/api/press${deploys ? '?deploys=1' : ''}`)
-		if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: `the server said ${res.status}` })
+		// A timeout, because a fetch without one never settles.
+		//
+		// A sleeping laptop or a phone handing off networks leaves the promise
+		// pending forever, so render() is never reached and the panel sits on
+		// whatever it was showing — which used to be nothing at all. Each 30s poll
+		// then stacked another dead socket behind the first.
+		const res = await fetch(`/api/press${deploys ? '?deploys=1' : ''}`, { signal: AbortSignal.timeout(deploys ? FULL_WAIT : LOCAL_WAIT) })
+		if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? 'The passcode changed — reload to sign in again.' : `the server said ${res.status}` })
 		snap = await res.json()
-	} catch {
-		return render({ at: Date.now(), items: [], repos: [], local: true, error: 'could not reach guildhall' })
+	} catch (e) {
+		const timedOut = e instanceof DOMException && e.name === 'TimeoutError'
+		return render({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? 'guildhall did not answer in time — the machine may be asleep.' : 'could not reach guildhall' })
 	}
-	render(normalise(snap))
+	// Drawing is fenced too. render() is the only thing that puts content on screen,
+	// so an exception in it used to leave the panel empty with no error anywhere but
+	// the console — a silent dead screen, which is worse than the wrong message this
+	// replaced. Anything unexpected in the data now says so instead of vanishing.
+	const shaped = normalise(snap)
+	try {
+		render(shaped)
+	} catch (e) {
+		render({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : 'unknown error'}` })
+	}
+	// While the server is still reading, come back in a second rather than in thirty.
+	// The 30s poll is right for watching commits land; it is far too slow to be the
+	// thing standing between a tap and the first screenful.
+	if (shaped.loading) {
+		clearInterval(timer)
+		timer = setInterval(refresh, 1200)
+	} else if (settled !== true) {
+		settled = true
+		clearInterval(timer)
+		timer = setInterval(refresh, 30_000)
+	}
 }
 
 export function show() {
 	open = true
+	settled = false
 	el.hidden = false
 	// The page must not scroll behind a full-screen overlay: on a phone, dragging
 	// the feed would otherwise pull the list underneath it around as well.
