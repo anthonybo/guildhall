@@ -2995,7 +2995,7 @@ function render(snap) {
   bar2.className = "flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2";
   const title = document.createElement("span");
   title.className = "font-bold tracking-[0.06em] text-gold";
-  title.textContent = "SHIPPED";
+  title.textContent = "PRESSROOM";
   const meta = document.createElement("span");
   meta.className = "truncate text-[0.72rem] text-faint";
   meta.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;

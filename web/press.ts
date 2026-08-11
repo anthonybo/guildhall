@@ -16,8 +16,11 @@
  *
  * It opens over the page rather than in it: full screen on a phone, a drawer down
  * the right on a desktop. Inline, it was a thing you scrolled past on the way to
- * something else; the question "what shipped" deserves the whole screen while you
- * are asking it.
+ * something else; the question it answers deserves the whole screen while you are
+ * asking it.
+ *
+ * Called "pressroom" on screen, not a new word. It is the same tool already run in
+ * a terminal here, and a second name for one thing is only friction.
  */
 import { ago } from './dom.ts'
 
@@ -237,7 +240,7 @@ function render(snap: Snapshot) {
 	bar.className = 'flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2'
 	const title = document.createElement('span')
 	title.className = 'font-bold tracking-[0.06em] text-gold'
-	title.textContent = 'SHIPPED'
+	title.textContent = 'PRESSROOM'
 	const meta = document.createElement('span')
 	meta.className = 'truncate text-[0.72rem] text-faint'
 	meta.textContent = snap.error ? '' : `${snap.repos.length} repos · ${ago(Date.now() - snap.at)}`
