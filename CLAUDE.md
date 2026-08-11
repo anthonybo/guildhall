@@ -147,9 +147,38 @@ here were wrong and cost hours:
   whether a ceiling is reachable.
 - The release script above was written, committed, and did not work.
 
+**Measure the thing you are claiming, not something next to it.** Three claims in
+one afternoon were wrong this way, and each number was real — it just answered a
+different question:
+
+- `$?` read after a pipe is the exit code of the LAST command in it. `cmux rpc …
+  | head` reports `head`'s status, which is how "cmux returns errors with exit 0"
+  became a finding, and a stdout error-sniffer got written for a bug that did not
+  exist. cmux exits 1.
+- `dist/main.mjs` is a build ARTIFACT. Its mtime moves on every build, including a
+  rebuild of source nobody touched, so "the artifact is newer than the running
+  process" does not mean the process is stale. Compare the SOURCE mtime, or read
+  what the running bundle actually contains. `tools/serve.mjs` had already
+  restarted correctly and was accused of not having.
+- A test that passes is not a test that works. Delete the fix, watch it fail, put
+  the fix back. The rpc test above passed with the fix removed, which is what
+  exposed the exit-code claim as wrong.
+
+**Never drive cmux by hand without the workspace guard.** `cmux send --workspace ""`
+does not refuse — an empty or unmatched target falls back to whatever surface is
+FOCUSED, and `terminal.input` accepts `workspaceId` (camelCase) while ignoring it,
+with the same fallback. Both typed test strings into a live session during one
+investigation: once from a shell variable that came back empty because the grep was
+case-sensitive and cmux prints UUIDs in caps, once from deliberately testing the
+camelCase key without thinking about where "ignored" sends it. `control.ts`
+validates the UUID before every call for exactly this reason; anything driving the
+CLI directly has to do the same. Test against a scratch workspace
+(`cmux workspace create --focus false`), never a real session.
+
 Useful harnesses: `npm start -- --bench` for frame cost, a python `pty` harness for
-driving the real app and capturing its output bytes, and a throwaway `git clone`
-for anything that mutates git state.
+driving the real app and capturing its output bytes, a throwaway `git clone` for
+anything that mutates git state, and a scratch `cmux workspace create` for anything
+that types.
 
 ## Editing
 
