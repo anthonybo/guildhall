@@ -3012,6 +3012,10 @@ function chrome(name) {
   send.type = "submit";
   send.textContent = "Send";
   send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
+  const note = document.createElement("p");
+  note.id = "sendnote";
+  note.hidden = true;
+  note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
   form.append(input, send);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -3035,9 +3039,11 @@ function chrome(name) {
 ${pre.textContent}`;
       input.value = text;
     }
+    note.textContent = r.note ?? "";
+    note.hidden = !r.note;
     refresh();
   });
-  el.append(bar2, pre, form);
+  el.append(bar2, pre, note, form);
   return { pre, input };
 }
 var polling = false;

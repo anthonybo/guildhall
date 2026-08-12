@@ -106,7 +106,7 @@ async function api(path: string, init: RequestInit = {}) {
 		if (res.status === 304) return { status: 304 }
 		lastTag = res.headers.get('etag') ?? lastTag
 		const body = await res.json().catch(() => ({ error: 'unreadable reply' }))
-		return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean }
+		return { status: res.status, ...body } as { status: number; render_grid?: Grid; error?: string; ok?: boolean; note?: string }
 	} catch (e) {
 		const timedOut = e instanceof DOMException && e.name === 'TimeoutError'
 		return { status: 0, error: timedOut ? 'the machine did not answer in time' : 'could not reach guildhall' }
@@ -381,6 +381,10 @@ function chrome(name: string) {
 	send.type = 'submit'
 	send.textContent = 'Send'
 	send.className = 'min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg'
+	const note = document.createElement('p')
+	note.id = 'sendnote'
+	note.hidden = true
+	note.className = 'm-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold'
 	form.append(input, send)
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
@@ -411,6 +415,14 @@ function chrome(name: string) {
 			pre.textContent = `${r.error}\n\n${pre.textContent}`
 			input.value = text // give it back rather than losing what was typed
 		}
+		// A send that worked but will sit for a while says so, ONCE, above the screen.
+		//
+		// Shown as a banner rather than folded into the terminal text, because the
+		// terminal text is about to be overwritten by the next poll and this has to
+		// outlive that. The whole failure was a send that looked like nothing happened;
+		// the answer is not a better send, it is telling you what happened to it.
+		note.textContent = r.note ?? ''
+		note.hidden = !r.note
 		refresh()
 		// NOT re-focused. This reply can arrive many seconds after the tap, by which
 		// time the keyboard has usually been dismissed — and focusing an input raises
@@ -421,7 +433,7 @@ function chrome(name: string) {
 		// forced back on them.
 	})
 
-	el.append(bar, pre, form)
+	el.append(bar, pre, note, form)
 	return { pre, input }
 }
 

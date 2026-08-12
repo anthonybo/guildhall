@@ -51,6 +51,21 @@ export type Session = {
 	/** cmux workspace UUID, the only safe way to address this session's terminal.
 	 *  Absent unless cmux is running and the session is in one of its tabs. */
 	workspace?: string
+	/**
+	 * A warning to hand back with a send that will not be read promptly.
+	 *
+	 * Set when the tab and the conversation belong to different processes: a parked
+	 * terminal keeps the tty and draws the background job's output, while its OWN
+	 * conversation has stopped. Measured here — the parked transcript had not been
+	 * written for 34 minutes while the job's grew every few seconds — so the screen
+	 * you read and the box you type into are two different conversations on one
+	 * terminal.
+	 *
+	 * A warning and NOT a refusal. Refusing was tried and was worse: it removed the
+	 * only route to a session without giving one back. Text typed there does arrive
+	 * and does queue; what was missing was any way to know that.
+	 */
+	deferred?: string
 	unread: boolean
 	/** which character sheet, and how far its hue is rotated, for identity */
 	palette: number

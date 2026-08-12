@@ -187,6 +187,18 @@ export function fold(list: Session[], registry: Registry[]): Session[] {
 			job.tab = parked.tab
 			job.workspace = parked.workspace
 			job.unread = parked.unread
+			// Say what the tab actually is, because it is two things at once.
+			//
+			// It DRAWS the job's output and it TYPES into the parked terminal, whose own
+			// conversation has stopped — measured on this machine as a parked transcript
+			// untouched for 34 minutes beside a job transcript written seconds ago. So a
+			// message lands in a box belonging to a conversation that is over, queues,
+			// and waits. Nothing about the screen says so, which is why it read as the
+			// send having silently failed and got sent again.
+			//
+			// A warning rather than a refusal. Refusing was shipped first and was worse:
+			// it took away the only route to the session and offered nothing instead.
+			job.deferred = 'queued — this conversation is running as a background job, and the tab you are typing into is the parked terminal it left behind. It will not be picked up until that job finishes.'
 		}
 		drop.add(r.sessionId)
 	}

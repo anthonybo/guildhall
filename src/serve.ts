@@ -251,7 +251,11 @@ export function createServer(opts: ServeOptions) {
 			// Every send is announced on the machine's own screen. A remote caller
 			// must not be able to act here invisibly.
 			opts.onSend?.(target.proj, String(body.text ?? '').slice(0, 200), out.ok)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
+			// `note` rides along with a SUCCESS. The send did happen; what it needs is a
+			// caveat, because a message that has been queued behind a background job looks
+			// exactly like one that vanished, and looking like it vanished is what made
+			// somebody send everything twice.
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, ...(target.deferred ? { note: target.deferred } : {}) } : { error: out.error }))
 		}
 
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
