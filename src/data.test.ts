@@ -188,38 +188,3 @@ test('a session that moved directory resolves to its live transcript', () => {
 		assert.equal(mt(picked), newest, `${id} resolved to a stale transcript`)
 	}
 })
-
-/** The dull half of a Session, so a fold test can say only what it is about. */
-const blank: Session = {
-	id: '', pid: 0, name: '', proj: '', cwd: '/x', state: 'working', stale: 0, title: '', doing: '', short: '',
-	last: '', ctxUsed: 0, ctxLimit: 200_000, unread: false, palette: 0, hueShift: 0, toolKind: 'think', turns: 0,
-	level: 1, xp: 0,
-}
-
-test('a folded row keeps its tab for looking, but refuses to be typed into', () => {
-	// The bug this pins: fold() carries the parked terminal's tab onto the job's row
-	// so there is still a way to go and look. That tab belongs to a process which no
-	// longer drives the conversation — the job has no tty at all — so text sent there
-	// queues in a TUI nobody is reading. It looked like a successful send and was not,
-	// and only folded rows were affected, which is why one project misbehaved alone.
-	const rows: Session[] = [
-		{ ...blank, id: 'job', proj: 'tidepool' },
-		{ ...blank, id: 'parked', proj: 'tidepool', tab: 5, workspace: 'D5838953-AE76-4AC9-8934-200758A76ADD' },
-	]
-	const registry: Registry[] = [
-		{ pid: 1, sessionId: 'job', cwd: '/x', kind: 'bg', jobId: 'J' },
-		{ pid: 2, sessionId: 'parked', cwd: '/x', kind: 'interactive', parkedJobId: 'J' },
-	]
-	const out = fold(rows, registry)
-	assert.equal(out.length, 1, 'the parked row should have folded away')
-	assert.equal(out[0]!.tab, 5, 'the tab must survive, or there is no way to go and look')
-	assert.ok(out[0]!.viewOnly, 'a folded row must be marked unwritable')
-	assert.match(out[0]!.viewOnly!, /background job/, 'the refusal has to say why')
-})
-
-test('an ordinary session is never marked unwritable', () => {
-	// The guard must cost nothing in the common case, or every send breaks.
-	const rows: Session[] = [{ ...blank, id: 'a', proj: 'guildhall', tab: 2, workspace: 'W' }]
-	const out = fold(rows, [{ pid: 1, sessionId: 'a', cwd: '/x', kind: 'interactive' }])
-	assert.equal(out[0]!.viewOnly, undefined)
-})

@@ -51,16 +51,6 @@ export type Session = {
 	/** cmux workspace UUID, the only safe way to address this session's terminal.
 	 *  Absent unless cmux is running and the session is in one of its tabs. */
 	workspace?: string
-	/**
-	 * Why this row's terminal can be READ but must not be typed into.
-	 *
-	 * Set when the tab belongs to a different process than the conversation does —
-	 * today, a parked terminal whose work has moved to a background job. The tab is
-	 * still worth showing, because it is the only way to go and look; it is not a
-	 * place to send text, because the process drawing it is no longer the one
-	 * driving the conversation and anything typed there queues and sits.
-	 */
-	viewOnly?: string
 	unread: boolean
 	/** which character sheet, and how far its hue is rotated, for identity */
 	palette: number
