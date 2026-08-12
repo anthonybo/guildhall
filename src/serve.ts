@@ -246,6 +246,15 @@ export function createServer(opts: ServeOptions) {
 			// Checked before the workspace lookup: this is a refusal about what the
 			// session is being asked, not about whether the plumbing to reach it exists.
 			if (PERMISSION.test(target.waitingFor ?? '')) return send(res, 409, MIME['.json'], '{"error":"this session is waiting on a permission prompt — that has to be answered at the machine"}')
+			// The sixth guard: a tab that can be read but not written.
+			//
+			// A folded row shows a background job, using the tab of the parked terminal
+			// that handed it the conversation. That terminal is alive and drawing, so a
+			// send SUCCEEDS at every level this server can see — cmux accepts it, the
+			// text appears on screen — and then nothing happens, because the process
+			// drawing that screen is not the one doing the work. Silent, and reported
+			// as "I have to send it twice".
+			if (target.viewOnly) return send(res, 409, MIME['.json'], JSON.stringify({ error: target.viewOnly }))
 			if (!target.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
 			const out = await ask(target.workspace, String(body.text ?? ''))
 			// Every send is announced on the machine's own screen. A remote caller

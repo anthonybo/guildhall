@@ -187,6 +187,22 @@ export function fold(list: Session[], registry: Registry[]): Session[] {
 			job.tab = parked.tab
 			job.workspace = parked.workspace
 			job.unread = parked.unread
+			// Readable, not writable, and this cost real time to learn.
+			//
+			// The tab belongs to the PARKED process, which still owns a tty and still
+			// draws a screen — but the conversation has moved to the job, which has no
+			// terminal at all (`ps` reports `??`). Text sent to that tab lands in a TUI
+			// that is not driving anything: it queues, and it sits. Measured on this
+			// machine with a message that had been waiting in `⧉` for some time while
+			// the job it was meant for worked on regardless.
+			//
+			// From the outside that is "I have to send everything twice", and it happens
+			// only to folded rows — which is exactly why one project misbehaved while
+			// every other session was fine.
+			//
+			// Carrying the tab was right for looking and wrong for typing. It stays, and
+			// says so.
+			job.viewOnly = 'this conversation has moved to a background job — the tab still shows it, but typing goes to the parked terminal, where it queues and is never read. Reply at the machine.'
 		}
 		drop.add(r.sessionId)
 	}
