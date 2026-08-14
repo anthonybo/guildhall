@@ -1,0 +1,10 @@
+Third-party material bundled with guildhall.
+
+Kept out of LICENSE on purpose: GitHub identifies a license by matching the file
+against known texts, and anything appended after the MIT body makes it
+unrecognisable — the repository then reports NOASSERTION and reads as unlicensed,
+which for a program that watches your sessions is exactly the wrong first
+impression.
+Character sprites in assets/characters/ are from pixel-agents
+(https://github.com/pixel-agents-hq/pixel-agents), used under the MIT License.
+Its notice is preserved in assets/characters/LICENSE-pixel-agents.txt.
