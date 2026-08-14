@@ -6,7 +6,17 @@
  * terminal also uses, and the handful of rules that depend on a value only known
  * at runtime or that need a pseudo-element.
  */
-@import 'tailwindcss';
+/*
+ * `source(none)` so the two lines below are the WHOLE list.
+ *
+ * Without it Tailwind v4 also scans the rest of the project on its own, and every
+ * file that is not gitignored is fair game — including prose. That is not
+ * hypothetical: the word "relative" in a COMMENT in `tools/readme-preview.mjs`
+ * put a `.relative` rule into the shipped bundle, and a sentence in a README or a
+ * research note could do the same at any time. The browser only ever uses classes
+ * written in `web/`, so that is what gets scanned.
+ */
+@import 'tailwindcss' source(none);
 
 /* Classes live in the markup and in the modules that generate it, so both have
    to be scanned or the utilities they name are never emitted. */
