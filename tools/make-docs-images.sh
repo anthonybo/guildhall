@@ -16,3 +16,13 @@ cd "$(dirname "$0")/.."
 
 npx tsx tools/shot.ts --cols 100 --rows 58 -o docs/room.svg
 npx tsx tools/shot.ts --cols 72 --rows 40 -o docs/narrow.svg
+
+# docs/room.gif is deliberately NOT built here — run `npm run docs:gif` for it.
+#
+# This script is what `npm run check:docs` executes on every commit, and the GIF
+# does not belong on that path: it needs ffmpeg, which is a fair thing to ask of
+# whoever regenerates an animation and not of everyone who commits, and two
+# ffmpeg passes over 72 frames is slow enough to notice in a pre-commit hook.
+# It is also not byte-reproducible across ffmpeg versions, so the shasum check
+# that guards the SVGs would fail on a different machine for no real reason.
+# The animation only changes when the room layout does, which is rare.

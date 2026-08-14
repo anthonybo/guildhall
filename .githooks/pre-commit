@@ -16,6 +16,9 @@ node tools/check-secrets.mjs
 echo "pre-commit: perf budget"
 node tools/check-perf.mjs
 
+echo "pre-commit: spelling"
+node tools/check-spelling.mjs
+
 echo "pre-commit: types and tests"
 npm run --silent check:types
 npm test --silent >/dev/null

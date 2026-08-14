@@ -1,6 +1,7 @@
 {
 	"name": "guildhall",
 	"version": "0.5.3",
+	"license": "MIT",
 	"private": true,
 	"type": "module",
 	"description": "A pixel town of every live Claude Code session, in the terminal",
@@ -18,17 +19,20 @@
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web && npm run check:perf && npm run check:secrets",
+		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web && npm run check:perf && npm run check:secrets && npm run check:spelling",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",
 		"format": "prettier --write .",
 		"docs": "sh tools/make-docs-images.sh",
+		"docs:gif": "npx tsx tools/make-docs-gif.ts",
 		"check:docs": "sh tools/check-docs-images.sh",
 		"check:web": "sh tools/check-web-bundle.sh",
 		"serve": "node tools/serve.mjs",
 		"check:perf": "node tools/check-perf.mjs",
 		"hooks": "git config core.hooksPath .githooks",
-		"check:secrets": "node tools/check-secrets.mjs"
+		"check:secrets": "node tools/check-secrets.mjs",
+		"check:spelling": "node tools/check-spelling.mjs",
+		"readme": "node tools/readme-preview.mjs"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

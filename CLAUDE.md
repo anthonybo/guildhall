@@ -21,7 +21,7 @@ two features, which made it useless as a signal. Then bumping it by hand left
 `npm version` for the next person to try it.
 
 **Bump on anything user-facing.** A new flag, a changed key, different wording on
-screen, a behaviour change. Not for refactors or comment edits.
+screen, a behavior change. Not for refactors or comment edits.
 
 The release regenerates `docs/` and `web/app.js` first and commits any change, so
 neither the README picture nor the browser client can lag the program. `npm run
@@ -83,6 +83,28 @@ whoever remembered it and nobody else. Because the test string looked like a
 plausible passphrase and lived in a public repo, "is my password on GitHub?" became
 a reasonable question, and answering it took far too long. **Test fixtures are now
 named so they cannot be mistaken for real credentials** (`TEST-ONLY-…`).
+
+## Write American English
+
+`npm run check:spelling` enforces it and the pre-commit hook runs it. The prose
+here kept drifting British — `colour`, `behaviour`, `licence` — and it was only
+ever caught by somebody reading the README and noticing, which is late and
+annoying.
+
+It scans **markdown, and quoted strings in `src/` and `web/`** — the two places a
+reader actually sees words. It does NOT scan identifiers or comments: `colourOf`
+is a real API name in `office.ts`, and a check that demanded a refactor to pass
+would be turned off within a week. Tests are skipped for the same reason; a test
+name is read by whoever runs the suite.
+
+If a British spelling is genuinely right — an API value from someone else's
+service, a quoted name — put `allow-uk: <why>` on the line. GitHub's workflow
+conclusions are the live example: `case 'cancelled':` in `web/press.ts` is their
+spelling, not ours, and changing it would break the comparison.
+
+*Why the word list is short:* an early version included `arse` and flagged
+`parsed` and `git rev-parse`. A check that cries wolf gets disabled, so anything
+ambiguous was left out rather than guessed at.
 
 ## Staying lightweight
 
