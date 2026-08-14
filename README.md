@@ -1,15 +1,30 @@
-# guildhall
+<h1 align="center">guildhall</h1>
 
-Every live Claude Code session as a pixel office, in your terminal.
+<p align="center"><strong>Nine Claude Code sessions are running. Three are waiting on you.<br>You have no idea which three.</strong></p>
 
-<img src="docs/room.svg" alt="A pixel-art office in a terminal: two rows of desks with monitors showing lines of code, characters seated at them, each project's desks on a coloured carpet with its name on a nameplate and a level badge beside the desk. Two desks carry a question-mark placard for sessions waiting on an answer. Below, people stand talking, sit on a couch and stand by a kitchen counter and a ping-pong table. Underneath the room, a table lists ten sessions with tab number, level, project name in its carpet colour, status, what it is doing, a context gauge and how long it has been idle." width="100%">
+<p align="center">
+  <sub>Every live session as a character in a pixel office — working ones at their desks, blocked ones holding a placard.<br>In your terminal, and on your phone. Reads what Claude Code already writes; installs nothing.</sub>
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-d29922?style=flat-square" alt="MIT license"></a>
+  <img src="https://img.shields.io/badge/node-20%2B-3fb950?style=flat-square" alt="Node 20 or newer">
+  <img src="https://img.shields.io/badge/zero%20runtime%20config-no%20hooks%2C%20no%20settings%20edits-8b949e?style=flat-square" alt="No hooks and no settings edits">
+  <a href="#seeing-it-from-another-machine"><img src="https://img.shields.io/badge/browser%20%2B%20phone-included-58a6ff?style=flat-square" alt="Browser and phone client included"></a>
+</p>
+
+<p align="center">
+  <img src="docs/room.gif" alt="The pixel office animating: characters typing at their desks while others walk across the floor between a couch, a kitchen counter and a ping-pong table." width="600">
+</p>
 
 Sessions that are working sit at their desks with a lit screen. Sessions waiting
 on you get a placard. Everyone else walks around, gets coffee, plays ping-pong.
 Below the room, a table with the detail: what each session is doing, how much
-context it has left, and how long it has been ignored. A project's colour is the
-same in both halves, so a character you notice upstairs is one colour-match away
+context it has left, and how long it has been ignored. A project's color is the
+same in both halves, so a character you notice upstairs is one color-match away
 from its row.
+
+<img src="docs/room.svg" alt="A pixel-art office in a terminal: two rows of desks with monitors showing lines of code, characters seated at them, each project's desks on a colored carpet with its name on a nameplate and a level badge beside the desk. Two desks carry a question-mark placard for sessions waiting on an answer. Below, people stand talking, sit on a couch and stand by a kitchen counter and a ping-pong table. Underneath the room, a table lists ten sessions with tab number, level, project name in its carpet color, status, what it is doing, a context gauge and how long it has been idle." width="100%">
 
 Sprites need a terminal that speaks the kitty graphics protocol — Ghostty, kitty,
 WezTerm. Anywhere else the room falls back to half blocks and everything else is
@@ -25,6 +40,21 @@ from somewhere else* below.
 npm install
 npm start
 ```
+
+Nothing is installed into Claude Code. No hooks, no settings file is edited, no
+wrapper around your terminal — it reads the registry and transcripts Claude Code
+already writes, which is why it sees sessions you started anywhere.
+
+## What it does
+
+| | |
+| --- | --- |
+| **The room** | Every live session as a character. Working sessions sit at a lit desk; ones waiting on you get a placard; the rest get coffee. |
+| **The table** | What each session is doing, context left, how long it has been ignored. |
+| **[The browser view](#seeing-it-from-another-machine)** | The same room and list on your phone or another computer, behind a passcode. Off by default — `s`. |
+| **[The live terminal](#typing-into-a-session-from-somewhere-else)** | Open a session's real terminal from the browser, read it, and type into it. Off by default, and behind a second password. |
+| **[pressroom](#commits-and-deploys)** | What has been committed, pushed, built and deployed, across every repo. |
+| **[Keeping the machine awake](#keeping-the-machine-awake)** | Hold off sleep while sessions are working, so a long job survives you walking away. |
 
 ## Keys
 
@@ -106,7 +136,7 @@ sleeps on its normal schedule. The header says which of the three you are in:
 | `○ sleeps normally · never held` | disabled |
 
 The screen is held on as well as the machine. That was not the original
-behaviour, and leaving it out was a mistake worth naming: `displaysleep` is
+behavior, and leaving it out was a mistake worth naming: `displaysleep` is
 commonly two minutes on battery and the screen lock is commonly immediate, so
 the machine stayed up exactly as promised while the display blanked and
 locked — which is indistinguishable from the feature not working. Set
@@ -156,10 +186,19 @@ can watch the same room. It is **off by default** and the choice is remembered.
 guildhall --serve          # or press s while it is running
 ```
 
-The browser runs the same office — same planner, same seating, same behaviour —
+The browser runs the same office — same planner, same seating, same behavior —
 against a JSON feed, so it cannot drift from the terminal. On a phone the room is
 hidden and the list carries everything; the office at 100 columns is a smear on a
 5-inch screen, and "what is the status" is the question a phone is asking.
+
+<img src="docs/web-room.jpg" alt="The office in a browser: desks on colored carpets with project nameplates down their sides, characters seated at lit monitors, level badges beside each desk, two question-mark placards, and a gold banner reading '⌘3 Needs you'. A header strip counts each state." width="100%">
+
+Underneath it, the same list the terminal shows, grouped by who needs you first.
+
+<img src="docs/web-list.jpg" alt="The session list in a browser, grouped into Needs you, Working, Finished unread, Your turn and Parked. Each row carries a tab number badge, the project name in its carpet color, what the session is doing, its state, context percentage and how long it has been idle." width="100%">
+
+*Both are `--demo`: every project name and sentence above is invented, so the
+images never carry anyone's real work.*
 
 It answers on your local network and on any VPN interface. Binding to `0.0.0.0`
 already covers a Tailscale address, so LAN today and a tailnet later is the same
@@ -197,6 +236,50 @@ With control off, nothing it serves can change anything. There is no endpoint th
 machine or in any session, so the worst case of leaving it on is disclosure, not
 damage.
 
+### Reaching it from anywhere — Tailscale
+
+On your own network the address from `?` is enough. To reach it from a phone on
+mobile data, put both machines on a [tailnet](https://tailscale.com/) — nothing in
+guildhall changes, because binding to `0.0.0.0` already answers on every interface
+the machine has.
+
+```
+brew install --cask tailscale     # then sign in on the Mac and on the phone
+tailscale ip -4                   # the 100.x.y.z address to use
+```
+
+Open `http://100.x.y.z:4318` on the phone and enter the passcode. The traffic is
+encrypted by Tailscale and the machine is never exposed to the public internet —
+which is also why **control is refused on a plain LAN**: a shared secret on a
+network you hand to guests is not a boundary.
+
+Add it to your phone's home screen and it opens like an app, without browser
+chrome.
+
+## Commits and deploys
+
+The **pressroom** button in the browser header opens what has actually shipped:
+one dense line per repository — branch, commits ahead of the upstream, dirty
+files, whether the pipeline passed, whether it is live — and a feed of commits,
+pushes, workflow runs and deploys underneath.
+
+`↑3` is the line that earns its place. Every project here deploys by pushing, so
+three commits ahead of the upstream is three commits of work that exist on this
+laptop and nowhere else.
+
+It reads [pressroom](https://github.com/anthonybo/pressroom), which is a separate
+program — guildhall watches sessions, pressroom watches repositories, and the two
+answer different questions. Install it and the panel fills; leave it out and the
+panel says so rather than sitting empty.
+
+```
+cd ~/projects/pressroom && npm link
+```
+
+The local half is git only and takes about two seconds. Workflow runs and
+Cloudflare deploys take about seventeen, because every Worker repo spawns its own
+wrangler, so they are fetched only when you ask — the toggle is remembered.
+
 ## Requirements
 
 - Node 20+
@@ -215,7 +298,7 @@ src/
   data.ts          joins registry + transcripts + cmux into Sessions
   data/            paths · registry · agents · transcript · digest · state · score · describe · cmux
   office.ts        Office — drawing and labels
-  office/          model · plan (pure layout) · room (seats, paths) · sim (behaviour)
+  office/          model · plan (pure layout) · room (seats, paths) · sim (behavior)
   canvas.ts        half-block pixel canvas
   kitty.ts         graphics protocol, terminal reply demultiplexer
   characters.ts    sprite sheets
@@ -273,8 +356,13 @@ deliberate ways, each documented at the top of `src/office.ts`.
 
 `"control": true` in the config lets the browser open a session's **real
 terminal** — the one already on your screen, not a second copy — read what it is
-showing, and type into it. It works through cmux's socket API: `read-screen` to
-see, `send` and `send-key` to type. Press ⌨ on a row to open it.
+showing, and type into it. It works through cmux's socket API: `terminal.replay`
+to see the screen as a styled grid, and `terminal.input` to type. Press ⌨ on a row
+to open it.
+
+Text and the Enter that submits it travel in **one** call. They used to be two —
+`send` then `send-key Enter` — and the gap between them was long enough to lose the
+Enter, which put the message in Claude Code's prompt and left it sitting there.
 
 Not `claude -p --resume`, which was the obvious alternative and is wrong for
 this: it starts a *second* process against the same transcript, so you get two
