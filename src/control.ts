@@ -119,7 +119,102 @@ export async function ask(workspace: string, text: string): Promise<Result> {
 	// Text and Enter are STILL one operation, which is the safety property that
 	// matters: no caller can reach a bare Enter, and a bare Enter is how you accept
 	// whatever prompt happens to be on screen — including a permission request.
-	return run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
+	const typed = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
+	if (!typed.ok) return typed
+	return settled(workspace, body)
+}
+
+/**
+ * Did the message actually go in — and if not, put it right.
+ *
+ * Reported repeatedly as "I have to send everything twice", and every attempt to
+ * fix it by reasoning about the mechanism missed, because the mechanism is not
+ * reliably reproducible: 26 trials here, idle and busy, atomic and delayed, all
+ * passed. Something between a phone and this function drops a send sometimes and
+ * I cannot make it happen on demand.
+ *
+ * So this stops trying to be right about the cause and checks the outcome
+ * instead. The screen is the ground truth about whether a message landed, it is
+ * already readable, and reading it costs about 150ms — far less than noticing by
+ * hand and typing the whole thing again.
+ *
+ * Two failures are possible and they need opposite repairs, which is why this
+ * looks at WHERE the text is rather than just whether it worked:
+ *
+ *  - Still sitting in the input box. The text arrived, the Enter did not take.
+ *    Send another Enter; never re-type, or the message lands twice.
+ *  - Nowhere on screen at all. The text never arrived. Re-type it — this is the
+ *    case that was observed live, with an empty prompt and the message simply
+ *    gone.
+ *
+ * Anything found in the SCROLLBACK is already submitted and must be left alone.
+ * That distinction is the whole reason this reads the input box specifically: a
+ * submitted message echoes with the same chevron the prompt uses, and an earlier
+ * version of the test harness matched those echoes and called every success a
+ * failure.
+ *
+ * Exported so the repair can be driven against a real session rather than trusted:
+ * the dangerous outcome here is a message delivered twice, and that has to be
+ * demonstrated not to happen.
+ */
+export async function settled(workspace: string, body: string): Promise<Result> {
+	// Compared with whitespace collapsed. The TUI wraps a long message across
+	// several lines, so a raw substring test would miss text that plainly arrived
+	// and then "repair" it by sending it a second time.
+	const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
+	const needle = flat(body).slice(0, 60)
+	let retyped = false
+
+	for (let attempt = 0; attempt < 3; attempt++) {
+		// Long enough for the TUI to redraw. Measured against a real session: a
+		// submitted message clears the box well inside this.
+		await new Promise((r) => setTimeout(r, 250))
+		const seen = await readScreen(workspace, 40)
+		// Cannot see, so cannot judge. Report the send as done rather than repeat it:
+		// a message that arrives twice is worse than one this function is unsure about.
+		if (!seen.ok) return { ok: true, text: '' }
+
+		if (flat(inputBox(seen.text)).includes(needle)) {
+			// Arrived, unsent. Enter only — re-typing here would submit it twice.
+			const again = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: '\r' })])
+			if (!again.ok) return again
+			continue
+		}
+		// Out of the box and somewhere on screen: submitted. Done.
+		if (flat(seen.text).includes(needle)) return { ok: true, text: '' }
+		// Nowhere at all. It never landed — which is the case seen live, with an
+		// empty prompt and the message simply gone. Safe to type again precisely
+		// BECAUSE it is absent: it was sent moments ago, so if it had arrived it
+		// would still be on screen. Once only; a send that vanishes twice is a
+		// failure worth reporting rather than a loop worth running.
+		if (retyped) break
+		retyped = true
+		const resent = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
+		if (!resent.ok) return resent
+	}
+	return { ok: false, error: 'the message would not go in — check the session at the machine before sending it again' }
+}
+
+/**
+ * The prompt's input box: the line between the last two rules.
+ *
+ * Not "does the text appear on screen". A message that submitted successfully is
+ * echoed into the scrollback with the same `❯` the prompt draws, so searching the
+ * whole screen reports every success as a stuck message.
+ */
+export function inputBox(screen: string) {
+	const lines = screen.split('\n')
+	const rules: number[] = []
+	lines.forEach((l, i) => {
+		if (/^\s*─{20,}/.test(l)) rules.push(i)
+	})
+	if (rules.length < 2) return ''
+	const [a, b] = rules.slice(-2)
+	return lines
+		.slice(a + 1, b)
+		.join(' ')
+		.replace(/❯/g, '')
+		.trim()
 }
 
 /** Exposed for the tests: whether a key would be refused as an approval. */

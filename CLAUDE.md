@@ -3,6 +3,33 @@
 Conventions for this repo. These exist because each one was learned the hard way
 here, so the reason is given rather than just the rule.
 
+## Read MISTAKES.md first
+
+**Before changing anything, check whether `MISTAKES.md` already covers the area.**
+It lists fixes that were tried here and did not work, with what was measured, so
+the same dead end is not walked twice.
+
+This is not paperwork. One bug — a message needing to be sent twice — took five
+attempts, three of which were plausible, confidently argued and useless, and two
+of which were shipped and reverted. The expensive part was never the code; it was
+rediscovering that an idea had already failed.
+
+**After a fix turns out to be wrong, add it.** An entry earns its place when
+something was shipped or seriously attempted and did not solve the problem —
+including what was measured, so nobody re-measures it. A bug found and fixed
+cleanly does not belong there; its commit message is enough. MISTAKES.md is only
+for dead ends.
+
+Two rules that came out of it and apply everywhere:
+
+- **Measure the thing being looked at, at the last step of the chain.** Four wrong
+  claims here were all real numbers answering a different question — `$?` after a
+  pipe, a build artifact's mtime, a GIF file rather than the GIF as the browser
+  scaled it.
+- **When a fix does not work, suspect the diagnosis before adding another fix on
+  top of it.** Three of the five send attempts were layered on a cause that had
+  already been ruled out by measurement.
+
 ## Releasing
 
 **Never bump the version by hand.** One command does the whole thing:

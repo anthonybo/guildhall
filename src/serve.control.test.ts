@@ -12,6 +12,7 @@ import path from 'node:path'
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-serve-control-'))
 
 import { createServer, screenTag } from './serve.ts'
+import { inputBox } from './control.ts'
 import { resetControlThrottle, setControlPass } from './controlauth.ts'
 
 // Named so it can never be mistaken for a real one, and so nobody has to wonder
@@ -185,4 +186,29 @@ test('a send to a workspace that does not exist is reported as a failure', async
 	const r = await ask('00000000-1111-2222-3333-444444444444', 'this must not be reported as sent')
 	assert.equal(r.ok, false, 'a send to a workspace that does not exist was reported as ok')
 	if (!r.ok) assert.ok(/not.?found|failed|refus/i.test(r.error), `unhelpful error: ${r.error}`)
+})
+
+test('the input box is the prompt line, never a submitted message echoed above it', () => {
+	// The distinction the whole verify-and-retry rests on. A message that submitted
+	// successfully is echoed into the scrollback with the SAME chevron the prompt
+	// draws, so "does the text appear on screen" reports every success as stuck —
+	// which is exactly what an early test harness did, reporting 3 of 4 failures
+	// that were all fine.
+	const screen = [
+		'  ⏺ working on it',
+		'❯ a message that was already sent',
+		'  ⏺ done',
+		'──────────────────────────────────────────────────────',
+		'❯ still being typed',
+		'──────────────────────────────────────────────────────',
+		'  Opus 5  ⏵⏵ auto mode',
+	].join('\n')
+	assert.equal(inputBox(screen), 'still being typed')
+	assert.ok(!inputBox(screen).includes('already sent'), 'a submitted message must never read as stuck')
+})
+
+test('a screen with no prompt rules yields no input box rather than guessing', () => {
+	// If the shape is not recognised, `settled` must not conclude the text is
+	// sitting unsent — that would send it a second time.
+	assert.equal(inputBox('just some output\nand more'), '')
 })

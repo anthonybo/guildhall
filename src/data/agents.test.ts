@@ -52,5 +52,17 @@ test('an unreadable registry falls back instead of emptying the room', () => {
 	const t = Date.now()
 	const out = liveSessions('/nonexistent-registry-directory')
 	assert.ok(Array.isArray(out))
-	assert.ok(Date.now() - t < 200, `liveSessions blocked for ${Date.now() - t}ms; the lookup must stay in the background`)
+	// 500ms, not 200. This is the one wall-clock assertion in the suite and the
+	// ceiling has to clear the machine's weather, which the old one did not: it
+	// failed about two runs in five while the machine sat at load 95, blocking
+	// commits at random for no defect. Measured at load 16 the call takes 26-35ms.
+	//
+	// The number it must still catch is 730ms — the cost of `claude agents --json`,
+	// which is what "blocked" would mean here. So the gap between a call that
+	// returned immediately and one that waited on the subprocess is wide enough that
+	// the ceiling can sit well clear of both.
+	//
+	// CPU time would be the usual answer here and is the wrong instrument for once:
+	// waiting on a subprocess costs no CPU, so the regression would be invisible.
+	assert.ok(Date.now() - t < 500, `liveSessions blocked for ${Date.now() - t}ms; the lookup must stay in the background`)
 })
