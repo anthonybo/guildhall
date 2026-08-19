@@ -28,6 +28,10 @@ export type ShareInfo = {
 	token: string
 	lan: string[]
 	vpn: string[]
+	/** digits typed so far while changing the port, or null when not changing it */
+	portEntry?: string | null
+	/** what happened last time the port was changed */
+	portNote?: string
 	/** digits typed so far while changing the code, or null when not changing it */
 	pin?: string | null
 	/** what happened last time it was changed */
@@ -107,12 +111,25 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 	// address and code stay separate on purpose: a code in a URL ends up in browser
 	// history, in a shared link, and in any log the request passes through
 	const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}`)
+	// Mid-entry the port line becomes the field, rather than a field appearing
+	// somewhere else: the number you are replacing and the number you are typing
+	// belong in the same place, or you end up reading two ports and trusting the
+	// wrong one.
+	if (share.portEntry !== null && share.portEntry !== undefined) {
+		return [
+			`${fg(C.label)}new port  ${bold}${fg(C.gold)}${share.portEntry || '…'}${R}`,
+			`${fg(C.faint)}1024-65535 · ⏎ to move · ⌫ to fix · esc to leave it alone${R}`,
+			`${fg(C.muted)}Every device has to be told the new address.${R}`,
+			...(share.portNote ? [`${fg(C.fillWarn)}${share.portNote}${R}`] : []),
+		]
+	}
 	return [
 		`${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`,
 		...(urls.length
 			? urls.slice(0, 3).map((u) => `${fg(C.gold)}${u}${R}`)
 			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
 		...passcodeLines(share),
+		`${fg(C.faint)}o to change the port${R}${share.portNote ? `${fg(C.muted)} · ${share.portNote}${R}` : ''}`,
 		`${fg(C.muted)}Asked once per device, then remembered. Five wrong tries and${R}`,
 		`${fg(C.muted)}that device waits, doubling each time — which is what makes${R}`,
 		`${fg(C.muted)}four digits safe. Changing it signs every device out.${R}`,

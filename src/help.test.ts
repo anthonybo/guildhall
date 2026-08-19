@@ -72,3 +72,18 @@ test('a help panel taller than the window scrolls instead of losing its bottom',
 	// and a window tall enough is left exactly as it was, with no hint
 	assert.doesNotMatch(H.panel(120, 200, share).join('\n'), /more line/)
 })
+
+test('the port can be changed from the panel, not just read off it', () => {
+	// The panel showed the port and offered no way to change it, so the only routes
+	// were a --port flag or hand-editing the config — neither reachable from the
+	// screen that tells you the port exists.
+	const share = { on: true, port: 4318, token: 'x', lan: ['192.168.1.24'], vpn: [], pin: null, pinNote: '' }
+	assert.match(strip(panel(100, 200, share).join(' ')), /o to change the port/)
+	// mid-entry the port line BECOMES the field, so there are never two ports on
+	// screen at once for the reader to pick the wrong one from
+	const typing = strip(panel(100, 200, { ...share, portEntry: '446' }).join(' '))
+	assert.match(typing, /new port\s+446/)
+	assert.doesNotMatch(typing, /sharing on port 4318/)
+	// and a rejected change explains itself rather than silently reverting
+	assert.match(strip(panel(100, 200, { ...share, portNote: '4472 is in use — kept 4318' }).join(' ')), /in use/)
+})

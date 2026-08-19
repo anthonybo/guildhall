@@ -61,7 +61,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   guildhall --serve      share read-only over the network (off by default)
   guildhall --no-serve   force sharing off for this run
 
-keys   ? help · s share · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+keys   ? help · s share · o port (in help) · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
 env    GUILDHALL_CMUX    path to the cmux binary
        GUILDHALL_NO_IMAGES  force half-block rendering`)
 	process.exit(0)
@@ -305,7 +305,7 @@ let helpScroll = 0
  */
 const shareInfo = () => {
 	const net = addresses()
-	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }
+	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote }
 }
 const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
 /** digits typed so far while changing the passcode, or null when not changing it */
@@ -321,6 +321,46 @@ let ctlPass: string | null = null
 let ctlNote = ''
 /** what happened last time it was changed, shown until the panel closes */
 let pinNote = ''
+/** digits typed so far while changing the port, or null when not changing it */
+let portEntry: string | null = null
+/** what happened last time the port was changed */
+let portNote = ''
+
+/**
+ * Move the listener to `next`, and put it back if that fails.
+ *
+ * Without the restore, mistyping a port that something else already holds would
+ * disable sharing outright: the EADDRINUSE handler in `syncServe` sets serve to
+ * false, so the panel would go from "sharing on port 4318" to off, and the address
+ * you were reading would be gone. Changing a setting must not be able to turn the
+ * feature off.
+ *
+ * The old listener is closed first because binding the new port while the old one
+ * is held is not what "change the port" means — one process, one address.
+ */
+function movePort(next: number) {
+	const was = cfg.port
+	server?.close()
+	server = null
+	cfg.port = next
+	cfg.serve = true
+	syncServe()
+	// `listen` is asynchronous, so a bind failure lands on the error handler rather
+	// than here. Give it a tick, then judge by whether a listener actually exists.
+	setTimeout(() => {
+		if (server) {
+			cfgStore.save(cfg)
+			portNote = `moved to ${next} — the old address stops working`
+		} else {
+			cfg.port = was
+			cfg.serve = true
+			serveError = ''
+			syncServe()
+			portNote = `${next} is in use — kept ${was}`
+		}
+		draw()
+	}, 150)
+}
 let selectedId: string | null = null
 /** table rows opened with →, so their detail shows under them */
 const expanded = new Set<string>()
@@ -678,6 +718,28 @@ function onKey(b: Buffer) {
 		return
 	}
 
+	// Same swallow-everything rule as the two above: a `q` typed while entering a
+	// port must not quit the app. Enter commits, because unlike a 4-digit passcode
+	// a port has no fixed length to commit on.
+	if (portEntry !== null) {
+		for (const key of eachKey(k)) {
+			if (portEntry === null) break
+			if (key === '\x1b') ((portEntry = null), (portNote = 'left as it was'))
+			else if (key === '\x7f' || key === '\b') portEntry = portEntry.slice(0, -1)
+			else if (key === '\r' || key === '\n') {
+				const n = Number(portEntry)
+				// 1024 rather than 1: binding below it needs root, and the failure would
+				// arrive as a permissions error that reads like a bug in this app
+				if (!Number.isInteger(n) || n < 1024 || n > 65535) portNote = 'a port is 1024 to 65535'
+				else if (n === cfg.port) portNote = `already on ${n}`
+				else movePort(n)
+				portEntry = null
+			} else if (/^\d$/.test(key) && portEntry.length < 5) portEntry += key
+		}
+		draw()
+		return
+	}
+
 	if (pin !== null) {
 		for (const key of eachKey(k)) {
 			if (pin === null) break // finished mid-chunk
@@ -721,6 +783,15 @@ function onKey(b: Buffer) {
 		if (k === 'c') {
 			ctlPass = ''
 			ctlNote = ''
+			draw()
+			return
+		}
+		// `o` rather than a second `p`, which the passcode already has. Only offered
+		// while sharing is on, since the port of a server that is not running is not
+		// a thing anybody is looking at.
+		if (k === 'o' && cfg.serve) {
+			portEntry = ''
+			portNote = ''
 			draw()
 			return
 		}
