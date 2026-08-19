@@ -47,8 +47,24 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	-->
 	<key>LSUIElement</key>
 	<true/>
-</dict>
 PLIST
+
+# Where to find guildhall itself, baked in at build time.
+#
+# The app shells out to `guildhall --set-control-password` so the control password
+# is hashed by the one implementation that has always done it, rather than a second
+# copy in Swift. It cannot find that by PATH: launchd starts the app with almost no
+# environment, so nvm's node is not on it.
+#
+# Baking absolute paths is honest here — the app is unsigned and built for the
+# machine it is built on, which is the same reason it is not distributable.
+cat >> "$APP/Contents/Info.plist" <<PATHS
+	<key>GHNode</key>
+	<string>$(command -v node)</string>
+	<key>GHEntry</key>
+	<string>$(pwd)/../dist/main.mjs</string>
+</dict>
+PATHS
 echo '</plist>' >> "$APP/Contents/Info.plist"
 
 echo "built $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"

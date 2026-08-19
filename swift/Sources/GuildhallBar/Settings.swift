@@ -2,9 +2,13 @@ import SwiftUI
 
 /// Everything the terminal's help panel can change, changeable here.
 ///
-/// The one exception is the control password, which is an scrypt hash written
-/// behind a deliberate guard and is set by typing it into the terminal. That is
-/// stated on screen rather than left as a gap somebody has to discover.
+/// Including the control password. The first version of this refused to offer it
+/// and told the person to open a terminal and press a key — which is not an answer
+/// a control panel gets to give. The objection was real but it was about the
+/// wrong thing: the credential must have ONE implementation of being stored, not
+/// one place it can be typed. So the field is here and the hashing is not; the
+/// password goes to `guildhall --set-control-password` on stdin and that does
+/// what it has always done.
 ///
 /// Every change writes the config file and then restarts the service, because
 /// the port and the passcode are read at startup — a setting that is saved but
@@ -17,6 +21,8 @@ struct SettingsView: View {
 	@State private var passcode = Config.passcode()
 	@State private var note = ""
 	@State private var failed = false
+	@State private var controlPassword = ""
+	@State private var controlSet = Config.controlPasswordIsSet()
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
@@ -65,14 +71,21 @@ struct SettingsView: View {
 
 			HStack(spacing: 6) {
 				Text("Control password:").font(.caption)
-				Text(Config.controlPasswordIsSet() ? "set" : "not set yet")
-					.font(.caption).foregroundStyle(Config.controlPasswordIsSet() ? .green : .orange)
+				Text(controlSet ? "set" : "not set yet")
+					.font(.caption).foregroundStyle(controlSet ? .green : .orange)
 				Spacer()
 			}
-			// Not editable here on purpose, and it says why rather than simply omitting
-			// the field. It is stored as a hash behind a guard that exists because a
-			// script once overwrote the real password with a test string.
-			Text("Set it by running guildhall in a terminal, pressing ? then c. It is stored hashed and never accepted over the network.")
+			// Settable here now. It is not hashed here, though: the password goes to
+			// `guildhall --set-control-password` on stdin and that does the scrypt, so
+			// there is exactly one implementation of storing this credential. Saying
+			// "do it in a terminal" was the wrong answer to a control panel.
+			HStack {
+				SecureField("new control password", text: $controlPassword)
+					.frame(width: 200)
+				Button("Set") { setControl() }
+					.disabled(controlPassword.count < 8)
+			}
+			Text("Eight characters or more, and not all the same one. Typed straight into guildhall and stored hashed — never sent over the network, and never written down by this app.")
 				.font(.caption).foregroundStyle(.secondary)
 				.fixedSize(horizontal: false, vertical: true)
 
@@ -97,6 +110,22 @@ struct SettingsView: View {
 		}
 		.padding(16)
 		.frame(width: 420)
+	}
+
+	private func setControl() {
+		do {
+			try Config.setControlPassword(controlPassword)
+			// Cleared immediately. There is no reason for it to sit in a view's state
+			// after it has been handed over, and a filled password field invites a
+			// second Set that would silently do the same thing again.
+			controlPassword = ""
+			controlSet = true
+			note = "Control password set. Every device must enter it again."
+			failed = false
+		} catch {
+			note = error.localizedDescription
+			failed = true
+		}
 	}
 
 	private func apply() {

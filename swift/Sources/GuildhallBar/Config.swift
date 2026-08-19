@@ -6,8 +6,8 @@ import Foundation
 /// the server to do it. Two reasons, and the second is the important one:
 ///
 /// It runs as the same user on the same machine, which is the trust boundary the
-/// whole design already uses — the control password is typed HERE and never
-/// accepted over the network for exactly this reason.
+/// whole design already uses — the control password is set from this machine and
+/// never accepted over the network for exactly this reason.
 ///
 /// And a settings endpoint would be a write surface reachable by anything that
 /// got past the passcode. The passcode guards reading session summaries; it
@@ -85,26 +85,61 @@ struct Config {
 		try write(Data(code.utf8), to: passcodeFile)
 	}
 
-	/// Whether a control password exists. Its VALUE is never read or written here.
+	/// Whether a control password exists. Its VALUE is never read here.
 	///
-	/// It is stored as an scrypt hash, and `setControlPass` in the app refuses to
-	/// write the live file unless the caller passes `{ live: true }` — a guard that
-	/// exists because a throwaway script once replaced the real password with a test
-	/// string. Reimplementing scrypt in Swift to write that file from a second place
-	/// would defeat the guard and duplicate the one credential in this project that
-	/// must not be got wrong. So this reports whether it is set and nothing more; it
-	/// is changed by typing it into the terminal, which is also the trust boundary
-	/// the feature is documented to have.
+	/// Only ever a yes or no: the file holds an scrypt hash, and there is nothing in
+	/// it this app could show or check even if it wanted to.
 	static func controlPasswordIsSet() -> Bool {
 		guard let s = try? String(contentsOfFile: controlFile, encoding: .utf8) else { return false }
 		return !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
 	}
 
+	/// Set the control password, by handing it to guildhall to hash.
+	///
+	/// The password is written to the child's STDIN and nowhere else. Not an
+	/// argument — argv is readable by every process on the machine through `ps` —
+	/// not a temporary file, and not this app's memory for any longer than the call.
+	///
+	/// The hashing, the length rule and the "too few different characters" rule all
+	/// stay in `setControlPass`, which is the only place they have ever been. This
+	/// app deliberately does not know how the credential is stored; it just types it
+	/// in on the person's behalf, which is what the terminal key handler does too.
+	static func setControlPassword(_ password: String) throws {
+		guard let node = Bundle.main.object(forInfoDictionaryKey: "GHNode") as? String,
+			let entry = Bundle.main.object(forInfoDictionaryKey: "GHEntry") as? String,
+			FileManager.default.isExecutableFile(atPath: node),
+			FileManager.default.fileExists(atPath: entry)
+		else { throw Failure.noCLI }
+
+		let task = Process()
+		task.executableURL = URL(fileURLWithPath: node)
+		task.arguments = [entry, "--set-control-password"]
+		let input = Pipe(), output = Pipe()
+		task.standardInput = input
+		task.standardOutput = output
+		task.standardError = output
+		try task.run()
+		input.fileHandleForWriting.write(Data(password.utf8))
+		// Closed so the child's read of stdin ends; without this it waits forever.
+		try? input.fileHandleForWriting.close()
+		let said = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+		task.waitUntilExit()
+		guard task.terminationStatus == 0 else {
+			// guildhall's own words, which already explain what was wrong with it.
+			throw Failure.refused(said.trimmingCharacters(in: .whitespacesAndNewlines))
+		}
+	}
+
 	enum Failure: Error, LocalizedError {
 		case badPasscode
+		case noCLI
+		case refused(String)
 		var errorDescription: String? {
 			switch self {
 			case .badPasscode: return "A passcode is exactly four digits."
+			case .noCLI:
+				return "Can't find guildhall itself. Rebuild the app with swift/build.sh so it records where node and dist/main.mjs are."
+			case .refused(let why): return why.isEmpty ? "Refused." : why
 			}
 		}
 	}

@@ -7,6 +7,7 @@
  * "focus this tab" request, and only when you press enter.
  */
 import { execFileSync, spawn } from 'node:child_process'
+import fs from 'node:fs'
 import {
 	clearAll,
 	WATCH_OFF,
@@ -53,6 +54,30 @@ import { CMUX } from './data/cmux-bin.ts'
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
 	console.log(BUILD)
 	process.exit(0)
+}
+/**
+ * Set the control password from another program, reading it from STDIN.
+ *
+ * This exists so the menu bar app can offer the field without owning the
+ * credential. It calls the same `setControlPass` the key handler does, so the
+ * length rule, the character-variety rule and the scrypt hashing are the one
+ * implementation they have always been — a second copy in Swift would be a second
+ * thing to get wrong about the only password here that can run commands.
+ *
+ * **STDIN, never an argument.** Anything in argv is readable by every process on
+ * the machine through `ps`, so a password passed that way is a password published
+ * to every other user and every script running as you.
+ *
+ * `{ live: true }` for the same reason the key handler passes it: this is a person
+ * deliberately setting a password, which is exactly what the guard is meant to
+ * allow. The guard's purpose is to stop a module import or a stray script from
+ * silently replacing a real credential, not to insist the person be in a terminal.
+ */
+if (process.argv.includes('--set-control-password')) {
+	const typed = fs.readFileSync(0, 'utf8')
+	const r = setControlPass(typed, { live: true })
+	console.log(r.ok ? 'ok' : r.why)
+	process.exit(r.ok ? 0 : 1)
 }
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
 	console.log(`guildhall ${BUILD} — every live Claude Code session as a pixel office

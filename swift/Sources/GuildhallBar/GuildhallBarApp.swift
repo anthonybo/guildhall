@@ -139,22 +139,17 @@ struct GuildhallBarApp: App {
 		// which a stack of NSMenuItems renders badly and cannot scroll.
 		.menuBarExtraStyle(.window)
 
-		// `GuildhallBar --panel` puts the dropdown in an ordinary window.
+		// NO second Scene here, deliberately.
 		//
-		// Only reachable by that flag, and it exists because the dropdown cannot
-		// otherwise be looked at without a hand: a menu bar popover needs a real click,
-		// and scripting one needs accessibility permission that a build machine does
-		// not have. The first version of this panel shipped with its session list
-		// collapsed to zero height and its buttons centred, and both were invisible to
-		// every check that did not involve a screenshot.
-		WindowGroup("Panel") {
-			if CommandLine.arguments.contains("--panel") {
-				Panel(model: model)
-					// Brought to the front deliberately: a status-item app does not
-					// activate its windows, so this opened behind everything else and
-					// looked like it had not opened at all.
-					.onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
-			}
-		}
+		// A `WindowGroup` was added to render the dropdown in a plain window so it
+		// could be screenshotted. It never came to the front, and it broke the app:
+		// declaring a window scene in an accessory app (LSUIElement) gives SwiftUI a
+		// window that can take key status, and a menu bar popover that is not the key
+		// window draws normally and accepts nothing. Reported as "I cannot click
+		// anything in that menu, it is only visual".
+		//
+		// Being unable to screenshot the panel is a testing inconvenience. Shipping a
+		// panel that cannot be clicked is the product not working, and the fix for the
+		// first must not cause the second.
 	}
 }

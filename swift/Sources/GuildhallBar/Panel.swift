@@ -106,15 +106,41 @@ struct Panel: View {
 	}
 
 	private func item(_ title: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
+		MenuItem(title: title, enabled: enabled, action: action)
+	}
+}
+
+/// A row that behaves like a menu item.
+///
+/// `.buttonStyle(.plain)` is needed to stop SwiftUI drawing a bordered button in
+/// a popover, but it also removes every trace of hover and press — so a working
+/// row is indistinguishable from a dead one, which is how this panel came to be
+/// described as "only visual". The highlight is the whole difference between a
+/// list of words and something that looks like it can be used.
+private struct MenuItem: View {
+	let title: String
+	let enabled: Bool
+	let action: () -> Void
+	@State private var hovering = false
+
+	var body: some View {
 		Button(action: action) {
 			Text(title)
 				.frame(maxWidth: .infinity, alignment: .leading)
-				.padding(.horizontal, 4).padding(.vertical, 3)
+				.padding(.horizontal, 6).padding(.vertical, 4)
+				// The shape is what gets hit. Without it only the glyphs of the text are
+				// clickable and the gaps between words are not, which feels broken even
+				// when every click that lands does the right thing.
 				.contentShape(Rectangle())
+				.background(
+					RoundedRectangle(cornerRadius: 4)
+						.fill(hovering && enabled ? Color.accentColor.opacity(0.25) : .clear)
+				)
 		}
 		.buttonStyle(.plain)
 		.disabled(!enabled)
 		.opacity(enabled ? 1 : 0.4)
+		.onHover { hovering = $0 }
 	}
 }
 
