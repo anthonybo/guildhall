@@ -23,6 +23,7 @@
  */
 import { execFile } from 'node:child_process'
 import { CMUX } from './data/cmux-bin.ts'
+import { spawnAllowed } from './data/projects.ts'
 
 /** Long enough for a busy app, short enough that a hung socket is not a stall. */
 const TIMEOUT = 5000
@@ -215,6 +216,103 @@ export function inputBox(screen: string) {
 		.join(' ')
 		.replace(/❯/g, '')
 		.trim()
+}
+
+/**
+ * Start a new Claude Code session in `dir`, in its own cmux tab.
+ *
+ * The one thing here that creates something rather than talking to something
+ * that already exists, and it is the most powerful call in the program: a session
+ * can edit files and run commands, so being able to start one is being able to do
+ * both. It is guarded exactly like typing — control on, loopback or tailnet only,
+ * control password — and additionally the directory must be one the SERVER
+ * offered. A path taken from the request would be arbitrary code execution in a
+ * text field.
+ *
+ * cmux does the work in one call: create the workspace with the right cwd and run
+ * `claude` in it. `--focus false` because this is usually driven from a phone and
+ * stealing the desktop's foreground tab is not part of the deal.
+ *
+ * Nothing is passed as a prompt. The session comes up empty and you type into it
+ * through the terminal panel like any other, which is deliberate — it means the
+ * first message goes through the same guarded path as every other message, and
+ * Claude Code names the session from it exactly as it does normally.
+ */
+export async function spawn(dir: string, title = 'new session'): Promise<Result> {
+	if (!spawnAllowed(dir)) return { ok: false, error: 'not a directory this machine offered' }
+	// A title cmux will accept as a tab name and nothing more. The session renames
+	// itself once the conversation has a subject, which is the point.
+	const name = title.replace(/[^\w .-]/g, '').slice(0, 40) || 'new session'
+	// Returns as soon as cmux has made the tab. It does NOT wait to see whether the
+	// session came up usable, and that is deliberate after trying the alternative.
+	//
+	// Some directories open a modal instead of a prompt — "Is this a project you
+	// created or one you trust?", or a settings-permissions confirmation — and
+	// guildhall refuses to answer prompts remotely on purpose, so a session stuck
+	// behind one cannot be used from a phone. Detecting that here looked easy and is
+	// not: `claude` takes 25-30 seconds to draw its first screen, so a probe a few
+	// seconds after creation reads a blank terminal and reports success. Measured —
+	// a 3.5s check passed a session that was sitting on the trust prompt.
+	//
+	// Waiting the full half-minute inside the request is worse: it holds an HTTP
+	// connection open past the client's own timeout to answer a question the client
+	// can answer better. So the wait belongs there — the browser is already watching
+	// the feed for the new row, and if it never arrives it says why.
+	//
+	// Predicting it from `~/.claude.json` was tried first and does not work either;
+	// the flag disagrees with reality in both directions. See data/projects.ts.
+	// `--id-format both` so the UUID comes back, not just a `workspace:N` ref. The
+	// ref is positional and cmux's own help warns those are not in tab order; the
+	// UUID is the only durable handle, and it is what gets remembered below.
+	const made = await run(['workspace', 'create', '--name', name, '--cwd', dir, '--command', 'claude', '--focus', 'false', '--id-format', 'both'])
+	if (!made.ok) return made
+	// Remember the exact tab, so the session that appears in this directory half a
+	// minute from now can be matched to it. cmux will never record the link itself
+	// for a CLI-created workspace — see data/spawned.ts.
+	const uuid = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/.exec(made.text)?.[0]
+	if (!uuid) return { ok: false, error: 'cmux did not report which workspace it made' }
+	// The UUID goes back to the caller, and that is the whole safety story for the
+	// browser: it waits for the row carrying THIS workspace, never for "a row in
+	// that directory". Seven sessions share `~/projects` here, so directory
+	// matching opened the terminal of whichever was busiest — an unrelated session,
+	// mid-conversation, ready to receive a message meant for a new one.
+	return { ok: true, text: uuid }
+}
+
+/**
+ * The four keys a selection prompt needs, as raw terminal input.
+ *
+ * Claude Code asks a lot of questions as a list you move a caret through —
+ * plan choices, `AskUserQuestion`, and permission requests all render the same
+ * way. From a phone there was no way to answer any of them, which meant the one
+ * moment a session most needs you was the one moment you could do nothing.
+ *
+ * Raw escape sequences through `terminal.input` rather than `send-key`, for the
+ * same reason `ask` uses it: it is verified, it passes bytes through untouched,
+ * and it does not interpret anything on the way. Confirmed against a live prompt —
+ * `\x1b[B` moved the caret from the first option to the second and `\x1b[A` moved
+ * it back.
+ *
+ * FOUR keys and no more. Not a general keyboard: no text, no letters, nothing that
+ * could type a command into a shell that happens to be at a prompt. Moving a caret
+ * and confirming are the whole vocabulary of answering a question.
+ */
+/** The escape byte, written as an escape rather than embedded raw: a literal
+ *  0x1b in the source is invisible in every editor and diff. */
+const ESC = '\u001b'
+
+const KEYS: Record<string, string> = {
+	up: `${ESC}[A`,
+	down: `${ESC}[B`,
+	enter: '\r',
+	escape: ESC,
+}
+
+export async function press(workspace: string, key: string): Promise<Result> {
+	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
+	const seq = KEYS[String(key).toLowerCase()]
+	if (!seq) return { ok: false, error: `not an answerable key: ${String(key).slice(0, 20)}` }
+	return run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: seq })])
 }
 
 /** Exposed for the tests: whether a key would be refused as an approval. */

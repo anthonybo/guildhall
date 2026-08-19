@@ -3,7 +3,7 @@
  * anything outside itself. Everything here is a refusal test.
  */
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import test, { after } from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -37,6 +37,14 @@ async function boot(control = true) {
 		const res = await fetch(`http://127.0.0.1:${port}${p}`, { ...init, headers: { cookie, ...(init.headers ?? {}) }, redirect: 'manual' })
 		return { status: res.status, text: await res.text() }
 	}
+	// Closed on the way out even if a test throws.
+	//
+	// Every test here calls `srv.close()` as its last line, so an assertion that
+	// fails skips it and leaves an open HTTP server holding the event loop. The
+	// suite then HANGS instead of reporting, which is exactly what happened when a
+	// guard was removed and this file's expectations went stale: 45 seconds of
+	// nothing rather than one red line naming the test.
+	after(() => srv.close())
 	return { hit, srv, set: (v: boolean) => (on = v) }
 }
 
@@ -89,18 +97,20 @@ test('a session with no cmux workspace cannot be typed into', () =>
 		srv.close()
 	}))
 
-test('a session sitting on a permission prompt cannot be answered from away', () =>
+test('answering a prompt from away is allowed, and only through the four keys', () =>
 	boot().then(async ({ hit, srv }) => {
 		resetControlThrottle()
-		// control.ts refuses `y`, `n`, `a` and `d` so no remote caller can approve
-		// tool use. But the prompt is a NUMBERED list and a send is text plus Enter,
-		// so "1" reached the same outcome with every letter guard still in place —
-		// the guard was letter-shaped and the prompt is number-shaped. Refused on
-		// what the session is waiting for instead, which no wording can slip past.
-		for (const text of ['1', 'yes', 'go ahead']) {
-			const r = await hit('/api/send', { method: 'POST', body: JSON.stringify({ id: 'lanternfish', text }), headers: { 'x-guildhall-control': PASS } })
-			assert.equal(r.status, 409, `"${text}" was accepted: ${r.text}`)
-			assert.match(r.text, /answered at the machine/)
+		// This used to assert a 409: a guard refused any send to a session whose
+		// `waitingFor` looked like a permission request. That guard was removed
+		// because it could never fire — `waitingFor` is not a field Claude Code
+		// writes, and was absent from all thirteen live registry entries on this
+		// machine. Answering prompts is now deliberate; see `/api/key`.
+		//
+		// What still holds is the shape of the key route: four keys and no more, so
+		// it cannot be used to type a command into a shell sitting at a prompt.
+		for (const key of ['y', 'a', 'ctrl+c', '1', 'tab', 'q']) {
+			const r = await hit('/api/key', { method: 'POST', body: JSON.stringify({ id: 'lanternfish', key }), headers: { 'x-guildhall-control': PASS } })
+			assert.notEqual(r.status, 200, `"${key}" was accepted: ${r.text}`)
 		}
 		srv.close()
 	}))

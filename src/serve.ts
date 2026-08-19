@@ -29,21 +29,39 @@ import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
-import { ask, readGrid } from './control.ts'
+import { ask, press as pressKey, readGrid, spawn } from './control.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
+import { spawnable } from './data/projects.ts'
 import type { Session } from './data.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 /**
- * A wait that means "may I do this?" rather than "what do you think?".
+ * Answering prompts from away: what changed, and what actually protects you.
  *
- * Deliberately broader than the one string this codebase writes today. If Claude
- * Code ever words it differently, the failure that matters is the one where a
- * prompt slips through unmatched, so this errs toward refusing a send.
+ * There used to be a guard here refusing any send to a session whose `waitingFor`
+ * looked like a permission request. It has been removed because it did nothing.
+ * `waitingFor` is not a field Claude Code writes: it is absent from the schema in
+ * all thirteen live registry files on this machine, and the only value guildhall
+ * ever puts there itself is the literal "answer a question", which the pattern did
+ * not match. A guard that cannot fire is worse than no guard, because the README
+ * described it as protection somebody was relying on.
+ *
+ * Answering prompts is now a deliberate feature — see `/api/key`. A session
+ * blocked on a question is the exact moment being away from the machine hurts
+ * most, and refusing to help then made the whole browser view decorative.
+ *
+ * What is actually holding the line, all of it real and all of it testable:
+ *
+ *  - control is off unless deliberately turned on, and it is its own switch
+ *  - loopback or a tailnet only, never a plain LAN, whatever the config says
+ *  - a separate password from the view passcode, scrypt-hashed, throttled
+ *  - four keys and no more: up, down, enter, escape. No text, no letters, nothing
+ *    that could type a command into a shell sitting at a prompt
+ *  - every press is announced on the machine's own screen, so acting here
+ *    remotely is possible and doing it unseen is not
  */
-const PERMISSION = /permission|approv|allow|trust/i
 
 export type ServeOptions = {
 	port: number
@@ -245,7 +263,6 @@ export function createServer(opts: ServeOptions) {
 			// by someone at the machine, which was the point of the whole design.
 			// Checked before the workspace lookup: this is a refusal about what the
 			// session is being asked, not about whether the plumbing to reach it exists.
-			if (PERMISSION.test(target.waitingFor ?? '')) return send(res, 409, MIME['.json'], '{"error":"this session is waiting on a permission prompt — that has to be answered at the machine"}')
 			if (!target.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
 			const out = await ask(target.workspace, String(body.text ?? ''))
 			// Every send is announced on the machine's own screen. A remote caller
@@ -256,6 +273,69 @@ export function createServer(opts: ServeOptions) {
 			// exactly like one that vanished, and looking like it vanished is what made
 			// somebody send everything twice.
 			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, ...(target.deferred ? { note: target.deferred } : {}) } : { error: out.error }))
+		}
+
+		/**
+		 * Start a new session, in a directory this server chose.
+		 *
+		 * The most powerful call here: a session can edit files and run commands, so
+		 * being able to create one is being able to do both. It carries every guard
+		 * the send path does — control armed, loopback or tailnet only, throttled,
+		 * control password — plus one that only applies here: the directory must be
+		 * one `spawnable()` offered. A path taken from the request body would be
+		 * arbitrary code execution in a text field, and no amount of validation on a
+		 * string makes a client-supplied cwd safe.
+		 *
+		 * No prompt is passed. The session comes up empty and is typed into through
+		 * the same guarded path as every other message, which is also what lets Claude
+		 * Code name it from the conversation exactly as it does normally.
+		 */
+		if (req.method === 'POST' && url.pathname === '/api/spawn') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			const waitCtl = controlLockedFor(addr)
+			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			let body: { dir?: string }
+			try {
+				body = JSON.parse(await readBody(req))
+			} catch {
+				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+			}
+			const out = await spawn(String(body.dir ?? ''))
+			// Announced on the machine's own screen like a send. Starting a session
+			// remotely is possible; doing it unseen is not.
+			opts.onSend?.(path.basename(String(body.dir ?? '')), 'started a new session', out.ok)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, workspace: out.text } : { error: out.error }))
+		}
+
+		/**
+		 * Move the caret in a prompt, or confirm it.
+		 *
+		 * Claude Code asks its questions as a list you arrow through, and from a phone
+		 * there was no way to answer one — the moment a session most needs you was the
+		 * moment you could do least. Four keys only; see `press` in control.ts for why
+		 * that list is not longer.
+		 */
+		if (req.method === 'POST' && url.pathname === '/api/key') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			const waitKey = controlLockedFor(addr)
+			if (waitKey > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitKey / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			let body: { id?: string; key?: string }
+			try {
+				body = JSON.parse(await readBody(req))
+			} catch {
+				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+			}
+			const target = sessions().find((s) => s.id === body.id)
+			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			const out = await pressKey(target.workspace, String(body.key ?? ''))
+			// Announced like a send. A key that answers a prompt is a decision, and a
+			// decision made from away must still be visible to whoever is here.
+			opts.onSend?.(target.proj, `pressed ${String(body.key ?? '').slice(0, 12)}`, out.ok)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
 		}
 
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -336,6 +416,15 @@ export function createServer(opts: ServeOptions) {
 			}
 			res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag }).end(out.text)
 			return
+		}
+
+		/** Directories a session can be started in. Behind the control token because
+		 *  it is only useful to something that can spawn, and it names your folders. */
+		if (url.pathname === '/api/projects') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			return send(res, 200, MIME['.json'], JSON.stringify({ projects: spawnable() }))
 		}
 
 		if (url.pathname === '/api/stream') {
