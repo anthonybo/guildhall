@@ -16,6 +16,7 @@ import { mountRoom, relayout, setRoomSessions } from './room.ts'
 import { busy as terminalBusy, mountTerminal, show as showTerminal } from './terminal.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
+import { isOpen as newOpen, mountNewSession, show as showNewSession } from './newsession.ts'
 
 const bar = { counts: $<HTMLElement>('#counts'), link: $<HTMLElement>('#link'), ver: $<HTMLElement>('#ver') }
 const roomEl = $<HTMLElement>('#room')
@@ -103,7 +104,7 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 	// also blocked the build which fixed closing it.
 	if (data.client) {
 		if (clientStamp === null) clientStamp = data.client
-		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen()) return void location.reload()
+		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen() && !newOpen()) return void location.reload()
 	}
 	sessions = data.sessions
 	setRoomSessions(sessions)
@@ -120,6 +121,25 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 		bar.ver.replaceChildren((data.update ? '⇡ v' : 'v') + num, build)
 		bar.ver.classList.toggle('newer', !!data.update)
 		bar.ver.title = data.update ? `v${data.update} is available` : ''
+	}
+	// A session started from the phone: open it as soon as it exists, so the idea
+	// can go straight in. Newest row in that directory, since a project may already
+	// have had one.
+	if (awaitingDir) {
+		// A row with no workspace has no terminal to show: `/api/screen` answers "no
+		// such session, or it is not in a cmux tab" and the panel opens blank on an
+		// error. Wait for one that can actually be opened — that is what the timeout
+		// below is for.
+		const fresh = sessions.filter((s) => s.cwd === awaitingDir && s.workspace).sort((a, b) => a.stale - b.stale)[0]
+		if (fresh) {
+			awaitingDir = null
+			showTerminal(fresh.id, fresh.name)
+		} else if (Date.now() - awaitingSince > SPAWN_WAIT) {
+			const where = awaitingDir
+			awaitingDir = null
+			offlineEl.hidden = false
+			offlineEl.textContent = `The session in ${where} has not come up. Some projects open a trust prompt on first run, and that has to be answered at the machine.`
+		}
 	}
 	showRoom()
 	paintCounts(sessions)
@@ -243,6 +263,37 @@ mountTerminal($<HTMLElement>('#terminal'), () => {})
 // One button in the header opens it, and the panel itself owns closing — it is a
 // full screen on a phone and a drawer on a desktop, so the way out has to be
 // inside it rather than back up in a header you may have scrolled past.
+/**
+ * A session started from the phone, waiting for its row to appear.
+ *
+ * The spawn returns as soon as cmux has made the tab, but guildhall only learns
+ * about the session on the next feed tick — so the terminal cannot be opened
+ * immediately. This remembers which directory was asked for and opens the
+ * terminal the moment a row shows up in it, which is what makes the flow "tap a
+ * project, type the idea" rather than "tap, wait, hunt for the new row".
+ */
+let awaitingDir: string | null = null
+let awaitingSince = 0
+
+/**
+ * How long to wait for a started session to appear before saying something.
+ *
+ * `claude` takes 25-30 seconds to draw its first screen, and the row only exists
+ * once it has registered — so anything shorter reports a failure that has not
+ * happened yet. 75 seconds is comfortably past that on a slow start, and a
+ * session that has not appeared by then is not coming: the usual reason is a
+ * trust prompt, which has to be answered at the machine and which guildhall
+ * refuses to answer remotely by design.
+ */
+const SPAWN_WAIT = 75_000
+
+const newBtn = $<HTMLButtonElement>('#newbtn')
+mountNewSession($<HTMLElement>('#newsession'), (dir) => {
+	awaitingDir = dir
+	awaitingSince = Date.now()
+})
+newBtn.addEventListener('click', () => showNewSession())
+
 const pressBtn = $<HTMLButtonElement>('#pressbtn')
 mountPress($<HTMLElement>('#press'), () => pressBtn.setAttribute('aria-expanded', 'false'))
 pressBtn.addEventListener('click', () => {

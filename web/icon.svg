@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+	<!--
+		A lit monitor on a desk: the one thing in the room that means "a session is
+		working", drawn at the size a tab strip actually gives you.
+
+		Pixels on a 32-unit grid and `crispEdges`, because the app is pixel art and a
+		favicon that antialiases into a smudge would be the only soft thing in it. No
+		character sprite — a 16x32 person shrunk into a 16px square is unreadable, and
+		the monitor is the shape that survives.
+
+		Dark plate behind it rather than a transparent background: a browser tab strip
+		may be light or dark, and the room is always dark.
+	-->
+	<rect width="32" height="32" rx="6" fill="#1c1e28" />
+	<!-- screen -->
+	<rect x="6" y="7" width="20" height="14" fill="#0d0f16" stroke="#4a4d5e" stroke-width="2" />
+	<!-- lines of code, in the app's own gold and greens -->
+	<rect x="9" y="10" width="9" height="2" fill="#ffd65c" />
+	<rect x="9" y="14" width="13" height="2" fill="#7fd88f" />
+	<rect x="9" y="18" width="6" height="2" fill="#6aa9f0" />
+	<!-- stand and desk -->
+	<rect x="14" y="21" width="4" height="3" fill="#4a4d5e" />
+	<rect x="5" y="24" width="22" height="3" fill="#8a6a44" />
+</svg>
