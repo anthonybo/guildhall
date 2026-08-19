@@ -1048,7 +1048,30 @@ function headless() {
 	cfg.serve = true
 	syncServe()
 	console.log(`${stamp()}  guildhall headless on ${cfg.host}:${cfg.port} (pid ${process.pid}) — ${BUILD}`)
-	if (serveError) console.log(`${stamp()}  serve failed: ${serveError}`)
+	// Serving is the entire job, so failing to serve is failing to run.
+	//
+	// This used to log the error and carry on: a live process, polling every two
+	// seconds, answering nothing, forever. Under launchd that is the worst of both
+	// — KeepAlive sees a healthy process and never restarts it, so the browser view
+	// stays down until somebody notices by hand, which from a phone is
+	// indistinguishable from a sleeping machine.
+	//
+	// Exiting non-zero hands the decision to launchd, which retries. That also makes
+	// "start the service before freeing the port" recover on its own rather than
+	// having to be done in the right order.
+	//
+	// Checked on a timer, not straight after syncServe(), because `listen` is
+	// ASYNCHRONOUS: the first version of this read `serveError` immediately, found
+	// it empty because the EADDRINUSE handler had not run yet, and carried on
+	// exactly as before. It looked right and did nothing.
+	//
+	// `server` rather than `serveError` is the real signal — the error handler nulls
+	// it — so this covers a refused bind for any reason, not only a busy port.
+	setTimeout(() => {
+		if (server) return
+		console.log(`${stamp()}  serve failed: ${serveError || 'no listener'} — exiting so it gets retried`)
+		process.exit(1)
+	}, 500)
 	const tick = () => {
 		sessions = collect()
 		awake.sync(sessions)
