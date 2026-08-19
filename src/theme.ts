@@ -158,6 +158,8 @@ export const R = '\x1b[0m'
 export const fg = (c: RGB) => `\x1b[38;2;${c[0]};${c[1]};${c[2]}m`
 export const bg = (c: RGB) => `\x1b[48;2;${c[0]};${c[1]};${c[2]}m`
 export const bold = '\x1b[1m'
+/** Underline. Used for one thing only: marking a value you can click to change. */
+export const underline = '\x1b[4m'
 
 export const plain = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
 export const width = (s: string) => [...plain(s)].length

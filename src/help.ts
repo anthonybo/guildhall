@@ -8,7 +8,7 @@
  * key bindings: what "awake" promises (and does not), why a session can read
  * `working` when nothing is on screen, and what a level counts.
  */
-import { C, LOOK, R, bold, clip, fg, tierOf, width } from './theme.ts'
+import { C, LOOK, R, bold, clip, fg, tierOf, underline, width } from './theme.ts'
 import type { State } from './data.ts'
 import { available } from './update.ts'
 
@@ -20,12 +20,143 @@ const PAD = 2
  * `copy` carries its own payload rather than a row number, because the thing
  * being copied is an address that only exists in the line that renders it.
  */
-export type Act = { kind: 'port' } | { kind: 'passcode' } | { kind: 'control' } | { kind: 'copy'; text: string }
+export type Act =
+	| { kind: 'port' }
+	| { kind: 'passcode' }
+	| { kind: 'control' }
+	| { kind: 'copy'; text: string }
+	| { kind: 'sharing' }
+	| { kind: 'awake' }
+	| { kind: 'labels' }
+	/** open or close one of the explanatory sections */
+	| { kind: 'section'; id: string }
+
+/**
+ * Mark a value as something you can act on.
+ *
+ * Underline and nothing else. The panel had six changeable values in it and no
+ * way to tell them from the prose — "I would have no idea the port is clickable"
+ * — and the fix has to be a convention rather than a word beside each one, or the
+ * hint costs more room than the setting. Underline is the one attribute already
+ * understood as "this does something" and is not used anywhere else here.
+ */
+const hot = (s: string) => `${underline}${s}${R}`
+
+/**
+ * Every collapsible section, in the order they appear.
+ *
+ * Exported so `h` can open all of them without main.ts keeping its own list that
+ * would quietly fall out of step with the headings below.
+ */
+export const SECTION_IDS = ['status', 'awake', 'level', 'room', 'sharing', 'control', 'keys'] as const
 
 /** A clickable line, as a screen row index into what `panel()` returned. */
 export type Hit = { row: number; act: Act }
 
 type Line = { text: string; kind?: 'title' | 'head' | 'dim'; act?: Act }
+
+/** Live values the settings block shows that are not about sharing. */
+export type Env = { awakeArmed: boolean; awakeHolding: boolean; labels: string }
+
+/**
+ * Hide the prose under any closed heading.
+ *
+ * Done as a pass over the finished list rather than by restructuring the sections
+ * into nested arrays: the panel is ninety lines of explanation with six settings
+ * buried in it, and the shape that fixes that is a short list of headings, not a
+ * different way of writing the same wall. A heading with no section id — SETTINGS —
+ * is never collapsible, and any heading at all ends the previous section, so a
+ * closed one cannot swallow what follows it.
+ */
+function collapse(items: (string | Line)[], open: Set<string>): (string | Line)[] {
+	const out: (string | Line)[] = []
+	let skipping = false
+	for (const item of items) {
+		if (typeof item !== 'string' && item.kind === 'head') {
+			const id = item.act?.kind === 'section' ? item.act.id : null
+			skipping = id ? !open.has(id) : false
+			out.push(id ? { ...item, text: `${open.has(id) ? '▾' : '▸'} ${item.text}` } : item)
+			continue
+		}
+		if (!skipping) out.push(item)
+	}
+	return out
+}
+
+/** One settings row: what it is, what it is set to, and the key that changes it. */
+function setting(label: string, value: string, hint: string, act: Act): Line {
+	return { text: `${fg(C.label)}${label.padEnd(9)}${R}${value}${hint ? `${fg(C.faint)}   ${hint}${R}` : ''}`, act }
+}
+
+/**
+ * Everything you can change, in one block at the top.
+ *
+ * These were spread through the prose, each explained where it appeared, which
+ * read fine as a document and badly as a control panel: there was no single place
+ * that answered "what can I change here". Values are underlined because that is
+ * the only cue that separates them from the sentences around them.
+ */
+function settingsBlock(share?: ShareInfo, control?: ControlInfo, env?: Env): (string | Line)[] {
+	const rows: (string | Line)[] = [{ text: 'SETTINGS', kind: 'head' }, `${fg(C.faint)}underlined values can be clicked, or use the key beside them${R}`]
+	// Mid-entry, the row being edited becomes the field. Same rule as before: the
+	// value you are replacing and the one you are typing belong in one place.
+	if (share?.portEntry !== null && share?.portEntry !== undefined) {
+		rows.push(setting('port', `${bold}${fg(C.gold)}${share.portEntry || '…'}${R}`, '1024-65535 · ⏎ move · esc cancel', { kind: 'port' }))
+		rows.push(`${fg(C.muted)}Every device has to be told the new address.${R}`)
+		if (share.portNote) rows.push(`${fg(C.fillWarn)}${share.portNote}${R}`)
+		return rows
+	}
+	if (share?.pin !== null && share?.pin !== undefined) {
+		const typed = '●'.repeat(share.pin.length) + '○'.repeat(4 - share.pin.length)
+		rows.push(setting('passcode', `${bold}${fg(C.gold)}${typed}${R}`, 'four digits · ⌫ fix · esc cancel', { kind: 'passcode' }))
+		return rows
+	}
+	if (control?.typing !== null && control?.typing !== undefined) {
+		// never echoed; the dots are enough to see it registering
+		rows.push(setting('control', `${bold}${fg(C.gold)}${'●'.repeat(Math.min(control.typing.length, 40)) || '…'}${R}`, `${control.typing.length} chars · ⏎ save · esc cancel`, { kind: 'control' }))
+		if (control.note) rows.push(`${fg(C.fillWarn)}${control.note}${R}`)
+		return rows
+	}
+	rows.push(
+		// "off by default" belongs on the row, not only in the prose behind a closed
+		// heading: it is the answer to "did I leave this on?", which is asked while
+		// looking at the setting.
+		setting('sharing', share?.on ? `${fg(C.screenAgent)}${hot('on')}${R}` : `${fg(C.fillWarn)}${hot('off')}${R}`, share?.on ? 's' : 's · off by default', { kind: 'sharing' }),
+	)
+	if (share?.on) {
+		rows.push(setting('port', `${fg(C.gold)}${hot(String(share.port))}${R}`, 'o', { kind: 'port' }))
+		const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}`)
+		for (const u of urls.slice(0, 3)) rows.push(setting('address', `${fg(C.gold)}${hot(u)}${R}`, 'y copies it', { kind: 'copy', text: u }))
+		if (!urls.length) rows.push(`${fg(C.fillWarn)}no network address found — is wifi off?${R}`)
+		// the code stays out of the URL: a code in a link ends up in history and logs
+		rows.push(setting('passcode', `${fg(C.gold)}${hot(share.token)}${R}`, 'p', { kind: 'passcode' }))
+		if (share.pinNote) rows.push(`${fg(C.faint)}${share.pinNote}${R}`)
+		if (share.portNote) rows.push(`${fg(C.faint)}${share.portNote}${R}`)
+	}
+	// Visible whether sharing is on or off, and collapsed or not. The case that
+	// matters most is somebody DECIDING whether to enable it, which is when sharing
+	// is still off — and serve.test.ts checks the panel with no sharing state at all
+	// for exactly that reason. A warning behind a closed heading is not a warning.
+	rows.push(`${fg(C.fillWarn)}anyone who reaches it can read session titles, filenames being${R}`)
+	rows.push(`${fg(C.fillWarn)}edited and commands run — never on the public internet. See SHARING.${R}`)
+	rows.push(
+		setting(
+			'control',
+			control?.on ? (control.isSet ? `${fg(C.screenAgent)}${hot('on, password set')}${R}` : `${fg(C.fillWarn)}${hot('on, no password yet')}${R}`) : `${fg(C.fillWarn)}${hot('off')}${R}`,
+			'c',
+			{ kind: 'control' },
+		),
+	)
+	if (control?.note) rows.push(`${fg(C.faint)}${control.note}${R}`)
+	// Same rule for control, which is the one setting here that can change the
+	// machine. The detail is in its section; the fact is not optional reading.
+	if (control?.on) rows.push(`${fg(C.fillWarn)}whoever holds the password can type into every session you have${R}`, `${fg(C.fillWarn)}open, which reaches editing files and running commands. See CONTROL.${R}`)
+	if (env) {
+		rows.push(setting('awake', env.awakeHolding ? `${fg(C.fillOk)}${hot('holding awake')}${R}` : env.awakeArmed ? `${fg(C.screenEdit)}${hot('awake when working')}${R}` : `${fg(C.fillWarn)}${hot('sleeps normally')}${R}`, 'a', { kind: 'awake' }))
+		rows.push(setting('labels', `${fg(C.muted)}${hot(env.labels)}${R}`, 'v', { kind: 'labels' }))
+	}
+	return rows
+}
 
 /** Colour a leading glyph, so the legend shows the mark you actually see. */
 function stateLine(state: State, meaning: string) {
@@ -47,21 +178,6 @@ export type ShareInfo = {
 	pin?: string | null
 	/** what happened last time it was changed */
 	pinNote?: string
-}
-
-/** The passcode line: what it is now, or what is being typed instead. */
-function passcodeLines(share: ShareInfo): (string | Line)[] {
-	if (share.pin !== null && share.pin !== undefined) {
-		const typed = '●'.repeat(share.pin.length) + '○'.repeat(4 - share.pin.length)
-		return [
-			`${fg(C.label)}new passcode  ${bold}${fg(C.gold)}${typed}${R}`,
-			`${fg(C.faint)}type four digits · ⌫ to fix · esc to leave it alone${R}`,
-		]
-	}
-	return [
-		{ text: `${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`, act: { kind: 'passcode' } },
-		{ text: `${fg(C.faint)}p to change it, or click it${R}${share.pinNote ? `${fg(C.muted)} · ${share.pinNote}${R}` : ''}`, act: { kind: 'passcode' } },
-	]
 }
 
 /**
@@ -89,78 +205,19 @@ export type ControlInfo = {
 	note: string
 }
 
-function controlLines(control?: ControlInfo): (string | Line)[] {
-	if (control?.typing !== null && control?.typing !== undefined) {
-		// Never echoed, not even here. The dots are enough to see it registering,
-		// and a passphrase on screen is a passphrase over anyone's shoulder.
-		const dots = '●'.repeat(Math.min(control.typing.length, 40))
-		return [
-			`${fg(C.label)}new control password  ${bold}${fg(C.gold)}${dots || '…'}${R}`,
-			`${fg(C.faint)}${control.typing.length} characters · ⏎ to save · ⌫ to fix · esc to leave it${R}`,
-			...(control.note ? [`${fg(C.fillWarn)}${control.note}${R}`] : []),
-		]
-	}
-	if (!control?.on) {
-		return [`${fg(C.fillWarn)}○ control off${R}${fg(C.muted)} — no browser can type into any session.${R}`]
-	}
-	return [
-		{
-			text: control.isSet
-				? `${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — password set. ${bold}c${R}${fg(C.muted)} or click to change it.${R}`
-				: `${fg(C.fillWarn)}◉ control on, but no password set${R}${fg(C.muted)} — press ${bold}c${R}${fg(C.muted)} or click to set one.${R}`,
-			act: { kind: 'control' } as Act,
-		},
-		...(control.note ? [`${fg(C.faint)}${control.note}${R}`] : []),
-	]
-}
 
-function shareLines(share?: ShareInfo): (string | Line)[] {
-	if (!share?.on) {
-		return [
-			`${fg(C.muted)}${bold}s${R}${fg(C.muted)} starts a small read-only web server so your other machines${R}`,
-			`${fg(C.muted)}and your phone can see this. It is ${bold}off by default${R}${fg(C.muted)} and the choice${R}`,
-			`${fg(C.muted)}is remembered. Turn it on and this panel shows the address.${R}`,
-		]
-	}
-	// address and code stay separate on purpose: a code in a URL ends up in browser
-	// history, in a shared link, and in any log the request passes through
-	const urls = [...share.vpn, ...share.lan].map((a) => `http://${a}:${share.port}`)
-	// Mid-entry the port line becomes the field, rather than a field appearing
-	// somewhere else: the number you are replacing and the number you are typing
-	// belong in the same place, or you end up reading two ports and trusting the
-	// wrong one.
-	if (share.portEntry !== null && share.portEntry !== undefined) {
-		return [
-			`${fg(C.label)}new port  ${bold}${fg(C.gold)}${share.portEntry || '…'}${R}`,
-			`${fg(C.faint)}1024-65535 · ⏎ to move · ⌫ to fix · esc to leave it alone${R}`,
-			`${fg(C.muted)}Every device has to be told the new address.${R}`,
-			...(share.portNote ? [`${fg(C.fillWarn)}${share.portNote}${R}`] : []),
-		]
-	}
-	return [
-		{ text: `${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`, act: { kind: 'port' } as Act },
-		...(urls.length
-			? // Clicking an address copies it. Enabling the mouse costs drag-to-select
-				// in this panel, and the address is the one thing here anybody needs to
-				// get onto another machine — so it has to be copyable by the mechanism
-				// that replaced selection, not in spite of it.
-				urls.slice(0, 3).map((u) => ({ text: `${fg(C.gold)}${u}${R}`, act: { kind: 'copy', text: u } as Act }))
-			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
-		...passcodeLines(share),
-		{ text: `${fg(C.faint)}o to change the port, or click it · y copies the address${R}${share.portNote ? `${fg(C.muted)} · ${share.portNote}${R}` : ''}`, act: { kind: 'port' } as Act },
-		`${fg(C.muted)}Asked once per device, then remembered. Five wrong tries and${R}`,
-		`${fg(C.muted)}that device waits, doubling each time — which is what makes${R}`,
-		`${fg(C.muted)}four digits safe. Changing it signs every device out.${R}`,
-	]
-}
 
-function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
+function body(share?: ShareInfo, control?: ControlInfo, env?: Env): (string | Line)[] {
 	const tier = (n: number) => `${fg(tierOf(n).color)}${tierOf(n).name}${R}`
 	return [
 		{ text: 'guildhall', kind: 'title' },
 		{ text: 'Every live Claude Code session as a room you can glance at.', kind: 'dim' },
 		'',
-		{ text: 'STATUS — whose turn it is', kind: 'head' },
+		...settingsBlock(share, control, env),
+		'',
+		{ text: 'HELP', kind: 'head' },
+		`${fg(C.faint)}click a heading to open it · h opens or closes them all${R}`,
+		{ text: 'STATUS — whose turn it is', kind: 'head', act: { kind: 'section', id: 'status' } },
 		stateLine('working', 'generating right now; leave it alone'),
 		stateLine('shell', 'a command it started is still running'),
 		stateLine('needs', 'blocked on you — a permission prompt or a question'),
@@ -172,7 +229,7 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		`${fg(C.muted)}from Claude Code's own flag — that one says ${bold}busy${R}${fg(C.muted)} forever if a${R}`,
 		`${fg(C.muted)}session dies mid-turn, and ${bold}idle${R}${fg(C.muted)} when it asked you a question.${R}`,
 		'',
-		{ text: 'KEEPING THE MACHINE AWAKE', kind: 'head' },
+		{ text: 'AWAKE — what it does and does not promise', kind: 'head', act: { kind: 'section', id: 'awake' } },
 		`${fg(C.fillOk)}● holding awake${R}       ${fg(C.muted)}something is working; sleep is blocked${R}`,
 		`${fg(C.screenEdit)}◐ awake when working${R}  ${fg(C.muted)}enabled, nothing running, free to sleep${R}`,
 		`${fg(C.fillWarn)}○ sleeps normally${R}     ${fg(C.muted)}switched off${R}`,
@@ -184,21 +241,26 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		`${fg(C.muted)}machine ignoring this. Set ${bold}awakeDisplay: false${R}${fg(C.muted)} in the config${R}`,
 		`${fg(C.muted)}file to let the screen sleep on its own and save the battery.${R}`,
 		'',
-		{ text: 'LEVEL — work done, not time spent', kind: 'head' },
+		{ text: 'LEVEL — work done, not time spent', kind: 'head', act: { kind: 'section', id: 'level' } },
 		`${fg(C.muted)}25 x commits  +  3 x file edits  +  15 x subagents  +  minutes worked${R}`,
 		`${fg(C.muted)}Minutes come from turn durations, so a session left open all${R}`,
 		`${fg(C.muted)}night earns nothing. A day of hard work is about 11, a month 37,${R}`,
 		`${fg(C.muted)}a year 85.  ${tier(3)} → ${tier(8)} → ${tier(15)} → ${tier(27)} → ${tier(50)}${R}`,
 		'',
-		{ text: 'THE ROOM', kind: 'head' },
+		{ text: 'THE ROOM — what you are looking at', kind: 'head', act: { kind: 'section', id: 'room' } },
 		`${fg(C.muted)}Working sessions sit at their desk with a lit screen; the tint${R}`,
 		`${fg(C.muted)}says what kind of tool is running. Everyone else walks around,${R}`,
 		`${fg(C.muted)}talks, or goes to the kitchen. A ${bold}?${R}${fg(C.muted)} beside a desk means that${R}`,
 		`${fg(C.muted)}session is waiting on an answer. A project's colour is the same${R}`,
 		`${fg(C.muted)}on its carpet, its nameplate and its row in the table.${R}`,
 		'',
-		{ text: 'SHARING — off unless you turn it on', kind: 'head' },
-		...shareLines(share),
+		{ text: 'SHARING — what it exposes', kind: 'head', act: { kind: 'section', id: 'sharing' } },
+		`${fg(C.muted)}A small read-only web server, so your other computers and your${R}`,
+		`${fg(C.muted)}phone can see this. Turn it on with ${bold}s${R}${fg(C.muted)}; off by default, and the${R}`,
+		`${fg(C.muted)}choice is remembered. The address and code are in SETTINGS.${R}`,
+		`${fg(C.muted)}The code is asked once per device, then remembered. Five wrong${R}`,
+		`${fg(C.muted)}tries and that device waits, doubling each time — which is what${R}`,
+		`${fg(C.muted)}makes four digits safe. Changing it signs every device out.${R}`,
 		`${fg(C.muted)}It answers on your local network and on any VPN interface, never${R}`,
 		`${fg(C.muted)}on the public internet.${R}`,
 		`${fg(C.fillWarn)}Anyone who reaches it can read session titles, the last thing${R}`,
@@ -206,8 +268,7 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		`${fg(C.muted)}Sharing alone changes nothing: with control off there is no${R}`,
 		`${fg(C.muted)}endpoint that writes, on this machine or in any session.${R}`,
 		'',
-		{ text: 'CONTROL — typing into a session from elsewhere', kind: 'head' },
-		...controlLines(control),
+		{ text: 'CONTROL — what it allows, and the risk', kind: 'head', act: { kind: 'section', id: 'control' } },
 		`${fg(C.muted)}Opens a session's real terminal in the browser and lets you type${R}`,
 		`${fg(C.muted)}into it — the same one on screen here, not a second copy.${R}`,
 		`${fg(C.fillWarn)}This is the one thing here that can change your machine. Whoever${R}`,
@@ -224,7 +285,7 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		`${fg(C.muted)}send is printed above the footer, so nothing happens unseen.${R}`,
 		`${fg(C.muted)}Set ${bold}"control": true${R}${fg(C.muted)} in the config file to enable it.${R}`,
 		'',
-		{ text: 'KEYS', kind: 'head' },
+		{ text: 'KEYS — everything else', kind: 'head', act: { kind: 'section', id: 'keys' } },
 		key('↑ ↓', 'move the selection'),
 		key('→ ←', 'open a row for detail, or close it'),
 		key('⏎', "jump to that session's cmux tab"),
@@ -233,9 +294,12 @@ function body(share?: ShareInfo, control?: ControlInfo): (string | Line)[] {
 		key('v', 'project names beside the desk, or under it'),
 		key('a', 'keep the machine awake, or let it sleep'),
 		key('s', 'share to your network, or stop sharing'),
-		key('p', 'set a new passcode (while this is open)'),
 		key('tab', 'room / split / table'),
 		key('r', 'force a redraw'),
+		key('h', 'open or close every explanation here'),
+		key('y', 'copy the sharing address to the clipboard'),
+		key('o', 'change the port'),
+		key('c', 'set the control password'),
 		key('?', 'close this'),
 		key('q', 'quit'),
 		'',
@@ -267,13 +331,13 @@ const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg
  * exist, with nothing on screen to say so. Reported from a second machine as not
  * being able to reach the port section.
  */
-export function overflow(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo): number {
-	return Math.max(0, lines(cols, share, control).length - rows)
+export function overflow(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, env?: Env, open?: Set<string>): number {
+	return Math.max(0, lines(cols, share, control, env, open).length - rows)
 }
 
 /** The panel's lines before centring or scrolling, which is what decides both. */
-function lines(cols: number, share?: ShareInfo, control?: ControlInfo): { text: string; act?: Act }[] {
-	const items = body(share, control)
+function lines(cols: number, share?: ShareInfo, control?: ControlInfo, env?: Env, open: Set<string> = new Set()): { text: string; act?: Act }[] {
+	const items = collapse(body(share, control, env), open)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
 	const boxW = Math.min(cols - 2, Math.max(46, inner))
@@ -298,8 +362,8 @@ function lines(cols: number, share?: ShareInfo, control?: ControlInfo): { text: 
  * of them — and the failure would be clicking a line and getting the action of a
  * different one, which is worse than no clicking at all.
  */
-export function view(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): { rows: string[]; hits: Hit[] } {
-	const out = lines(cols, share, control)
+export function view(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0, env?: Env, open?: Set<string>): { rows: string[]; hits: Hit[] } {
+	const out = lines(cols, share, control, env, open)
 	const done = (list: { text: string; act?: Act }[], offset: number) => ({
 		rows: list.map((l) => clip(l.text, cols)),
 		hits: list.flatMap((l, i) => (l.act ? [{ row: i + offset, act: l.act }] : [])),
@@ -326,8 +390,8 @@ export function view(cols: number, rows: number, share?: ShareInfo, control?: Co
 	return { rows: filled.slice(0, rows).map((l) => clip(l, cols)), hits: shown.hits.filter((h) => h.row < rows) }
 }
 
-export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): string[] {
-	return view(cols, rows, share, control, scroll).rows
+export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0, env?: Env, open?: Set<string>): string[] {
+	return view(cols, rows, share, control, scroll, env, open).rows
 }
 
 function format(l: Line) {

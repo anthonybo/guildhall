@@ -65,7 +65,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   guildhall --serve      share read-only over the network (off by default)
   guildhall --no-serve   force sharing off for this run
 
-keys   ? help (click to edit · y copies the address) · s share · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+keys   ? help · in it: click a value to change it · h explanations · y copy address · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
 env    GUILDHALL_CMUX    path to the cmux binary
        GUILDHALL_NO_IMAGES  force half-block rendering`)
 	process.exit(0)
@@ -298,6 +298,12 @@ let showHelp = false
  * down somebody else's scroll position is worse than starting at the top.
  */
 let helpScroll = 0
+/**
+ * Which explanatory sections are open. Empty is the point: the panel opens as a
+ * short list of settings and headings, and the ninety lines of prose are there
+ * when asked for rather than by default.
+ */
+let helpOpen = new Set<string>()
 
 /**
  * What the help panel is told about sharing and control.
@@ -312,6 +318,32 @@ const shareInfo = () => {
 	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote }
 }
 const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
+const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), labels: cfg.labels })
+
+/**
+ * The three toggles, extracted so the help panel and the global keys run the same
+ * code. Two copies of "flip this and persist it" is how one of them ends up not
+ * saving, or not taking effect until the next poll.
+ */
+function toggleShare() {
+	// Persisted, because a network listener you have to remember to re-enable is one
+	// you will eventually leave on with a flag instead.
+	cfg.serve = !cfg.serve
+	syncServe()
+	cfgStore.save(cfg)
+}
+function toggleAwake() {
+	// Toggling off drops any assertion immediately rather than waiting for the next
+	// poll — the point of reaching for this is usually "let it sleep now".
+	awake.configure(!awake.isArmed())
+	awake.sync(sessions)
+}
+function toggleLabels() {
+	// the room re-reads this every frame, so nothing needs re-planning
+	cfg.labels = cfg.labels === 'vertical' ? 'horizontal' : 'vertical'
+	cfgStore.save(cfg)
+	prev = []
+}
 /** digits typed so far while changing the passcode, or null when not changing it */
 let pin: string | null = null
 /**
@@ -473,7 +505,7 @@ function draw() {
 						: null
 		paint(
 			[
-				...H.panel(cols, rows + 1, shareInfo(), controlInfo(), helpScroll),
+				...H.panel(cols, rows + 1, shareInfo(), controlInfo(), helpScroll, envInfo(), helpOpen),
 				entry ?? T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() }),
 			],
 			'',
@@ -786,7 +818,7 @@ function onKey(b: Buffer) {
 		// a help panel that ran off the bottom used to CLOSE it, so the sections past
 		// the fold — the address and the passcode — could not be reached at all on a
 		// terminal shorter than 41 rows.
-		const hidden = H.overflow(geom.cols, geom.rows + 1, shareInfo(), controlInfo())
+		const hidden = H.overflow(geom.cols, geom.rows + 1, shareInfo(), controlInfo(), envInfo(), helpOpen)
 		if (hidden > 0 && (k === '\x1b[A' || k === '\x1b[B' || k === 'k' || k === 'j' || k === ' ')) {
 			const by = k === '\x1b[A' || k === 'k' ? -1 : k === ' ' ? Math.max(1, geom.rows - 3) : 1
 			helpScroll = Math.max(0, Math.min(helpScroll + by, hidden + 1))
@@ -802,7 +834,7 @@ function onKey(b: Buffer) {
 		const press = MOUSE_PRESS.exec(k)
 		if (press || /\x1b\[<\d+;\d+;\d+m/.test(k)) {
 			if (press) {
-				const v = H.view(geom.cols, geom.rows + 1, shareInfo(), controlInfo(), helpScroll)
+				const v = H.view(geom.cols, geom.rows + 1, shareInfo(), controlInfo(), helpScroll, envInfo(), helpOpen)
 				// paint() puts line i on screen row i+1, so a 1-based click row maps back
 				// by subtracting one
 				const hit = v.hits.find((h) => h.row === Number(press[3]) - 1)
@@ -810,8 +842,42 @@ function onKey(b: Buffer) {
 				else if (hit?.act.kind === 'passcode') ((pin = ''), (pinNote = ''))
 				else if (hit?.act.kind === 'control') ((ctlPass = ''), (ctlNote = ''))
 				else if (hit?.act.kind === 'copy') copyAddress(hit.act.text)
+				else if (hit?.act.kind === 'sharing') toggleShare()
+				else if (hit?.act.kind === 'awake') toggleAwake()
+				else if (hit?.act.kind === 'labels') toggleLabels()
+				else if (hit?.act.kind === 'section') {
+					const id = hit.act.id
+					// Opening a section moves everything below it, so the scroll position
+					// stops meaning what it did. Clamped rather than reset: closing a
+					// section near the bottom would otherwise throw you back to the top.
+					helpOpen.has(id) ? helpOpen.delete(id) : helpOpen.add(id)
+					helpScroll = Math.min(helpScroll, H.overflow(geom.cols, geom.rows + 1, shareInfo(), controlInfo(), envInfo(), helpOpen) + 1)
+				}
 				draw()
 			}
+			return
+		}
+		// One key for all the prose, since the common want is either "show me the
+		// settings" or "explain everything", not one section at a time.
+		if (k === 'h') {
+			helpOpen = helpOpen.size ? new Set() : new Set(H.SECTION_IDS)
+			helpScroll = 0
+			draw()
+			return
+		}
+		if (k === 's') {
+			toggleShare()
+			draw()
+			return
+		}
+		if (k === 'a') {
+			toggleAwake()
+			draw()
+			return
+		}
+		if (k === 'v') {
+			toggleLabels()
+			draw()
 			return
 		}
 		if (k === 'y') {
@@ -897,24 +963,14 @@ function onKey(b: Buffer) {
 		eraseDisplay()
 		layout()
 	} else if (k === 'v') {
-		// the room re-reads this every frame, so nothing needs re-planning
-		cfg.labels = cfg.labels === 'vertical' ? 'horizontal' : 'vertical'
-		cfgStore.save(cfg)
-		prev = []
+		toggleLabels()
 		eraseDisplay()
 	} else if (k === 'l') {
 		labels = !labels
 	} else if (k === 's') {
-		// Persisted, because a network listener you have to remember to re-enable is
-		// one you will eventually leave on with a flag instead.
-		cfg.serve = !cfg.serve
-		syncServe()
-		cfgStore.save(cfg)
+		toggleShare()
 	} else if (k === 'a') {
-		// Toggling off drops any assertion immediately rather than waiting for the
-		// next poll — the point of reaching for this key is usually "let it sleep now".
-		awake.configure(!awake.isArmed())
-		awake.sync(sessions)
+		toggleAwake()
 	} else if (/^[0-9]$/.test(k)) jump(k === '0' ? 10 : Number(k))
 	// keys only ever redraw; they must not advance the animation or the creatures
 	// lurch forward once per keystroke
