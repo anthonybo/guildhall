@@ -12,10 +12,12 @@
  * the behaviour a phone battery wants and a stream would not give.
  */
 import { type Grid, paint } from './grid.ts'
+import { tap } from './dom.ts'
 import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
 
 const KEY = 'guildhall.control'
 const WRAP = 'guildhall.terminal.wrap'
+const KEYPAD = 'guildhall.terminal.keys'
 
 /**
  * What to do when the grid is wider than the glass — which only ever happens on
@@ -31,6 +33,16 @@ const WRAP = 'guildhall.terminal.wrap'
  * rather than small type — it fits in the sense that a photograph of a page fits.
  */
 let wrap = localStorage.getItem(WRAP) !== 'exact'
+
+/**
+ * Whether the answer keys are showing.
+ *
+ * Off by default and remembered. They are only wanted when a session is actually
+ * asking something, which is a small fraction of the time a terminal is open, and
+ * a row of controls that is usually useless costs the screen it sits on — the
+ * thing this view is shortest of on a phone.
+ */
+let keypad = localStorage.getItem(KEYPAD) === 'on'
 
 /** The last screen drawn, so an unchanged one is not rebuilt under your selection. */
 let lastSig = ''
@@ -176,66 +188,6 @@ function askForToken(why: string) {
 }
 
 /**
- * Wire a button so a finger cannot miss it, whatever the layout does next.
- *
- * A `click` is only delivered if the press and the release land on the same
- * element — so anything that moves the button between them silently eats the tap,
- * and the panel is full of things that move it: the keyboard closing, the
- * viewport settling, a re-measure. That is a tap the person made, that the
- * browser correctly discarded, and it reads exactly like a dead button.
- *
- * On touch, act on `pointerdown` instead. It fires before any of that can happen,
- * and it bubbles to the panel's own re-measure AFTER this, so the press is
- * already banked by the time anything moves. Mouse and keyboard keep `click`,
- * where press-and-slide-off-to-cancel is a convention worth honouring and none of
- * this applies.
- */
-function tap(el: HTMLElement, run: () => void) {
-	let done = false
-	const once = () => {
-		if (done) return
-		done = true
-		run()
-	}
-	el.addEventListener('pointerdown', (e) => {
-		const pe = e as PointerEvent
-		if (pe.pointerType !== 'touch') return
-		// Acting on the press means this panel is GONE before the finger lifts, so the
-		// click that follows is delivered to whatever is underneath by then. Under
-		// Close is the page header, where the pressroom button sits at very nearly the
-		// same place — so closing the terminal opened pressroom, every time.
-		//
-		// Cancelling the press suppresses the compatibility mouse events it would
-		// otherwise synthesise, which is the documented way to stop that click.
-		pe.preventDefault()
-		eatNextClick()
-		once()
-	})
-	el.addEventListener('click', once)
-}
-
-/**
- * Swallow one click, if the browser sends it anyway.
- *
- * Belt and braces behind `preventDefault` above: not every engine agrees about
- * which compatibility events a cancelled `pointerdown` suppresses, and the cost of
- * being wrong is a button the person never aimed at. Capture phase, so it is taken
- * before it reaches whatever is now under the finger.
- *
- * Short-lived on purpose. The synthesised click follows the press within a few
- * hundred milliseconds or never comes at all, and a listener left armed longer
- * than that would eventually eat a tap somebody meant.
- */
-function eatNextClick() {
-	const eat = (e: Event) => {
-		e.stopPropagation()
-		e.preventDefault()
-	}
-	addEventListener('click', eat, { capture: true, once: true })
-	setTimeout(() => removeEventListener('click', eat, { capture: true }), 400)
-}
-
-/**
  * The bar every state of this panel wears, including the ones that are not a
  * terminal.
  *
@@ -322,9 +274,28 @@ function chrome(name: string) {
 	tap(x, close)
 	// Grouped so the pair stays right-aligned when the mode button is hidden — two
 	// separate `ml-auto`s would split the free space and strand them apart.
+	// Show or hide the answer keys. Next to Close because that is where the hand
+	// already is, and because both are things you reach for about as often.
+	const keysBtn = document.createElement('button')
+	keysBtn.type = 'button'
+	keysBtn.id = 'keystoggle'
+	const labelKeys = () => {
+		keysBtn.textContent = '⌨'
+		keysBtn.title = keypad ? 'Hide the prompt keys' : 'Show arrows and enter, for answering a prompt'
+		keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? 'border-gold text-gold' : 'border-line text-muted'}`
+	}
+	labelKeys()
+	tap(keysBtn, () => {
+		keypad = !keypad
+		localStorage.setItem(KEYPAD, keypad ? 'on' : 'off')
+		labelKeys()
+		const row = document.getElementById('promptkeys')
+		if (row) row.hidden = !keypad
+	})
+
 	const tail = document.createElement('div')
 	tail.className = 'ml-auto flex items-center gap-2'
-	tail.append(mode, x)
+	tail.append(mode, keysBtn, x)
 	bar.append(title, live, tail)
 
 	const pre = document.createElement('pre')
@@ -381,11 +352,78 @@ function chrome(name: string) {
 	send.type = 'submit'
 	send.textContent = 'Send'
 	send.className = 'min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg'
+	// Send acts on the PRESS, like every other control in this panel.
+	//
+	// It was the last one still relying on a plain click, and it is the worst place
+	// to leave that: a click is only delivered if press and release land on the same
+	// element, and pressing Send is the exact moment the keyboard begins to dismiss
+	// and the panel resizes under the finger. The button moves between the two
+	// halves of the tap and the click is discarded — silently, and indistinguishably
+	// from a send that failed on the network.
+	//
+	// That is the shape of "I pressed send and nothing happened", and it is the one
+	// cause of it that had never been ruled out, because every local test drove the
+	// server directly and never went near a finger.
+	//
+	// `requestSubmit` rather than letting the form handle it, since cancelling the
+	// press to suppress the synthesised click also suppresses implicit submission.
+	tap(send, () => form.requestSubmit())
 	const note = document.createElement('p')
 	note.id = 'sendnote'
 	note.hidden = true
 	note.className = 'm-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold'
 	form.append(input, send)
+
+	/**
+	 * The four keys a prompt needs.
+	 *
+	 * Claude Code asks its questions as a list you arrow through, and until now
+	 * there was no way to answer one from a phone — which made the browser view
+	 * decorative at the exact moment a session was blocked on you. Always visible
+	 * rather than shown only when a prompt is detected: guessing whether the screen
+	 * is a prompt would be wrong sometimes, and a control that appears and vanishes
+	 * is worse than one that is simply there.
+	 *
+	 * `tap`, so a press registers before anything can move under the finger — a
+	 * repaint lands every two seconds and would otherwise eat the click.
+	 */
+	const keys = document.createElement('div')
+	keys.id = 'promptkeys'
+	keys.hidden = !keypad
+	keys.className = 'flex shrink-0 items-center gap-2 border-t border-line px-2 py-2'
+	const hint = document.createElement('span')
+	hint.className = 'mr-auto text-[0.72rem] text-faint'
+	hint.textContent = 'answer a prompt'
+	keys.append(hint)
+	for (const [label, key, title] of [
+		['▲', 'up', 'Move up the list'],
+		['▼', 'down', 'Move down the list'],
+		['⏎', 'enter', 'Choose the highlighted option'],
+		['esc', 'escape', 'Cancel the prompt'],
+	] as const) {
+		const b = document.createElement('button')
+		b.type = 'button'
+		b.title = title
+		b.textContent = label
+		b.className = 'min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold'
+		// ⏎ means "submit what I have typed" when there IS something typed.
+		//
+		// Two different Enters live in this panel and they were indistinguishable. A
+		// failed send hands your text BACK to the box above — and then pressing ⏎ sent a
+		// bare Enter to the session's prompt, which is empty, so nothing happened while
+		// the message sat in plain sight. Reported as "I did have input in the box to
+		// submit, that is why I tried the enter function".
+		//
+		// A person pressing enter with a half-typed message means send it. Only when the
+		// box is empty is a bare Enter the answer, and that is exactly when it is wanted
+		// — confirming a highlighted option.
+		tap(b, () => {
+			if (key === 'enter' && input.value.trim()) return void form.requestSubmit()
+			sendKey(key, pre)
+		})
+		keys.append(b)
+	}
+	el.append(keys)
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
 		const text = input.value
@@ -455,6 +493,46 @@ function chrome(name: string) {
  */
 let polling = false
 let sending = false
+
+/**
+ * Press one of the four answer keys in the open session.
+ *
+ * Repaints immediately afterwards rather than waiting for the poll: moving a
+ * caret and not seeing it move for two seconds reads as a dead button, and this
+ * is the one control whose whole value is the feedback.
+ */
+async function sendKey(key: string, pre: HTMLElement) {
+	if (!openId) return
+	const r = await api('/api/key', { method: 'POST', body: JSON.stringify({ id: openId, key }) })
+	if (r.error) {
+		pre.textContent = `${r.error}\n\n${pre.textContent}`
+		return
+	}
+	// NO forced repaint here, and that was the bug.
+	//
+	// This called `repaintSoon()`, which throws away the ETag as well as the paint
+	// signature — so every key press refetched the whole 68KB screen and rebuilt
+	// every node in it, whether or not anything had moved. On a phone that reads as
+	// the view tearing itself down and building itself again, which is exactly what
+	// it is.
+	//
+	// Nothing needs forcing. Moving a caret CHANGES the screen, so the conditional
+	// request returns new content on its own and paints once; if the key did
+	// nothing, the server answers 304 and the view holds still — which is the
+	// honest outcome and much better feedback than a flash either way.
+	//
+	// The short wait is for the TUI to redraw before we look. Without it the poll
+	// races the terminal and fetches the frame from before the keypress.
+	await new Promise((r) => setTimeout(r, 120))
+	// And wait for any poll already in flight, rather than giving up.
+	//
+	// `refresh` returns immediately if one is running — right for a timer, wrong
+	// here: a key pressed while a poll was out would show nothing until the next
+	// tick two seconds later, which is indistinguishable from a key that did not
+	// work. Bounded, so a stuck request cannot hold this open.
+	for (let i = 0; polling && i < 12; i++) await new Promise((r) => setTimeout(r, 100))
+	refresh()
+}
 
 async function refresh() {
 	if (!openId || polling || sending) return

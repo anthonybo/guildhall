@@ -34,7 +34,42 @@ export type Grid = { rows: number; columns: number; styles: Style[]; row_spans: 
  * Cached because it cannot change without the font changing, and measuring it
  * forces a layout — which is not something to do twice a second behind a poll.
  */
-/** Largest type this will use. Past about here a terminal stops reading as one. */
+/**
+ * There is no cap on type size, and that is a decision rather than an oversight.
+ *
+ * The grid is sized so the columns span the panel exactly — a wide grid shrinks to
+ * fit, a narrow one grows to fill, and both end up using the whole width they were
+ * given. Every value tried here failed the same way, because a cap on size is also
+ * a cap on how much width the text can cover:
+ *
+ * | cap | what happened |
+ * |-----|---------------|
+ * | 15  | 70 columns covered 632px of a 1400px panel — "super narrow" |
+ * | 32  | still short of the edge on a wide monitor — "zoomed in but still not full width" |
+ * | 16  | panel finally full width, text bunched at the left — "all the text is on the far left" |
+ *
+ * These terminals are genuinely different widths — measured from the ptys, most
+ * panes here are 193 columns, one is 79, and the one that kept being reported is
+ * **70**. Nothing can give a 70-column terminal more columns; the only way its
+ * text reaches the right-hand edge is by drawing each character bigger. Wanting
+ * the text to span the window means wanting exactly that, so this now does it
+ * instead of stopping just short and looking broken.
+ *
+ * And uncapped was worse than either — "insanely zoomed in", 42px for 70 columns
+ * on a wide window, which is the arithmetic working correctly and the result being
+ * unusable.
+ *
+ * **The premise was wrong.** Making a narrow terminal *span* like a wide one is not
+ * possible, because the columns to fill it do not exist; the only lever is
+ * character size, and every setting of it trades one complaint for the other. What
+ * makes panes look like each other is rendering at the SAME SIZE, not covering the
+ * same width — 15 here is within a pixel or two of what the 193-column panes land
+ * on, so the characters match and the narrow one is simply narrower.
+ *
+ * Which it is. Measured: this window is 1552px split three ways, and the pane in
+ * question is 566px of it. That is a fact about the desk, not the browser, and the
+ * real fix for it is `pane.resize` on the cmux side.
+ */
 const COMFORTABLE = 15
 
 /**
@@ -137,32 +172,64 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	// screen or leaves it in a pool of dead space. On this Mac the stack lands on
 	// ui-monospace at 0.602.
 	//
-	// Shrink to fit, never magnify to fill. These terminals run 70 to 193 columns
-	// depending on how the panes are split, so "use the whole window" and "stay
-	// readable" are the same instruction only when the grid happens to match the
-	// glass. Stretching a 70-column screen across 1541px needs 28px type, which is
-	// not full width so much as zoomed in — the columns to fill it do not exist.
-	// A wide grid shrinks until it fits; a narrow one stops at a comfortable size
-	// and is centred, which reads as deliberate rather than as a failure to fill.
+	// Shrink to fit AND magnify to fill: the columns span the panel exactly, whatever
+	// the grid. These terminals run 42 to 193 columns depending on how the panes are
+	// split, so the same instruction sizes a 193-column screen down to 12px and a
+	// 70-column one up past 30 — both of them ending at the right-hand edge.
 	//
-	// The panel is then narrowed to what the grid actually needs. Leaving it full
-	// width and centring the text only splits the dead space into two pools; a
-	// terminal window that is the size of its terminal reads as deliberate.
+	// The rule used to be shrink-only, on the argument that magnifying is "not full
+	// width so much as zoomed in — the columns to fill it do not exist". The columns
+	// still do not exist, and that argument is still true; it just loses to the fact
+	// that a terminal stopping halfway across its own window looks broken, and was
+	// reported as broken every single time it was seen.
 	//
-	// The cap is cleared before measuring, or each pass would measure the width the
-	// previous pass constrained it to and walk the type down to nothing.
+	// The panel keeps the full width it was given, always.
+	//
+	// It used to be narrowed to whatever the grid needed, on the argument that "a
+	// terminal window that is the size of its terminal reads as deliberate". It does
+	// not. A 70-column session sat at 659px beside a 193-column one filling 1400,
+	// and read as broken every time it was seen — the panel is the window, and one
+	// window at half the width of the next looks like a fault in the window, not a
+	// fact about its contents.
+	//
+	// Cleared rather than merely left unset, because the element persists across
+	// paints and would otherwise keep a width some earlier version put on it.
 	panel.style.maxWidth = ''
 	panel.style.marginInline = ''
 	const advance = advanceRatio(pre)
 	const usable = Math.max(200, pre.clientWidth - PAD)
 	const exact = Math.min(COMFORTABLE, usable / (g.columns * advance))
-	// Reflowing is only on the table when the grid cannot fit legibly, which on
-	// every desktop width is never — so this branch is, in practice, the phone.
-	const cramped = exact < LEGIBLE
+	// Reflow whenever the true grid would be SMALLER TO READ than the reflowed one,
+	// not merely when it fails to fit.
+	//
+	// This compared against LEGIBLE (8px), and the effect was backwards: a narrow
+	// grid squeaked over the line and stayed exact at tiny type, while a wide one
+	// fell under it and was bumped to READABLE. Measured on a 390px phone — a
+	// 70-column session rendered at 8.69px while 99- and 193-column sessions beside
+	// it rendered at 12px. The narrowest terminal had the smallest text.
+	//
+	// The old floor was chosen deliberately, and the note said why: 8 rather than 9
+	// so a 70-column screen would not wrap "to save four per cent of nothing". That
+	// weighed wrapping against fitting and never against SIZE — wrapping was not
+	// costing four per cent, it was worth 3.3px, nearly forty per cent bigger.
+	//
+	// So the test is which one you can actually read. Anything that cannot reach
+	// READABLE as a true grid is better off reflowed at READABLE; anything that can
+	// keeps its alignment, which is worth having when it is legible anyway.
+	const cramped = exact < READABLE
 	const reflow = wrap && cramped
 	const size = reflow ? READABLE : Math.max(LEGIBLE, exact)
 	pre.style.fontSize = `${size.toFixed(2)}px`
 	pre.style.lineHeight = '1.25'
+	// Centre a grid that does not fill its panel, by padding rather than by
+	// `text-align` — every line has to shift by the SAME amount or the columns stop
+	// lining up, which is the one thing a terminal cannot lose.
+	//
+	// The panel stays full width regardless; this only moves the text inside it.
+	// Left-aligned in a wide panel it reads as having fallen to one side, which is
+	// how it was reported: "all the text is on the far left".
+	const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size)
+	pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`
 	pre.style.whiteSpace = reflow ? 'pre-wrap' : 'pre'
 	// break-word, not break-all: a wrapped path or a long token should move whole
 	// rather than be sliced mid-word wherever the edge happens to fall
@@ -185,12 +252,6 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 		const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0
 		pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
 	}
-	const needed = Math.ceil(g.columns * advance * size) + PAD + 2
-	if (needed < pre.clientWidth) {
-		panel.style.maxWidth = `${needed}px`
-		panel.style.marginInline = 'auto'
-	}
-
 	const out: HTMLElement[] = []
 	for (let r = 0; r < g.rows; r++) {
 		const line = document.createElement('div')
