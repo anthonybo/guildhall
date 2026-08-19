@@ -14,6 +14,26 @@ struct Session: Decodable, Identifiable {
 	let title: String?
 	let doing: String?
 	let tab: Int?
+	/// cmux workspace UUID, which is what focusing a tab actually needs.
+	let workspace: String?
+	let level: Int?
+	let turns: Int?
+	let unread: Bool?
+	/// "59 dispatched", already worded by the server.
+	let agents: String?
+	let toolKind: String?
+	let ctxUsed: Double?
+	let ctxLimit: Double?
+
+	/// How full the context window is, 0 to 1, or nil when the server did not say.
+	///
+	/// This is guildhall's answer to the cost and quota numbers other menu bar apps
+	/// show: it is the number that actually changes what happens next, because a
+	/// session near its limit is about to compact and lose the thread.
+	var context: Double? {
+		guard let used = ctxUsed, let limit = ctxLimit, limit > 0 else { return nil }
+		return min(1, used / limit)
+	}
 
 	/// What the room calls this, which is the project rather than the session id.
 	var label: String { proj?.isEmpty == false ? proj! : name }

@@ -1,9 +1,18 @@
 import SwiftUI
 
-/// The dropdown: what every session is doing, and the controls for the service.
+/// The dropdown: what every session is doing, grouped by project.
+///
+/// Shaped after so-agentbar, which does this well — grouped rows, a status face,
+/// badges for the things you want without reading a sentence, and a number that
+/// tells you how much room is left. Two of its numbers are not ours to show:
+/// per-session cost and the plan quota come from Claude's own billing, which
+/// guildhall never reads. Context fullness is the equivalent here and arguably the
+/// more useful one, because it is the number that decides whether a session is
+/// about to compact and lose the thread.
 struct Panel: View {
 	@ObservedObject var model: Model
 	@State private var showSettings = false
+	@State private var collapsed: Set<String> = []
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 0) {
@@ -15,30 +24,56 @@ struct Panel: View {
 				Text("No sessions").foregroundStyle(.secondary).padding(12)
 			} else {
 				ScrollView {
-					VStack(alignment: .leading, spacing: 0) {
-						// Sorted the way the room sorts: whoever is waiting on you first,
-						// then whoever is working, then everyone else. A list in registry
-						// order buries the one row that needed a person.
-						ForEach(model.sessions.sorted(by: rank)) { Row(session: $0) }
+					VStack(alignment: .leading, spacing: 2) {
+						ForEach(groups, id: \.name) { group in
+							GroupHeader(
+								name: group.name,
+								count: group.sessions.count,
+								open: !collapsed.contains(group.name)
+							) {
+								if collapsed.contains(group.name) { collapsed.remove(group.name) } else { collapsed.insert(group.name) }
+							}
+							if !collapsed.contains(group.name) {
+								ForEach(group.sessions) { Row(session: $0) }
+							}
+						}
 					}
+					.padding(.vertical, 4)
 				}
 				// A minimum, not just a maximum. `maxHeight` alone let it collapse to
 				// nothing: a ScrollView has no intrinsic content height, so inside a menu
 				// bar window that sizes itself to its content the list rendered at zero
 				// and the panel showed a header and some buttons with the sessions
 				// missing entirely — while the app was holding all ten of them.
-				.frame(minHeight: 120, maxHeight: 320)
+				.frame(minHeight: 140, maxHeight: 360)
 			}
 			Divider()
 			controls
 		}
-		.frame(width: 320)
+		.frame(width: 360)
 		.onAppear { model.start(open: true) }
 		.onDisappear { model.start(open: false) }
 		// A sheet rather than a separate window: the settings belong to this panel and
 		// should not outlive it or turn up in the window list of an app that has no
 		// windows.
 		.sheet(isPresented: $showSettings) { SettingsView(model: model) }
+	}
+
+	/// Sessions by project, each group sorted the way the room sorts.
+	///
+	/// Projects that need something come first, so a group you must act on is never
+	/// below one you can ignore.
+	private var groups: [(name: String, sessions: [Session])] {
+		let byProject = Dictionary(grouping: model.sessions) { $0.label }
+		return byProject
+			.map { (name: $0.key, sessions: $0.value.sorted(by: rank)) }
+			.sorted { a, b in
+				let an = a.sessions.contains(where: \.needsYou), bn = b.sessions.contains(where: \.needsYou)
+				if an != bn { return an }
+				let aw = a.sessions.contains(where: \.working), bw = b.sessions.contains(where: \.working)
+				if aw != bw { return aw }
+				return a.name < b.name
+			}
 	}
 
 	private func rank(_ a: Session, _ b: Session) -> Bool {
@@ -48,20 +83,28 @@ struct Panel: View {
 	}
 
 	private var header: some View {
-		HStack {
+		HStack(spacing: 8) {
+			Image(systemName: "building.columns.fill").foregroundStyle(.secondary)
 			Text("guildhall").font(.headline)
 			Spacer()
 			Text(summary).font(.caption).foregroundStyle(.secondary)
+			Button { Task { await model.refresh() } } label: {
+				Image(systemName: "arrow.clockwise").font(.system(size: 11))
+			}
+			.buttonStyle(.plain).help("Refresh now")
+			Button { showSettings = true } label: {
+				Image(systemName: "gearshape").font(.system(size: 12))
+			}
+			.buttonStyle(.plain).help("Settings")
 		}
 		.padding(.horizontal, 12).padding(.vertical, 8)
 	}
 
 	private var summary: String {
 		if !model.reachable { return "not running" }
-		let needs = model.needsYou.count
-		let working = model.working.count
-		if needs > 0 { return "\(needs) need you · \(working) working" }
-		return working > 0 ? "\(working) working" : "all idle"
+		let needs = model.needsYou.count, working = model.working.count
+		if needs > 0 { return "\(needs) need you · \(working) active" }
+		return working > 0 ? "\(working) active" : "all idle"
 	}
 
 	/// Shown instead of an empty list, because "no sessions" and "cannot reach the
@@ -86,27 +129,173 @@ struct Panel: View {
 	}
 
 	private var controls: some View {
-		// Each row full width and left aligned. `.frame(alignment: .leading)` on the
-		// stack does not do that — a Button centres its own label inside whatever
-		// width it is given, which is why these came out centred down the middle
-		// looking like a dialog rather than a menu.
 		VStack(alignment: .leading, spacing: 2) {
-			item(model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
+			MenuItem(title: model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
 				model.act { model.daemon == .stopped ? Daemon.start() : Daemon.stop() }
 			}
-			item("Restart the service", enabled: model.daemon != .notInstalled && model.daemon != .stopped) {
+			MenuItem(title: "Restart the service", enabled: model.daemon != .notInstalled && model.daemon != .stopped) {
 				model.act { Daemon.restart() }
 			}
-			item("Open the browser view", enabled: model.reachable) { model.openBrowser() }
-			item("Settings…") { showSettings = true }
+			MenuItem(title: "Open the browser view", enabled: model.reachable) { model.openBrowser() }
 			Divider().padding(.vertical, 4)
-			item("Quit") { NSApplication.shared.terminate(nil) }
+			HStack {
+				Text(model.reachable ? "Watching \(model.sessions.count) sessions" : "Not watching")
+					.font(.caption).foregroundStyle(.secondary)
+				Spacer()
+				Button("Quit") { NSApplication.shared.terminate(nil) }.buttonStyle(.plain)
+			}
+			.padding(.horizontal, 6).padding(.vertical, 2)
 		}
 		.padding(.horizontal, 8).padding(.vertical, 6)
 	}
+}
 
-	private func item(_ title: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
-		MenuItem(title: title, enabled: enabled, action: action)
+/// A project heading you can fold away.
+private struct GroupHeader: View {
+	let name: String
+	let count: Int
+	let open: Bool
+	let toggle: () -> Void
+	@State private var hovering = false
+
+	var body: some View {
+		Button(action: toggle) {
+			HStack(spacing: 6) {
+				Image(systemName: open ? "chevron.down" : "chevron.right")
+					.font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+				Image(systemName: "folder.fill").font(.system(size: 10)).foregroundStyle(.secondary)
+				Text(name).font(.system(size: 12, weight: .semibold))
+				Text("(\(count))").font(.system(size: 11)).foregroundStyle(.secondary)
+				Spacer()
+			}
+			.padding(.horizontal, 8).padding(.vertical, 4)
+			.contentShape(Rectangle())
+			.background(RoundedRectangle(cornerRadius: 4).fill(hovering ? Color.accentColor.opacity(0.18) : .clear))
+		}
+		.buttonStyle(.plain)
+		.onHover { hovering = $0 }
+	}
+}
+
+/// One session: what it is, what it is doing, and how much room it has left.
+private struct Row: View {
+	let session: Session
+	@State private var hovering = false
+
+	var body: some View {
+		Button {
+			// Clicking a row brings its terminal to the front. The workspace UUID comes
+			// from the payload, so this needs no position lookup — unlike the room's own
+			// jump, which maps a tab NUMBER through `workspace list` and is therefore
+			// wrong the moment the order changes.
+			if let ws = session.workspace { Cmux.focus(workspace: ws) }
+		} label: {
+			HStack(alignment: .top, spacing: 8) {
+				Text(face).font(.system(size: 15)).frame(width: 20)
+				VStack(alignment: .leading, spacing: 2) {
+					HStack(spacing: 5) {
+						Text(session.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+						if session.unread == true { Circle().fill(.blue).frame(width: 5, height: 5) }
+						if let level = session.level { Badge(text: "lv\(level)", tint: .purple) }
+						if let kind = session.toolKind, session.working { Badge(text: kind, tint: .green) }
+						Spacer(minLength: 0)
+						Text(ago).font(.system(size: 10)).foregroundStyle(.secondary)
+					}
+					Text(session.doing?.isEmpty == false ? session.doing! : (session.title ?? state))
+						.font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+					HStack(spacing: 6) {
+						Text(state).font(.system(size: 10)).foregroundStyle(color)
+						if let agents = session.agents, !agents.isEmpty {
+							Text("· \(agents)").font(.system(size: 10)).foregroundStyle(.secondary)
+						}
+						if let tab = session.tab {
+							Text("· tab \(tab)").font(.system(size: 10)).foregroundStyle(.secondary)
+						}
+						Spacer(minLength: 0)
+						if let ctx = session.context { context(ctx) }
+					}
+				}
+			}
+			.padding(.horizontal, 10).padding(.vertical, 5)
+			.contentShape(Rectangle())
+			.background(RoundedRectangle(cornerRadius: 4).fill(hovering ? Color.accentColor.opacity(0.14) : .clear))
+		}
+		.buttonStyle(.plain)
+		.onHover { hovering = $0 }
+		.help(session.workspace == nil ? session.name : "Click to bring this session's tab to the front")
+	}
+
+	/// The context bar: how full the window is, and red once compaction is close.
+	private func context(_ fraction: Double) -> some View {
+		HStack(spacing: 4) {
+			GeometryReader { geo in
+				ZStack(alignment: .leading) {
+					Capsule().fill(Color.secondary.opacity(0.25))
+					Capsule().fill(fraction > 0.85 ? Color.red : fraction > 0.6 ? Color.orange : Color.green)
+						.frame(width: geo.size.width * fraction)
+				}
+			}
+			.frame(width: 44, height: 4)
+			Text("\(Int(fraction * 100))%").font(.system(size: 10)).foregroundStyle(.secondary)
+		}
+	}
+
+	/// A face per state, which is readable before any of the words are.
+	private var face: String {
+		switch session.state {
+		case "needs": return "🙋"
+		case "working": return "⚡"
+		case "shell": return "⚙️"
+		case "review": return "📩"
+		case "error": return "⚠️"
+		case "done": return "✅"
+		default: return "😴"
+		}
+	}
+
+	private var state: String {
+		switch session.state {
+		case "needs": return "needs you"
+		case "shell": return "running a command"
+		case "review": return "finished, unread"
+		case "done": return "your turn"
+		case "parked": return "idle"
+		default: return session.state
+		}
+	}
+
+	/// The room's own colours, so the two views agree about what a state looks like.
+	private var color: Color {
+		switch session.state {
+		case "needs": return .orange
+		case "working": return .green
+		case "shell": return .teal
+		case "review": return .blue
+		case "error": return .red
+		default: return .gray
+		}
+	}
+
+	private var ago: String {
+		let m = Int((session.stale / 60000).rounded())
+		if m < 1 { return "now" }
+		if m < 60 { return "\(m)m" }
+		let h = Int((Double(m) / 60).rounded())
+		return h < 48 ? "\(h)h" : "\(Int((Double(h) / 24).rounded()))d"
+	}
+}
+
+/// A small pill. Deliberately dull: the badges are for scanning, and a row with
+/// four loud colours in it is slower to read than one with none.
+private struct Badge: View {
+	let text: String
+	let tint: Color
+	var body: some View {
+		Text(text)
+			.font(.system(size: 9, weight: .medium))
+			.padding(.horizontal, 4).padding(.vertical, 1)
+			.background(RoundedRectangle(cornerRadius: 3).fill(tint.opacity(0.2)))
+			.foregroundStyle(tint)
 	}
 }
 
@@ -117,9 +306,9 @@ struct Panel: View {
 /// row is indistinguishable from a dead one, which is how this panel came to be
 /// described as "only visual". The highlight is the whole difference between a
 /// list of words and something that looks like it can be used.
-private struct MenuItem: View {
+struct MenuItem: View {
 	let title: String
-	let enabled: Bool
+	var enabled: Bool = true
 	let action: () -> Void
 	@State private var hovering = false
 
@@ -141,49 +330,5 @@ private struct MenuItem: View {
 		.disabled(!enabled)
 		.opacity(enabled ? 1 : 0.4)
 		.onHover { hovering = $0 }
-	}
-}
-
-/// One session: the project, what it is doing, and how long since it last did it.
-private struct Row: View {
-	let session: Session
-
-	var body: some View {
-		HStack(alignment: .top, spacing: 8) {
-			Circle().fill(color).frame(width: 7, height: 7).padding(.top, 5)
-			VStack(alignment: .leading, spacing: 1) {
-				HStack(spacing: 6) {
-					Text(session.label).font(.system(size: 12, weight: .medium))
-					Spacer()
-					Text(ago).font(.system(size: 10)).foregroundStyle(.secondary)
-				}
-				// `doing` is the current tool where there is one, and the last thing said
-				// otherwise — which is the sentence a person actually wants.
-				if let doing = session.doing ?? session.title, !doing.isEmpty {
-					Text(doing).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
-				}
-			}
-		}
-		.padding(.horizontal, 12).padding(.vertical, 5)
-	}
-
-	/// The room's own colours, so the two views agree about what a state looks like.
-	private var color: Color {
-		switch session.state {
-		case "needs": return .orange
-		case "working": return .green
-		case "shell": return .teal
-		case "review": return .blue
-		case "error": return .red
-		default: return .gray
-		}
-	}
-
-	private var ago: String {
-		let m = Int((session.stale / 60000).rounded())
-		if m < 1 { return "now" }
-		if m < 60 { return "\(m)m" }
-		let h = Int((Double(m) / 60).rounded())
-		return h < 48 ? "\(h)h" : "\(Int((Double(h) / 24).rounded()))d"
 	}
 }
