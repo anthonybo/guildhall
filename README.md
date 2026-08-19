@@ -41,6 +41,18 @@ npm install
 npm start
 ```
 
+Or put it on your PATH once, and run it from anywhere:
+
+```
+npm link                    # from the project, once
+guildhall                   # the room, from any directory
+guildhall --help            # everything it can do
+```
+
+`npm link` also builds the bundle, which is what `guildhall` runs — measured at
+0.15s to start against 0.49s through the TypeScript loader, and a third of a
+second is worth noticing on a program you open to glance at something.
+
 Nothing is installed into Claude Code. No hooks, no settings file is edited, no
 wrapper around your terminal — it reads the registry and transcripts Claude Code
 already writes, which is why it sees sessions you started anywhere.
@@ -235,6 +247,42 @@ off unless you ask for it.
 With control off, nothing it serves can change anything. There is no endpoint that writes, on this
 machine or in any session, so the worst case of leaving it on is disclosure, not
 damage.
+
+### Leaving it running — the browser view without a terminal
+
+The room and the server started life together, which tied the browser view to a
+terminal window somebody had to leave open. `--headless` is that view on its own:
+it serves, holds sleep off while sessions work, and draws nothing at all.
+
+```
+guildhall --headless
+2026-08-19 15:39:06  guildhall headless on 0.0.0.0:4318 (pid 1234) — 0.6.0
+```
+
+Run it at login so it survives a reboot, which is the point — a phone checking on
+the machine should not depend on whether you happened to leave a terminal open:
+
+```
+cp contrib/dev.guildhall.headless.plist ~/Library/LaunchAgents/
+# edit the two paths inside first — `which node` prints the one you need
+launchctl load ~/Library/LaunchAgents/dev.guildhall.headless.plist
+```
+
+It is up when this answers `401`, which is the passcode gate rather than a
+failure:
+
+```
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4318/
+```
+
+Two things to get right. **Use the absolute path to `node`** in the plist:
+launchd starts with almost no environment, so nvm's PATH does not exist and a
+linked `guildhall` is not on it. And **do not run this and `--guard` together** —
+headless already holds sleep off, so the pair would poll the same registry twice
+and assert the same thing.
+
+The room is then optional. Open `guildhall` in a terminal when you want to watch
+it, quit it when you do not, and the browser view carries on either way.
 
 ### Reaching it from anywhere — Tailscale
 

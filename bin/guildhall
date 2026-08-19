@@ -1,12 +1,44 @@
-#!/usr/bin/env node
-import { spawn } from 'node:child_process'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+#!/bin/sh
+#
+# Runs guildhall from anywhere.
+#
+#   npm link      once, from the project — puts `guildhall` on your PATH
+#   guildhall --help
+#
+# Arguments are passed straight through, so `guildhall --headless --port 4400`
+# works exactly as it does from the project directory.
+#
+# Three things this has to get right:
+#
+# **Resolve symlinks before locating the project.** Once linked onto PATH,
+# `dirname "$0"` is the directory of the LINK — somewhere in nvm's bin — not of
+# the project, so neither the bundle nor the sources would be found. The loop
+# below walks the link chain to the real file, one hop at a time, because a link
+# can point at another link.
+#
+# **Prefer the built bundle.** Measured on this machine, `--version` costs 0.15s
+# through `dist/main.mjs` and 0.49s through tsx: a third of a second of nothing,
+# every launch, for a program you open to glance at something. `prepare` in
+# package.json builds the bundle on install and on `npm link`, so it is there.
+# Source is the fallback, which is what a working copy mid-edit wants anyway.
+#
+# **`exec`, not a spawned child.** The previous version started node, which
+# started tsx, which started the app — three processes, and signals had to be
+# forwarded by hand through the middle one. Replacing this shell with the program
+# means Ctrl-C, SIGTERM and the exit code all belong to the app directly, which
+# matters when a LaunchAgent is the thing sending them.
+src="$0"
+while [ -L "$src" ]; do
+	dir=$(cd -P "$(dirname "$src")" && pwd)
+	src=$(readlink "$src")
+	case "$src" in
+	/*) ;;
+	*) src="$dir/$src" ;;
+	esac
+done
+root=$(cd -P "$(dirname "$src")/.." && pwd)
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
-const child = spawn(
-	process.execPath,
-	[path.join(root, 'node_modules/tsx/dist/cli.mjs'), path.join(root, 'src/main.ts'), ...process.argv.slice(2)],
-	{ stdio: 'inherit' },
-)
-child.on('exit', (code) => process.exit(code ?? 0))
+if [ -f "$root/dist/main.mjs" ]; then
+	exec node "$root/dist/main.mjs" "$@"
+fi
+exec node "$root/node_modules/tsx/dist/cli.mjs" "$root/src/main.ts" "$@"

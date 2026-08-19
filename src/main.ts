@@ -57,17 +57,31 @@ if (process.argv.includes('--version') || process.argv.includes('-v')) {
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
 	console.log(`guildhall ${BUILD} — every live Claude Code session as a pixel office
 
-  guildhall              watch the room
-  guildhall --guard      headless: hold sleep off while sessions work, draw nothing
-  guildhall --headless   headless: serve the browser view only, draw nothing
-  guildhall --once       print one frame and exit
-  guildhall --no-awake   start with the sleep hold disarmed
-  guildhall --serve      share read-only over the network (off by default)
-  guildhall --no-serve   force sharing off for this run
+watching
+  guildhall                watch the room
+  guildhall --once         print one frame and exit
+  guildhall --demo         a fictional office; never reads the real registry
+
+serving the browser view — these draw nothing and want no terminal
+  guildhall --headless     serve it and nothing else (what the LaunchAgent runs)
+  guildhall --guard        hold sleep off while sessions work, but do NOT serve
+  guildhall --port 4400    listen elsewhere; default 4318, remembered in the config
+
+alongside the room
+  guildhall --serve        share while the room is on screen
+  guildhall --no-serve     force sharing off for this run
+  guildhall --no-awake     start with the sleep hold disarmed
+
+  guildhall --version      print the version and exit
 
 keys   ? help · in it: click a value to change it · h explanations · y copy address · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
-env    GUILDHALL_CMUX    path to the cmux binary
-       GUILDHALL_NO_IMAGES  force half-block rendering`)
+env    GUILDHALL_CMUX       path to the cmux binary
+       GUILDHALL_CONFIG_DIR  settings elsewhere (default ~/.config/guildhall)
+       GUILDHALL_NO_IMAGES   force half-block rendering
+files  ~/.config/guildhall/config.json   port, host, and what is switched on
+
+Run it from anywhere by linking it once, from the project: npm link
+Start the browser view at login: see contrib/dev.guildhall.headless.plist`)
 	process.exit(0)
 }
 

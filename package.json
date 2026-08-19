@@ -32,7 +32,8 @@
 		"hooks": "git config core.hooksPath .githooks",
 		"check:secrets": "node tools/check-secrets.mjs",
 		"check:spelling": "node tools/check-spelling.mjs",
-		"readme": "node tools/readme-preview.mjs"
+		"readme": "node tools/readme-preview.mjs",
+		"prepare": "npm run --silent build"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",
