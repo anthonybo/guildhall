@@ -51,6 +51,14 @@ export class RoomBase {
 	protected zoneColor = new Map<string, RGB>()
 	/** rally phase, advanced by update() so the ball moves with real time */
 	protected ballT = 0
+	/**
+	 * Phase of the light that travels under a working desk, in seconds.
+	 *
+	 * Its own clock rather than the screen's frame counter, for the same reason the
+	 * ball has one: the frame counter only advances every 0.45s, which is fine for a
+	 * screen that flickers and far too coarse for something sliding along a line.
+	 */
+	protected glowT = 0
 
 	constructor(protected rng: () => number = Math.random) {}
 

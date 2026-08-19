@@ -52,7 +52,7 @@ const cache = new Map<string, Grid>()
 export type Kind = 'edit' | 'read' | 'run' | 'search' | 'agent' | 'think'
 
 /** Screen tint by tool class, so the whole room is readable at a glance. */
-const TINT: Record<Kind, RGB> = {
+export const TINT: Record<Kind, RGB> = {
 	edit: [120, 170, 255],
 	read: [110, 220, 235],
 	run: [250, 180, 90],

@@ -24,6 +24,7 @@ import { cut } from './data/describe.ts'
 import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'
+import { TINT } from './screens.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, SCREEN_HOLD, SIT_SINK, TILE, type Character, type Placed } from './office/model.ts'
 import { SimBase } from './office/sim.ts'
 
@@ -104,6 +105,45 @@ export class Office extends SimBase {
 					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
 				})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
+				// A light sliding along the floor under a desk somebody is working at, so
+				// who is active reads from across the room without looking at any screen.
+				//
+				// It is drawn into the CANVAS, not into the monitor sprite and not as a
+				// pass in the compositor, because the canvas is the one surface all three
+				// renderers share — the terminal draws it as half-blocks, the browser and
+				// the docs run it through renderRoom. Put anywhere else it exists in some
+				// of them and not others; the first attempt lived in the sprite and so
+				// never reached the terminal at all.
+				//
+				// Under the desk rather than on it. The desk's own front edge was tried
+				// first and looked right in the sprite, but the occupant sits directly at
+				// it and is exactly as wide as it is: measured on a real frame, only about
+				// 24 pixels across five lit desks survived to the screen. The bar is also
+				// drawn a pixel wider than the desk on each side so its ends clear their
+				// shoulders.
+				//
+				// FOUR rows below the seat, which is the first row outside the pod's
+				// carpet — the carpet covers the monitor, desk and seat rows and so ends
+				// at +3.
+				//
+				// Both neighbours were tried on the real screen. At +3 the light is ON the
+				// carpet and reads as part of the desk: "I see it at the bottom of the desk
+				// but not below it". At +5 there is a whole empty row between them and it
+				// floats: "a little too far down". +4 touches the carpet's outside edge,
+				// which is the subtle gap that was actually wanted. The clear band runs to
+				// +8 where the next pod's monitor starts, so there is room either way; this
+				// is about what it reads as, not about what fits.
+				if (lit.has(`${c},${pod.seatRow}`)) {
+					const span = TILE + 2
+					const y = pod.seatRow * TILE + 4
+					const head = Math.floor(this.glowT * 2.5) % span
+					const tint = TINT[lit.get(`${c},${pod.seatRow}`) ?? 'think'] ?? TINT.think
+					// three pixels, brightest at the head, so it reads as travelling rather
+					// than blinking in place
+					cv.tint(c * TILE - 1 + head, y, 1, 1, tint, 0.9)
+					cv.tint(c * TILE - 1 + ((head + span - 1) % span), y, 1, 1, tint, 0.55)
+					cv.tint(c * TILE - 1 + ((head + span - 2) % span), y, 1, 1, tint, 0.25)
+				}
 				// beside the desk, in the gap column, where nobody sits
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
 				if (lvl) {

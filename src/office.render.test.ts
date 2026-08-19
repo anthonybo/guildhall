@@ -228,3 +228,24 @@ test('a status label never sits on top of a horizontal nameplate', () => {
 		}
 	}
 })
+
+test('a working desk has a light travelling under it, and an idle room stays still', () => {
+	// The whole point is peripheral: you should see who is active without reading a
+	// screen. So the thing worth pinning is that the CANVAS changes over time — the
+	// canvas, because it is the one surface the terminal, the browser and the docs
+	// all render, and an earlier version of this lived in the monitor sprite and
+	// therefore never reached the terminal at all.
+	const paint = (list: ReturnType<typeof session>[], seconds: number) => {
+		const { cv, office } = room(list)
+		office.settle(list)
+		for (let i = 0; i < Math.round(seconds * 30); i++) office.update(1 / 30, list)
+		office.draw(cv, list)
+		return cv.pixels().join(',')
+	}
+	const busy = [session('a', 'alpha', 'working')]
+	assert.notEqual(paint(busy, 0), paint(busy, 0.4), 'the under-desk light does not move')
+	// A room where nobody is working must not shimmer, or "who is active" means
+	// nothing. Parked sessions leave their desk, so this also covers the empty desk.
+	const idle = [session('b', 'beta', 'parked')]
+	assert.equal(paint(idle, 0), paint(idle, 0.4), 'an idle room animates under the desks')
+})

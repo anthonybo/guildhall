@@ -45,6 +45,7 @@ export class SimBase extends RoomBase {
 
 	update(dt: number, sessions: Session[]) {
 		this.ballT += dt * 1.6
+		this.glowT += dt
 		const byId = new Map(sessions.map((s) => [s.id, s]))
 		for (const ch of this.chars.values()) {
 			const s = byId.get(ch.id)
