@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shows the GuildhallBar menu bar icon at login.
+
+    sh swift/build.sh --install
+    cp contrib/dev.guildhall.bar.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/dev.guildhall.bar.plist
+
+  To stop it coming back:
+    launchctl unload ~/Library/LaunchAgents/dev.guildhall.bar.plist
+
+  **KeepAlive is deliberately false, unlike the headless service.** The app has a
+  Quit item, and Quit has to mean it: with KeepAlive on, launchd would relaunch
+  it a second later and the menu item would look broken. The service is the
+  opposite case — nobody quits a daemon on purpose, so it should come back.
+
+  **A LaunchAgent rather than SMAppService.** The modern API registers a login
+  item from inside the app, which is nicer, and it wants a signed bundle. This app
+  is built locally and not signed, so the agent is the thing that actually works.
+  It also matches how the other menu bar apps on this machine are started.
+
+  This is only the icon. The browser view is dev.guildhall.headless, and it does
+  not need this to be running — quitting the icon does not stop the service.
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>dev.guildhall.bar</string>
+
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/GuildhallBar.app/Contents/MacOS/GuildhallBar</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<false/>
+
+	<key>StandardOutPath</key>
+	<string>/tmp/guildhall-bar.log</string>
+	<key>StandardErrorPath</key>
+	<string>/tmp/guildhall-bar.log</string>
+</dict>
+</plist>

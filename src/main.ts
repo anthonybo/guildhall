@@ -157,7 +157,13 @@ function syncServe() {
 			},
 		})
 		server.on('error', (e: NodeJS.ErrnoException) => {
-			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} in use` : (e.code ?? 'failed')
+			// A busy port is the NORMAL case once the headless service exists: it holds
+			// the port at login, so a room opened afterwards cannot have it and does not
+			// need it. Saying only "in use" made the expected arrangement read as a
+			// fault, and the fault it suggested — something is broken, sharing is down —
+			// is the opposite of the truth, since the browser view is being served by
+			// the thing that took the port.
+			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} already served — the daemon has it` : (e.code ?? 'failed')
 			server = null
 			cfg.serve = false
 		})

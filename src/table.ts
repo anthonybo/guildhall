@@ -182,6 +182,13 @@ export type Share = { on: boolean; port: number; error?: string }
  * frame would train the eye to ignore the place the warning appears.
  */
 function shareBadge(share?: Share, compact = false) {
+	// A busy port is not a failure any more, it is the arrangement: the headless
+	// service takes the port at login, so a room opened afterwards cannot have it
+	// and does not need it — the browser view is up, served by the thing that took
+	// it. The header is where this is read and it truncates, so the SHORT label has
+	// to carry the meaning; appending the detail after "share failed" left it saying
+	// "⚠ share fa" on a normal width, which is alarming and wrong.
+	if (share?.error?.includes('already served')) return `  ${fg(C.screenAgent)}◉ :${share.port} by daemon${R}`
 	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${compact ? '' : `${fg(C.muted)} · ${share.error}`}${R}`
 	if (!share?.on) return ''
 	if (compact) return `  ${fg(C.screenAgent)}◉ :${share.port}${R}`
