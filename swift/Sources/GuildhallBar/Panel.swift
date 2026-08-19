@@ -3,6 +3,7 @@ import SwiftUI
 /// The dropdown: what every session is doing, and the controls for the service.
 struct Panel: View {
 	@ObservedObject var model: Model
+	@State private var showSettings = false
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 0) {
@@ -21,7 +22,12 @@ struct Panel: View {
 						ForEach(model.sessions.sorted(by: rank)) { Row(session: $0) }
 					}
 				}
-				.frame(maxHeight: 320)
+				// A minimum, not just a maximum. `maxHeight` alone let it collapse to
+				// nothing: a ScrollView has no intrinsic content height, so inside a menu
+				// bar window that sizes itself to its content the list rendered at zero
+				// and the panel showed a header and some buttons with the sessions
+				// missing entirely — while the app was holding all ten of them.
+				.frame(minHeight: 120, maxHeight: 320)
 			}
 			Divider()
 			controls
@@ -29,6 +35,10 @@ struct Panel: View {
 		.frame(width: 320)
 		.onAppear { model.start(open: true) }
 		.onDisappear { model.start(open: false) }
+		// A sheet rather than a separate window: the settings belong to this panel and
+		// should not outlive it or turn up in the window list of an app that has no
+		// windows.
+		.sheet(isPresented: $showSettings) { SettingsView(model: model) }
 	}
 
 	private func rank(_ a: Session, _ b: Session) -> Bool {
@@ -76,21 +86,35 @@ struct Panel: View {
 	}
 
 	private var controls: some View {
-		VStack(spacing: 0) {
-			Button(model.daemon == .stopped ? "Start the service" : "Stop the service") {
+		// Each row full width and left aligned. `.frame(alignment: .leading)` on the
+		// stack does not do that — a Button centres its own label inside whatever
+		// width it is given, which is why these came out centred down the middle
+		// looking like a dialog rather than a menu.
+		VStack(alignment: .leading, spacing: 2) {
+			item(model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
 				model.act { model.daemon == .stopped ? Daemon.start() : Daemon.stop() }
 			}
-			.disabled(model.daemon == .notInstalled)
-			Button("Restart the service") { model.act { Daemon.restart() } }
-				.disabled(model.daemon == .notInstalled || model.daemon == .stopped)
-			Button("Open the browser view") { model.openBrowser() }
-				.disabled(!model.reachable)
+			item("Restart the service", enabled: model.daemon != .notInstalled && model.daemon != .stopped) {
+				model.act { Daemon.restart() }
+			}
+			item("Open the browser view", enabled: model.reachable) { model.openBrowser() }
+			item("Settings…") { showSettings = true }
 			Divider().padding(.vertical, 4)
-			Button("Quit") { NSApplication.shared.terminate(nil) }
+			item("Quit") { NSApplication.shared.terminate(nil) }
+		}
+		.padding(.horizontal, 8).padding(.vertical, 6)
+	}
+
+	private func item(_ title: String, enabled: Bool = true, _ action: @escaping () -> Void) -> some View {
+		Button(action: action) {
+			Text(title)
+				.frame(maxWidth: .infinity, alignment: .leading)
+				.padding(.horizontal, 4).padding(.vertical, 3)
+				.contentShape(Rectangle())
 		}
 		.buttonStyle(.plain)
-		.padding(.horizontal, 12).padding(.vertical, 8)
-		.frame(maxWidth: .infinity, alignment: .leading)
+		.disabled(!enabled)
+		.opacity(enabled ? 1 : 0.4)
 	}
 }
 

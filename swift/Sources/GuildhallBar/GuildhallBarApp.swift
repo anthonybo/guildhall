@@ -138,5 +138,23 @@ struct GuildhallBarApp: App {
 		// .window, not .menu: the content is a list of sessions with two lines each,
 		// which a stack of NSMenuItems renders badly and cannot scroll.
 		.menuBarExtraStyle(.window)
+
+		// `GuildhallBar --panel` puts the dropdown in an ordinary window.
+		//
+		// Only reachable by that flag, and it exists because the dropdown cannot
+		// otherwise be looked at without a hand: a menu bar popover needs a real click,
+		// and scripting one needs accessibility permission that a build machine does
+		// not have. The first version of this panel shipped with its session list
+		// collapsed to zero height and its buttons centred, and both were invisible to
+		// every check that did not involve a screenshot.
+		WindowGroup("Panel") {
+			if CommandLine.arguments.contains("--panel") {
+				Panel(model: model)
+					// Brought to the front deliberately: a status-item app does not
+					// activate its windows, so this opened behind everything else and
+					// looked like it had not opened at all.
+					.onAppear { NSApplication.shared.activate(ignoringOtherApps: true) }
+			}
+		}
 	}
 }
