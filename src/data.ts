@@ -15,8 +15,9 @@
  *   cmux        which tab to jump to
  */
 import path from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { assignLooks } from './characters.ts'
-import { cmuxMap } from './data/cmux.ts'
+import { cmuxMap, tabForTty } from './data/cmux.ts'
 import { KIND, doingText, firstSentence, shortText } from './data/describe.ts'
 import { digest } from './data/digest.ts'
 import { liveSessions } from './data/registry.ts'
@@ -45,6 +46,18 @@ const CONTAINER = /^(projects|repos|workspace)$/
 function projectName(cwd: string, d: Digest, given?: string) {
 	const base = path.basename(cwd)
 	if (!CONTAINER.test(base)) return base
+	// Where it WRITES beats where it looks.
+	//
+	// `subProj` counts every path in every tool call, so a session building one
+	// project while reading another's source can be outvoted by the reading. That
+	// is not hypothetical: a session writing into `harbor` sat labelled `saltmarsh`
+	// for 53 minutes because bursts of reading kept flipping the winner, and each
+	// flip restarted settle()'s ten-minute hold, so it could never elapse.
+	//
+	// Putting files on disk somewhere is working there; reading a sibling's source
+	// is a detour. Preferring the write also makes the signal STABLE, which is what
+	// actually unsticks the hold — a name that stops oscillating settles on its own.
+	if (d.writeProj) return d.writeProj
 	// A session that has not touched a subdirectory yet — one opened a minute ago,
 	// or one that has only talked — has no tool calls to be named after, and the
 	// fallback used to be the container itself. That is the collision this is here
@@ -140,7 +153,7 @@ export function collect(): Session[] {
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
 	})
-	return disambiguate(fold(out, registry))
+	return disambiguate(pairByTty(fold(out, registry)))
 }
 
 /**
@@ -203,6 +216,49 @@ export function fold(list: Session[], registry: Registry[]): Session[] {
 		drop.add(r.sessionId)
 	}
 	return drop.size ? list.filter((s) => !drop.has(s.id)) : list
+}
+
+/**
+ * Give a row its tab by looking up the terminal device its process is attached to.
+ *
+ * The exact answer, for the sessions cmux never recorded as agents. A workspace
+ * created from the CLI gets no `terminal.agent` and no `resumeBinding` — measured
+ * still empty at 90 seconds — so `cmuxMap` cannot see it and the row arrives with
+ * no tab, no terminal button, and nothing to type into.
+ *
+ * Every panel carries `ttyName`, every Claude process has a tty, and a tty belongs
+ * to exactly one terminal. Nothing is inferred and nothing is remembered.
+ *
+ * Two worse attempts came first and are worth naming so they are not repeated.
+ * Matching on the shared DIRECTORY was ambiguous — seven sessions here have
+ * `~/projects` as their cwd — and the browser opened whichever had been active
+ * most recently, which was an unrelated session mid-conversation, one keystroke
+ * away from receiving a message meant for a new one. Remembering the workspace at
+ * spawn time was exact but lived in memory, and the dev watcher restarts the
+ * server on every source change, so the claim was usually gone before the session
+ * appeared.
+ */
+export function pairByTty(list: Session[]): Session[] {
+	const orphans = list.filter((s) => !s.workspace)
+	if (!orphans.length) return list
+	for (const s of orphans) {
+		const at = tabForTty(ttyOf(s.pid))
+		if (!at) continue
+		s.tab = at.tab
+		s.workspace = at.workspace
+		s.unread = at.unread
+	}
+	return list
+}
+
+/** The terminal a process is attached to, or '' for one with none — a background
+ *  job reports `??` and has no tab to find. */
+function ttyOf(pid: number): string {
+	try {
+		return execFileSync('ps', ['-o', 'tty=', '-p', String(pid)], { encoding: 'utf8' }).trim()
+	} catch {
+		return ''
+	}
 }
 
 /**

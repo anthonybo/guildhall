@@ -61,17 +61,30 @@ function tailLines(file: string) {
  */
 const CONTAINERS = /(?:^|\/)(projects|repos|workspace)\/([^/\s"'`;:.]+)(?=\/|$)/g
 
+/**
+ * Tools that put code on disk, as opposed to looking at it.
+ *
+ * The distinction the naming turns on: reading a sibling project's source is a
+ * detour, writing files into a directory is working there. Bash is deliberately
+ * absent — a `cd` or a `grep` in its arguments says nothing about where the work
+ * is, and it is the noisiest source of paths in a transcript.
+ */
+const WRITES = /^(Edit|MultiEdit|Write|NotebookEdit)$/
+
 function projectVotes() {
 	const seen = new Map<string, number>()
-	const note = (v: unknown) => {
+	const wrote = new Map<string, number>()
+	const note = (v: unknown, writing = false) => {
 		if (typeof v !== 'string') return
 		for (const m of v.matchAll(CONTAINERS)) {
 			const name = m[2]
 			if (!name || name.startsWith('.') || name.includes('*') || name === 'null' || name === 'undefined') continue
 			seen.set(name, (seen.get(name) ?? 0) + 1)
+			if (writing) wrote.set(name, (wrote.get(name) ?? 0) + 1)
 		}
 	}
-	return { note, winner: () => (seen.size ? [...seen.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined) }
+	const top = (m: Map<string, number>) => (m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0][0] : undefined)
+	return { note, winner: () => top(seen), writer: () => top(wrote) }
 }
 
 /** Trailing punctuation must not hide a question mark. */
@@ -114,6 +127,7 @@ function read(file: string): Digest {
 	}
 
 	d.subProj = votes.winner()
+	d.writeProj = votes.writer()
 	const L = advance(file)
 	d.commits = L.commits
 	d.edits = L.edits
@@ -122,7 +136,7 @@ function read(file: string): Digest {
 	return d
 }
 
-function readAssistant(m: any, d: Digest, note: (v: unknown) => void) {
+function readAssistant(m: any, d: Digest, note: (v: unknown, writing?: boolean) => void) {
 	if (m.usage) d.usage = m.usage
 	if (!Array.isArray(m.content)) return
 	for (const b of m.content) {
@@ -132,7 +146,8 @@ function readAssistant(m: any, d: Digest, note: (v: unknown) => void) {
 			// a session that opened a question dialog is waiting on you even though
 			// the registry still calls it idle
 			d.asked = b.name === 'AskUserQuestion' || b.name === 'ExitPlanMode'
-			for (const v of Object.values(b.input ?? {})) note(v)
+			const writing = WRITES.test(String(b.name))
+			for (const v of Object.values(b.input ?? {})) note(v, writing)
 		} else if (b.type === 'text' && b.text.trim()) {
 			const text = b.text.trim()
 			d.text = text

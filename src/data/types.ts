@@ -95,6 +95,14 @@ export type Digest = {
 	text?: string
 	lastTs?: number
 	subProj?: string
+	/**
+	 * The project this session is WRITING into, when it is writing anywhere.
+	 *
+	 * Kept apart from `subProj`, which counts every path in every tool call and so
+	 * lets a burst of reading outvote the work. Reading a sibling's source is a
+	 * detour; putting files on disk somewhere is working there.
+	 */
+	writeProj?: string
 	turns?: number
 	/** subagents still running, from turn_duration's own count */
 	pending?: number

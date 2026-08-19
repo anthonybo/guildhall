@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { collect, fold, levelFor, liveSessions, transcriptIndex, xpForLevel, xpOf } from './data.ts'
+import { collect, fold, levelFor, liveSessions, pairByTty, transcriptIndex, xpForLevel, xpOf } from './data.ts'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tierOf } from './theme.ts'
@@ -187,4 +187,32 @@ test('a session that moved directory resolves to its live transcript', () => {
 		const newest = Math.max(...paths.map(mt))
 		assert.equal(mt(picked), newest, `${id} resolved to a stale transcript`)
 	}
+})
+
+/** The dull half of a Session, so a pairing test can say only what it is about. */
+const blank: Session = {
+	id: '', pid: 0, name: '', proj: '', cwd: '/x', state: 'working', stale: 0, title: '', doing: '', short: '',
+	last: '', ctxUsed: 0, ctxLimit: 200_000, unread: false, palette: 0, hueShift: 0, toolKind: 'think', turns: 0,
+	level: 1, xp: 0,
+}
+
+test('a session with no agent record still gets its tab, by terminal device', async () => {
+	// The gap this closes: cmux writes NO agent id for a workspace created from the
+	// CLI — `terminal.agent` and `resumeBinding` were still null at 90 seconds — so
+	// a session started from the browser had no tab and nothing to type into.
+	//
+	// Two earlier attempts are recorded in MISTAKES.md and must not come back.
+	// Matching on the shared directory was ambiguous: seven sessions here have
+	// `~/projects` as their cwd, and the browser opened whichever was busiest — an
+	// unrelated session, mid-conversation. Remembering the workspace at spawn time
+	// was exact but in-memory, and the watcher restarts the server on every edit.
+	//
+	// A tty belongs to exactly one terminal, so there is nothing left to guess.
+	const { tabForTty } = await import('./data/cmux.ts')
+	assert.equal(tabForTty(''), undefined, 'no tty is not a match')
+	assert.equal(tabForTty('??'), undefined, 'a process with no controlling terminal has no tab')
+
+	// A row that already has a workspace is never re-pointed by this.
+	const rows: Session[] = [{ ...blank, id: 'a', proj: 'x', cwd: '/x', pid: 1, tab: 3, workspace: 'REAL' }]
+	assert.equal(pairByTty(rows)[0]!.workspace, 'REAL')
 })

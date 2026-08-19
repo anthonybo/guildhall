@@ -20,6 +20,8 @@ import { CMUX_STATE } from './paths.ts'
  * a number that means something else is exactly the mistake worth designing out.
  * It is stable across reorders, which a position is not.
  */
+const byTty = new Map<string, { tab: number; workspace: string; unread: boolean }>()
+
 export function cmuxMap() {
 	const m = new Map<string, { tab: number; workspace: string; unread: boolean }>()
 	let st: any
@@ -32,6 +34,12 @@ export function cmuxMap() {
 		;(win.tabManager?.workspaces ?? []).forEach((ws: any, i: number) => {
 			const at = { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator }
 			for (const pn of ws.panels ?? []) {
+				// Every panel by its terminal device — the exact session-to-tab key. See
+				// `tabForTty`.
+				if (pn.ttyName) {
+					byTty.set(String(pn.ttyName), at)
+					byTty.set(String(pn.ttyName).replace(/^\/dev\//, ''), at)
+				}
 				const t = pn.terminal
 				// `terminal.agent` is not the panel's identity, it is its *attachment*:
 				// cmux drops the whole object once its hooks stop hearing from the agent
@@ -51,7 +59,64 @@ export function cmuxMap() {
 				if (live) m.set(live, at)
 				else if (resumable && !m.has(resumable)) m.set(resumable, at)
 			}
+			// A tab with no agent recorded on it at all, remembered by the directory it
+			// is sitting in. See `unclaimed` — this is what lets a session guildhall
+			// started be found, since cmux writes no agent fields for a workspace made
+			// from the CLI.
+			if (!(ws.panels ?? []).some((pn: any) => pn.terminal?.agent?.sessionId || pn.terminal?.resumeBinding?.checkpointId)) {
+				const dir = String(ws.currentDirectory ?? '')
+				if (dir) free.push({ dir, at })
+			}
 		})
 	}
 	return m
+}
+
+/**
+ * Tabs holding no agent, by the directory they are open in.
+ *
+ * For sessions cmux does not know are sessions. `cmuxMap` matches a tab to a
+ * Claude session through `terminal.agent.sessionId` or
+ * `resumeBinding.checkpointId`, and neither is ever written for a workspace
+ * created from the CLI — measured at 30s, 60s and 90s after `cmux workspace
+ * create --command claude`, the whole `terminal` object stays empty. A session
+ * started that way therefore has no tab, no terminal button, and no way to be
+ * typed into, which is the entire point of starting one.
+ *
+ * cmux does record `currentDirectory` per workspace, so the directory is the
+ * fact both sides share. This is offered as a LAST resort and only when it is
+ * unambiguous — see `pairByDirectory`.
+ */
+const free: { dir: string; at: { tab: number; workspace: string; unread: boolean } }[] = []
+
+export function unclaimed() {
+	// Populated as a side effect of cmuxMap, which is the only thing that parses the
+	// state file; calling it here keeps the two answers from the same read.
+	free.length = 0
+	byTty.clear()
+	cmuxMap()
+	return free.slice()
+}
+
+/**
+ * Which tab a terminal device belongs to.
+ *
+ * The exact answer, and it should have been the first thing tried. cmux records
+ * `ttyName` on every panel; a Claude process has a tty; a tty belongs to exactly
+ * one terminal. There is nothing to infer and nothing to remember.
+ *
+ * This replaces two worse attempts. Matching by directory was ambiguous — seven
+ * sessions share `~/projects` here, and the browser opened whichever was busiest,
+ * which meant a terminal for an unrelated session mid-conversation. Remembering
+ * the workspace guildhall created worked but was in-memory bookkeeping that a
+ * server restart erased, and the dev watcher restarts on every source change.
+ *
+ * Measured on this machine: 13 of 13 live Claude processes matched to a tab,
+ * including the one cmux had recorded no agent for.
+ */
+export function tabForTty(tty: string) {
+	if (!tty || tty === '??') return undefined
+	if (!byTty.size) cmuxMap()
+	// `ps` reports `ttysNNN`; cmux records `/dev/ttysNNN`. Accept either.
+	return byTty.get(tty) ?? byTty.get(`/dev/${tty}`) ?? byTty.get(tty.replace(/^\/dev\//, ''))
 }
