@@ -120,6 +120,33 @@ var ago = (ms) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 };
+function tap(el4, run) {
+  let actedAt = 0;
+  const GESTURE_MS = 700;
+  const fire = () => {
+    actedAt = Date.now();
+    run();
+  };
+  el4.addEventListener("pointerdown", (e) => {
+    const pe = e;
+    if (pe.pointerType !== "touch") return;
+    pe.preventDefault();
+    eatNextClick();
+    fire();
+  });
+  el4.addEventListener("click", () => {
+    if (Date.now() - actedAt < GESTURE_MS) return;
+    fire();
+  });
+}
+function eatNextClick() {
+  const eat = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  addEventListener("click", eat, { capture: true, once: true });
+  setTimeout(() => removeEventListener("click", eat, { capture: true }), 400);
+}
 
 // src/data/select.ts
 function needsAttention(s) {
@@ -334,9 +361,9 @@ function paintList(list) {
     }
     li.tabIndex = 0;
     li.setAttribute("role", "button");
-    const open2 = opened.has(s.id);
-    li.setAttribute("aria-expanded", String(open2));
-    if (open2) {
+    const open3 = opened.has(s.id);
+    li.setAttribute("aria-expanded", String(open3));
+    if (open3) {
       li.classList.add("open");
       li.append(details(s));
     }
@@ -668,6 +695,120 @@ function prop(kind) {
   return g;
 }
 
+// src/screens.ts
+var W = 16;
+var H = 24;
+var CASE = [46, 48, 62];
+var CASE_LIT = [72, 76, 96];
+var BASE = [38, 40, 52];
+var DARK = [22, 24, 32];
+var CODE = [
+  [126, 220, 190],
+  [150, 190, 255],
+  [240, 200, 120],
+  [230, 140, 170],
+  [170, 210, 140]
+];
+var DIGITS = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "010", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  "?": ["111", "001", "011", "000", "010"],
+  "\u2605": ["101", "111", "010", "111", "101"]
+};
+var cache2 = /* @__PURE__ */ new Map();
+var TINT = {
+  edit: [120, 170, 255],
+  read: [110, 220, 235],
+  run: [250, 180, 90],
+  search: [200, 160, 250],
+  agent: [160, 235, 150],
+  think: [150, 160, 190]
+};
+function monitor(lit, frame2, seed = 0, kind = "think") {
+  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}`;
+  const hit = cache2.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: H }, () => new Array(W).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < W && y < H) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  const WOOD = [138, 96, 62];
+  const WOOD_DK = [104, 70, 44];
+  box(0, 16, W, 8, WOOD);
+  box(0, 16, W, 1, [168, 122, 82]);
+  box(0, 23, W, 1, WOOD_DK);
+  box(7, 12, 2, 3, BASE);
+  box(5, 15, 6, 1, CASE);
+  box(3, 18, 9, 3, [58, 62, 78]);
+  box(4, 19, 7, 1, [92, 98, 118]);
+  box(13, 18, 3, 3, [226, 118, 96]);
+  put(12, 19, [226, 118, 96]);
+  box(0, 19, 3, 2, [236, 234, 226]);
+  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
+  box(2, 2, 12, 9, DARK);
+  if (lit) {
+    const lens = [9, 6, 11, 7];
+    for (let i = 0; i < 4; i++) {
+      const y = 3 + i * 2;
+      const wob = (frame2 + i * 3 + seed) % 5 - 2;
+      const len = Math.max(2, Math.min(11, lens[i] + wob));
+      const indent = i === 1 || i === 3 ? 3 : 2;
+      for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length]);
+    }
+    if (frame2 % 2 === 0) put(3, 9, [250, 250, 250]);
+  } else {
+    for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58]);
+  }
+  const g = { w: W, h: H, grid };
+  cache2.set(key, g);
+  return g;
+}
+var badges = /* @__PURE__ */ new Map();
+function badge(level, tier, face = "") {
+  const key = level + ":" + tier.join("") + ":" + face;
+  const hit = badges.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < 16 && y < 16) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  const CARD = [238, 236, 228];
+  const EDGE = [90, 92, 102];
+  box(7, 0, 2, 2, EDGE);
+  box(2, 2, 12, 13, EDGE);
+  box(3, 3, 10, 3, tier);
+  box(3, 6, 10, 8, CARD);
+  const INK2 = [40, 42, 54];
+  if (face) {
+    const glyph = DIGITS[face] ?? DIGITS["0"];
+    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK2)));
+  } else {
+    const text = String(Math.max(1, Math.min(99, level)));
+    const startX = text.length > 1 ? 4 : 6;
+    [...text].forEach((ch, i) => {
+      const glyph = DIGITS[ch] ?? DIGITS["0"];
+      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK2)));
+    });
+  }
+  const g = { w: 16, h: 16, grid };
+  badges.set(key, g);
+  return g;
+}
+
 // src/office/model.ts
 var TILE = 4;
 var CHAR_W = TILE;
@@ -994,6 +1135,14 @@ var RoomBase = class {
   zoneColor = /* @__PURE__ */ new Map();
   /** rally phase, advanced by update() so the ball moves with real time */
   ballT = 0;
+  /**
+   * Phase of the light that travels under a working desk, in seconds.
+   *
+   * Its own clock rather than the screen's frame counter, for the same reason the
+   * ball has one: the frame counter only advances every 0.45s, which is fine for a
+   * screen that flickers and far too coarse for something sliding along a line.
+   */
+  glowT = 0;
   rand(a, b) {
     return a + this.rng() * (b - a);
   }
@@ -1254,12 +1403,12 @@ var RoomBase = class {
   }
   /** Free floor that nobody else is heading to or standing on. */
   freeTiles() {
-    const open2 = this.walkable.filter((t) => {
+    const open3 = this.walkable.filter((t) => {
       const k = `${t.col},${t.row}`;
       return !this.dest.get(k) && !this.seatTiles.has(k);
     });
-    const social = open2.filter((t) => t.row > this.workBottom + 1);
-    return social.length ? social : open2;
+    const social = open3.filter((t) => t.row > this.workBottom + 1);
+    return social.length ? social : open3;
   }
 };
 
@@ -1284,6 +1433,7 @@ var SimBase = class extends RoomBase {
   }
   update(dt, sessions3) {
     this.ballT += dt * 1.6;
+    this.glowT += dt;
     const byId = new Map(sessions3.map((s) => [s.id, s]));
     for (const ch of this.chars.values()) {
       const s = byId.get(ch.id);
@@ -1377,8 +1527,8 @@ var SimBase = class extends RoomBase {
             break;
           }
           if (this.goToSpot(ch)) break;
-          const open2 = this.freeTiles();
-          const t = open2[Math.floor(this.rng() * open2.length)];
+          const open3 = this.freeTiles();
+          const t = open3[Math.floor(this.rng() * open3.length)];
           if (t) this.walkTo(ch, t.col, t.row);
           break;
         }
@@ -1655,6 +1805,15 @@ var Office = class extends SimBase {
           kind: lit.get(`${c},${pod.seatRow}`) ?? "think"
         });
         block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS);
+        if (lit.has(`${c},${pod.seatRow}`)) {
+          const span = TILE + 2;
+          const y = pod.seatRow * TILE + 4;
+          const head = Math.floor(this.glowT * 2.5) % span;
+          const tint = TINT[lit.get(`${c},${pod.seatRow}`) ?? "think"] ?? TINT.think;
+          cv2.tint(c * TILE - 1 + head, y, 1, 1, tint, 0.9);
+          cv2.tint(c * TILE - 1 + (head + span - 1) % span, y, 1, 1, tint, 0.55);
+          cv2.tint(c * TILE - 1 + (head + span - 2) % span, y, 1, 1, tint, 0.25);
+        }
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
         if (lvl) {
           this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false });
@@ -1846,7 +2005,7 @@ var sheets = [];
 function setSheets(imgs) {
   sheets.length = 0;
   sheets.push(...imgs);
-  cache2.clear();
+  cache3.clear();
 }
 function extract(img, rowIdx, frame2, flip) {
   const x0 = frame2 * FRAME_W;
@@ -1894,7 +2053,7 @@ function hueRotate(g, deg) {
     )
   };
 }
-var cache2 = /* @__PURE__ */ new Map();
+var cache3 = /* @__PURE__ */ new Map();
 function pinBadge(g, colour) {
   const grid = g.grid.map((row) => [...row]);
   const top = Math.round(g.h * 0.58);
@@ -1919,7 +2078,7 @@ var BLANK = { w: FRAME_W, h: FRAME_H, grid: Array.from({ length: FRAME_H }, () =
 function frameOf(palette, hueShift, facing, pose, step2, badge2) {
   if (!sheets.length) return BLANK;
   const key = `${palette}:${hueShift}:${facing}:${pose}:${step2}:${badge2?.join("") ?? ""}`;
-  const hit = cache2.get(key);
+  const hit = cache3.get(key);
   if (hit) return hit;
   const sheet = sheets[palette % sheets.length];
   const cycle = POSE_FRAMES[pose];
@@ -1927,121 +2086,7 @@ function frameOf(palette, hueShift, facing, pose, step2, badge2) {
   const rowIdx = ROWS.indexOf(facing === "left" ? "right" : facing);
   let g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame2, facing === "left"), hueShift);
   if (badge2) g = pinBadge(g, badge2);
-  cache2.set(key, g);
-  return g;
-}
-
-// src/screens.ts
-var W = 16;
-var H = 24;
-var CASE = [46, 48, 62];
-var CASE_LIT = [72, 76, 96];
-var BASE = [38, 40, 52];
-var DARK = [22, 24, 32];
-var CODE = [
-  [126, 220, 190],
-  [150, 190, 255],
-  [240, 200, 120],
-  [230, 140, 170],
-  [170, 210, 140]
-];
-var DIGITS = {
-  "0": ["111", "101", "101", "101", "111"],
-  "1": ["010", "110", "010", "010", "111"],
-  "2": ["111", "001", "111", "100", "111"],
-  "3": ["111", "001", "111", "001", "111"],
-  "4": ["101", "101", "111", "001", "001"],
-  "5": ["111", "100", "111", "001", "111"],
-  "6": ["111", "100", "111", "101", "111"],
-  "7": ["111", "001", "010", "010", "010"],
-  "8": ["111", "101", "111", "101", "111"],
-  "9": ["111", "101", "111", "001", "111"],
-  "?": ["111", "001", "011", "000", "010"],
-  "\u2605": ["101", "111", "010", "111", "101"]
-};
-var cache3 = /* @__PURE__ */ new Map();
-var TINT = {
-  edit: [120, 170, 255],
-  read: [110, 220, 235],
-  run: [250, 180, 90],
-  search: [200, 160, 250],
-  agent: [160, 235, 150],
-  think: [150, 160, 190]
-};
-function monitor(lit, frame2, seed = 0, kind = "think") {
-  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}`;
-  const hit = cache3.get(key);
-  if (hit) return hit;
-  const grid = Array.from({ length: H }, () => new Array(W).fill(null));
-  const put = (x, y, c) => {
-    if (x >= 0 && y >= 0 && x < W && y < H) grid[y][x] = c;
-  };
-  const box = (x, y, w, h, c) => {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
-  };
-  const WOOD = [138, 96, 62];
-  const WOOD_DK = [104, 70, 44];
-  box(0, 16, W, 8, WOOD);
-  box(0, 16, W, 1, [168, 122, 82]);
-  box(0, 23, W, 1, WOOD_DK);
-  box(7, 12, 2, 3, BASE);
-  box(5, 15, 6, 1, CASE);
-  box(3, 18, 9, 3, [58, 62, 78]);
-  box(4, 19, 7, 1, [92, 98, 118]);
-  box(13, 18, 3, 3, [226, 118, 96]);
-  put(12, 19, [226, 118, 96]);
-  box(0, 19, 3, 2, [236, 234, 226]);
-  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
-  box(2, 2, 12, 9, DARK);
-  if (lit) {
-    const lens = [9, 6, 11, 7];
-    for (let i = 0; i < 4; i++) {
-      const y = 3 + i * 2;
-      const wob = (frame2 + i * 3 + seed) % 5 - 2;
-      const len = Math.max(2, Math.min(11, lens[i] + wob));
-      const indent = i === 1 || i === 3 ? 3 : 2;
-      for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length]);
-    }
-    if (frame2 % 2 === 0) put(3, 9, [250, 250, 250]);
-  } else {
-    for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58]);
-  }
-  const g = { w: W, h: H, grid };
   cache3.set(key, g);
-  return g;
-}
-var badges = /* @__PURE__ */ new Map();
-function badge(level, tier, face = "") {
-  const key = level + ":" + tier.join("") + ":" + face;
-  const hit = badges.get(key);
-  if (hit) return hit;
-  const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
-  const put = (x, y, c) => {
-    if (x >= 0 && y >= 0 && x < 16 && y < 16) grid[y][x] = c;
-  };
-  const box = (x, y, w, h, c) => {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
-  };
-  const CARD = [238, 236, 228];
-  const EDGE = [90, 92, 102];
-  box(7, 0, 2, 2, EDGE);
-  box(2, 2, 12, 13, EDGE);
-  box(3, 3, 10, 3, tier);
-  box(3, 6, 10, 8, CARD);
-  const INK2 = [40, 42, 54];
-  if (face) {
-    const glyph = DIGITS[face] ?? DIGITS["0"];
-    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK2)));
-  } else {
-    const text = String(Math.max(1, Math.min(99, level)));
-    const startX = text.length > 1 ? 4 : 6;
-    [...text].forEach((ch, i) => {
-      const glyph = DIGITS[ch] ?? DIGITS["0"];
-      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK2)));
-    });
-  }
-  const g = { w: 16, h: 16, grid };
-  badges.set(key, g);
   return g;
 }
 
@@ -2462,7 +2507,7 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY, JSON.stringify(settings));
         } catch {
         }
-        for (const el3 of choices.querySelectorAll("[role=radio]")) el3.setAttribute("aria-checked", "false");
+        for (const el4 of choices.querySelectorAll("[role=radio]")) el4.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
@@ -2478,7 +2523,7 @@ function mountSettings(button, panel, onChange) {
   note.className = "mt-3.5 mb-0 border-t border-line pt-3 text-[0.72rem]/[1.4] text-faint";
   note.textContent = "Saved in this browser only. The terminal keeps its own settings.";
   panel.append(note);
-  const open2 = (want) => {
+  const open3 = (want) => {
     panel.hidden = !want;
     button.setAttribute("aria-expanded", String(want));
     if (want) panel.querySelector("[role=radio]")?.focus();
@@ -2486,13 +2531,13 @@ function mountSettings(button, panel, onChange) {
   };
   button.addEventListener("click", (e) => {
     e.stopPropagation();
-    open2(panel.hidden);
+    open3(panel.hidden);
   });
   document.addEventListener("pointerdown", (e) => {
-    if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open2(false);
+    if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open3(false);
   });
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !panel.hidden) open2(false);
+    if (e.key === "Escape" && !panel.hidden) open3(false);
   });
 }
 
@@ -2632,9 +2677,9 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-function mountRoom(room, el3) {
+function mountRoom(room, el4) {
   roomEl = room;
-  canvas = el3;
+  canvas = el4;
   ctx2d = canvas.getContext("2d");
   buffer2 = document.createElement("canvas");
   bufferCtx = buffer2.getContext("2d");
@@ -2732,10 +2777,10 @@ function step() {
   if (stable >= STEADY || performance.now() > until) return;
   raf = requestAnimationFrame(step);
 }
-function watch(el3, open2) {
-  host = el3;
-  showing = open2;
-  el3.addEventListener("pointerdown", measure, { passive: true });
+function watch(el4, open3) {
+  host = el4;
+  showing = open3;
+  el4.addEventListener("pointerdown", measure, { passive: true });
   window.visualViewport?.addEventListener("resize", settle);
   window.visualViewport?.addEventListener("scroll", measure);
 }
@@ -2791,11 +2836,13 @@ function paint2(pre, g, panel, wrap2) {
   const advance = advanceRatio(pre);
   const usable = Math.max(200, pre.clientWidth - PAD);
   const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
-  const cramped = exact < LEGIBLE;
+  const cramped = exact < READABLE;
   const reflow = wrap2 && cramped;
   const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
   pre.style.fontSize = `${size.toFixed(2)}px`;
   pre.style.lineHeight = "1.25";
+  const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size);
+  pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`;
   pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
   pre.style.overflowWrap = reflow ? "break-word" : "";
   if (fullScreen()) {
@@ -2805,11 +2852,6 @@ function paint2(pre, g, panel, wrap2) {
     const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
     const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0;
     pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
-  }
-  const needed = Math.ceil(g.columns * advance * size) + PAD + 2;
-  if (needed < pre.clientWidth) {
-    panel.style.maxWidth = `${needed}px`;
-    panel.style.marginInline = "auto";
   }
   const out = [];
   for (let r = 0; r < g.rows; r++) {
@@ -2845,7 +2887,9 @@ function paint2(pre, g, panel, wrap2) {
 // web/terminal.ts
 var KEY2 = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
+var KEYPAD = "guildhall.terminal.keys";
 var wrap = localStorage.getItem(WRAP) !== "exact";
+var keypad = localStorage.getItem(KEYPAD) === "on";
 var lastSig = "";
 function repaintSoon() {
   lastSig = "";
@@ -2910,33 +2954,9 @@ function askForToken(why) {
   el.append(wrap2);
   input.focus();
 }
-function tap(el3, run) {
-  let done = false;
-  const once = () => {
-    if (done) return;
-    done = true;
-    run();
-  };
-  el3.addEventListener("pointerdown", (e) => {
-    const pe = e;
-    if (pe.pointerType !== "touch") return;
-    pe.preventDefault();
-    eatNextClick();
-    once();
-  });
-  el3.addEventListener("click", once);
-}
-function eatNextClick() {
-  const eat = (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-  };
-  addEventListener("click", eat, { capture: true, once: true });
-  setTimeout(() => removeEventListener("click", eat, { capture: true }), 400);
-}
 function titleBar(name, subtitle) {
-  const bar2 = document.createElement("div");
-  bar2.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const bar3 = document.createElement("div");
+  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
   const title = document.createElement("span");
   title.className = "truncate font-bold text-label";
   title.textContent = name;
@@ -2949,14 +2969,14 @@ function titleBar(name, subtitle) {
   x.title = "Close the terminal (Esc)";
   x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   tap(x, close);
-  bar2.append(title, live2, x);
-  return bar2;
+  bar3.append(title, live2, x);
+  return bar3;
 }
 function chrome(name) {
   el.innerHTML = "";
-  const bar2 = document.createElement("div");
-  bar2.id = "screenbar";
-  bar2.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const bar3 = document.createElement("div");
+  bar3.id = "screenbar";
+  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
   const title = document.createElement("span");
   title.className = "font-bold text-label";
   title.textContent = name;
@@ -2986,10 +3006,26 @@ function chrome(name) {
   x.title = "Close the terminal (Esc)";
   x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   tap(x, close);
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.id = "keystoggle";
+  const labelKeys = () => {
+    keysBtn.textContent = "\u2328";
+    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
+    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
+  };
+  labelKeys();
+  tap(keysBtn, () => {
+    keypad = !keypad;
+    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
+    labelKeys();
+    const row = document.getElementById("promptkeys");
+    if (row) row.hidden = !keypad;
+  });
   const tail = document.createElement("div");
   tail.className = "ml-auto flex items-center gap-2";
-  tail.append(mode, x);
-  bar2.append(title, live2, tail);
+  tail.append(mode, keysBtn, x);
+  bar3.append(title, live2, tail);
   const pre = document.createElement("pre");
   pre.id = "screen";
   pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
@@ -3012,11 +3048,38 @@ function chrome(name) {
   send.type = "submit";
   send.textContent = "Send";
   send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
+  tap(send, () => form.requestSubmit());
   const note = document.createElement("p");
   note.id = "sendnote";
   note.hidden = true;
   note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
   form.append(input, send);
+  const keys = document.createElement("div");
+  keys.id = "promptkeys";
+  keys.hidden = !keypad;
+  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
+  const hint = document.createElement("span");
+  hint.className = "mr-auto text-[0.72rem] text-faint";
+  hint.textContent = "answer a prompt";
+  keys.append(hint);
+  for (const [label2, key, title2] of [
+    ["\u25B2", "up", "Move up the list"],
+    ["\u25BC", "down", "Move down the list"],
+    ["\u23CE", "enter", "Choose the highlighted option"],
+    ["esc", "escape", "Cancel the prompt"]
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = title2;
+    b.textContent = label2;
+    b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
+    tap(b, () => {
+      if (key === "enter" && input.value.trim()) return void form.requestSubmit();
+      sendKey(key, pre);
+    });
+    keys.append(b);
+  }
+  el.append(keys);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
@@ -3043,11 +3106,24 @@ ${pre.textContent}`;
     note.hidden = !r.note;
     refresh();
   });
-  el.append(bar2, pre, note, form);
+  el.append(bar3, pre, note, form);
   return { pre, input };
 }
 var polling = false;
 var sending = false;
+async function sendKey(key, pre) {
+  if (!openId) return;
+  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId, key }) });
+  if (r.error) {
+    pre.textContent = `${r.error}
+
+${pre.textContent}`;
+    return;
+  }
+  await new Promise((r2) => setTimeout(r2, 120));
+  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
+  refresh();
+}
 async function refresh() {
   if (!openId || polling || sending) return;
   polling = true;
@@ -3179,9 +3255,9 @@ function repoRow(r) {
   const li = document.createElement("li");
   li.className = "flex items-baseline gap-2 px-2 py-[0.15rem] whitespace-nowrap hover:bg-line/40";
   const tint = hue(r.label);
-  const bar2 = document.createElement("span");
-  bar2.textContent = "\u2502";
-  bar2.style.color = tint;
+  const bar3 = document.createElement("span");
+  bar3.textContent = "\u2502";
+  bar3.style.color = tint;
   const name = document.createElement("span");
   name.className = "w-[9rem] shrink-0 truncate font-bold max-[560px]:w-[6.5rem]";
   name.style.color = tint;
@@ -3190,7 +3266,7 @@ function repoRow(r) {
     const err = document.createElement("span");
     err.className = "truncate text-hot";
     err.textContent = r.error;
-    li.append(bar2, name, err);
+    li.append(bar3, name, err);
     return li;
   }
   const branch = document.createElement("span");
@@ -3222,7 +3298,7 @@ function repoRow(r) {
   const when = document.createElement("span");
   when.className = "ml-auto shrink-0 tabular-nums text-faint";
   when.textContent = r.lastCommitAt ? ago(Date.now() - r.lastCommitAt) : "";
-  li.append(bar2, name, branch, sync, work, ci, live2, when);
+  li.append(bar3, name, branch, sync, work, ci, live2, when);
   if (!r.upstream && !r.unborn) {
     const note = document.createElement("span");
     note.className = "shrink-0 pl-2 text-faint max-[560px]:hidden";
@@ -3243,9 +3319,9 @@ function feedRow(i) {
   const when = document.createElement("span");
   when.className = "w-[2.6rem] shrink-0 text-right tabular-nums text-faint";
   when.textContent = ago(Date.now() - i.at);
-  const bar2 = document.createElement("span");
-  bar2.textContent = "\u2502";
-  bar2.style.color = tint;
+  const bar3 = document.createElement("span");
+  bar3.textContent = "\u2502";
+  bar3.style.color = tint;
   const repo = document.createElement("span");
   repo.className = "w-[9rem] shrink-0 truncate max-[560px]:w-[6.5rem]";
   repo.style.color = tint;
@@ -3256,7 +3332,7 @@ function feedRow(i) {
   const what = document.createElement("span");
   what.className = `truncate ${failed(i) ? "text-hot" : i.kind === "commit" ? "text-label" : "text-muted"}`;
   what.textContent = describe(i);
-  li.append(glyph, when, bar2, repo, sha, what);
+  li.append(glyph, when, bar3, repo, sha, what);
   return li;
 }
 function heading(text, count) {
@@ -3281,8 +3357,8 @@ function render(snap) {
   const priorOpen = el2.querySelector("details")?.open ?? false;
   const wrap2 = document.createElement("div");
   wrap2.className = "flex h-full min-h-0 flex-col";
-  const bar2 = document.createElement("div");
-  bar2.className = "flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2";
+  const bar3 = document.createElement("div");
+  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2";
   const title = document.createElement("span");
   title.className = "font-bold tracking-[0.06em] text-gold";
   title.textContent = "PRESSROOM";
@@ -3305,8 +3381,8 @@ function render(snap) {
   x.title = "Close (Esc)";
   x.className = "flex min-h-9 shrink-0 cursor-pointer items-center rounded border border-hot bg-transparent px-2.5 text-[0.72rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   x.addEventListener("click", close2);
-  bar2.append(title, meta, toggle, x);
-  wrap2.append(bar2);
+  bar3.append(title, meta, toggle, x);
+  wrap2.append(bar3);
   const body = document.createElement("div");
   body.className = "press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
   if (snap.error) {
@@ -3449,8 +3525,163 @@ function mountPress(host2, closed) {
   });
 }
 
+// web/newsession.ts
+var KEY3 = "guildhall.control";
+var token2 = () => sessionStorage.getItem(KEY3) ?? "";
+var el3;
+var onPick = () => {
+};
+var open2 = false;
+function mountNewSession(host2, picked) {
+  el3 = host2;
+  onPick = picked;
+}
+var isOpen3 = () => open2;
+function close3() {
+  open2 = false;
+  el3.hidden = true;
+  el3.replaceChildren();
+  unlockPage("newsession");
+}
+function bar(title) {
+  const b = document.createElement("div");
+  b.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const h = document.createElement("span");
+  h.className = "font-bold text-label";
+  h.textContent = title;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot";
+  tap(x, close3);
+  b.append(h, x);
+  return b;
+}
+function say(host2, text, tone = "text-faint") {
+  const p = document.createElement("p");
+  p.className = `m-0 px-3 py-3 text-[0.82rem]/[1.5] ${tone}`;
+  p.textContent = text;
+  host2.append(p);
+}
+function askHere(body) {
+  body.replaceChildren();
+  const wrap2 = document.createElement("div");
+  wrap2.className = "p-4";
+  const h = document.createElement("p");
+  h.className = "mt-0 mb-2 text-label";
+  h.textContent = "Control password";
+  const why = document.createElement("p");
+  why.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
+  why.textContent = "Starting a session needs the password you set on the machine running guildhall \u2014 press ? there, then c.";
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "the password you set";
+  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "Unlock";
+  go.className = "mt-2 min-h-11 cursor-pointer rounded border border-gold bg-gold px-3 font-bold text-bg";
+  const submit = () => {
+    const v = input.value.trim();
+    if (!v) return;
+    sessionStorage.setItem(KEY3, v);
+    show3();
+  };
+  go.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submit();
+  });
+  wrap2.append(h, why, input, go);
+  body.append(wrap2);
+  input.focus();
+}
+async function show3() {
+  open2 = true;
+  el3.hidden = false;
+  lockPage("newsession");
+  el3.replaceChildren(bar("Start a session"));
+  const body = document.createElement("div");
+  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain";
+  el3.append(body);
+  say(body, "Loading projects\u2026");
+  let projects = [];
+  try {
+    const res = await fetch("/api/projects", { headers: { "x-guildhall-control": token2() }, signal: AbortSignal.timeout(15e3) });
+    if (res.status === 403) {
+      body.replaceChildren();
+      say(body, "Control is off, or this device is not on the machine or its tailnet.", "text-gold");
+      return;
+    }
+    if (res.status === 401) return askHere(body);
+    projects = (await res.json()).projects ?? [];
+  } catch {
+    body.replaceChildren();
+    say(body, "Could not reach guildhall.", "text-hot");
+    return;
+  }
+  body.replaceChildren();
+  if (!projects.length) return void say(body, "No projects found to start in.");
+  say(body, "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
+  const list = document.createElement("ul");
+  list.className = "m-0 list-none p-0";
+  for (const p of projects) {
+    const li = document.createElement("li");
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "flex min-h-12 w-full cursor-pointer items-center gap-2 border-0 border-b border-line bg-transparent px-3 text-left text-[0.86rem] text-label hover:bg-line/40";
+    const name = document.createElement("span");
+    name.className = "truncate";
+    name.textContent = p.label;
+    b.append(name);
+    if (p.live) {
+      const t = document.createElement("span");
+      t.className = "ml-auto shrink-0 text-[0.72rem] text-faint";
+      t.textContent = "already running";
+      b.append(t);
+    }
+    b.addEventListener("click", () => start(p, body, b));
+    li.append(b);
+    list.append(li);
+  }
+  body.append(list);
+}
+async function start(p, body, btn) {
+  btn.disabled = true;
+  const was = btn.textContent;
+  btn.textContent = `Starting in ${p.label}\u2026`;
+  try {
+    const res = await fetch("/api/spawn", {
+      method: "POST",
+      headers: { "x-guildhall-control": token2(), "content-type": "application/json" },
+      body: JSON.stringify({ dir: p.dir }),
+      // Starting a session runs `claude`, which is slower than a send; the server
+      // also waits to see whether a trust prompt came up before answering.
+      signal: AbortSignal.timeout(3e4)
+    });
+    const out = await res.json().catch(() => ({ error: "unreadable reply" }));
+    if (out.error) {
+      btn.disabled = false;
+      btn.textContent = was;
+      body.querySelectorAll("[data-note]").forEach((n2) => n2.remove());
+      const n = document.createElement("p");
+      n.dataset.note = "1";
+      n.className = "m-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot";
+      n.textContent = out.error;
+      body.prepend(n);
+      return;
+    }
+    close3();
+    onPick(p.dir);
+  } catch {
+    btn.disabled = false;
+    btn.textContent = was;
+  }
+}
+
 // web/app.ts
-var bar = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
+var bar2 = { counts: $("#counts"), link: $("#link"), ver: $("#ver") };
 var roomEl2 = $("#room");
 var stampEl = $("#stamp");
 var offlineEl = $("#offline");
@@ -3464,26 +3695,26 @@ function setLink(state) {
   const word2 = document.createElement("span");
   word2.className = "max-[560px]:hidden";
   word2.textContent = state;
-  bar.link.replaceChildren(dot, word2);
+  bar2.link.replaceChildren(dot, word2);
 }
 function paintCounts(list) {
   const counts = {};
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
-  bar.counts.replaceChildren(
+  bar2.counts.replaceChildren(
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
-      const el3 = document.createElement("span");
-      el3.style.color = rgb(LOOK[k].color);
-      el3.className = "whitespace-nowrap";
-      el3.textContent = `${LOOK[k].glyph} `;
+      const el4 = document.createElement("span");
+      el4.style.color = rgb(LOOK[k].color);
+      el4.className = "whitespace-nowrap";
+      el4.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("span");
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
       word2.className = "text-label";
       word2.textContent = ` ${LOOK[k].label}`;
-      el3.title = `${counts[k]} ${LOOK[k].label}`;
-      el3.append(n, word2);
-      return el3;
+      el4.title = `${counts[k]} ${LOOK[k].label}`;
+      el4.append(n, word2);
+      return el4;
     })
   );
 }
@@ -3491,7 +3722,7 @@ var clientStamp = null;
 function apply(data) {
   if (data.client) {
     if (clientStamp === null) clientStamp = data.client;
-    else if (data.client !== clientStamp && !busy() && !isOpen2()) return void location.reload();
+    else if (data.client !== clientStamp && !busy() && !isOpen2() && !isOpen3()) return void location.reload();
   }
   sessions2 = data.sessions;
   setRoomSessions(sessions2);
@@ -3500,9 +3731,21 @@ function apply(data) {
     const build = document.createElement("span");
     build.className = "build";
     build.textContent = commit ? ` \xB7 ${commit}` : "";
-    bar.ver.replaceChildren((data.update ? "\u21E1 v" : "v") + num, build);
-    bar.ver.classList.toggle("newer", !!data.update);
-    bar.ver.title = data.update ? `v${data.update} is available` : "";
+    bar2.ver.replaceChildren((data.update ? "\u21E1 v" : "v") + num, build);
+    bar2.ver.classList.toggle("newer", !!data.update);
+    bar2.ver.title = data.update ? `v${data.update} is available` : "";
+  }
+  if (awaitingDir) {
+    const fresh = sessions2.filter((s) => s.cwd === awaitingDir && s.workspace).sort((a, b) => a.stale - b.stale)[0];
+    if (fresh) {
+      awaitingDir = null;
+      show(fresh.id, fresh.name);
+    } else if (Date.now() - awaitingSince > SPAWN_WAIT) {
+      const where = awaitingDir;
+      awaitingDir = null;
+      offlineEl.hidden = false;
+      offlineEl.textContent = `The session in ${where} has not come up. Some projects open a trust prompt on first run, and that has to be answered at the machine.`;
+    }
   }
   showRoom();
   paintCounts(sessions2);
@@ -3534,12 +3777,12 @@ function connect() {
     try {
       const r = await fetch("/api/sessions", { cache: "no-store" });
       if (r.status === 401) return location.reload();
-      return open2();
+      return open3();
     } catch {
     }
     retry();
   };
-  function open2() {
+  function open3() {
     es?.close();
     delay = 1e3;
     es = new EventSource("/api/stream");
@@ -3561,7 +3804,7 @@ function connect() {
       retry();
     };
   }
-  open2();
+  open3();
   return { probe: () => (delay = 1e3, probe()) };
 }
 function showRoom() {
@@ -3569,6 +3812,15 @@ function showRoom() {
 }
 mountTerminal($("#terminal"), () => {
 });
+var awaitingDir = null;
+var awaitingSince = 0;
+var SPAWN_WAIT = 75e3;
+var newBtn = $("#newbtn");
+mountNewSession($("#newsession"), (dir) => {
+  awaitingDir = dir;
+  awaitingSince = Date.now();
+});
+newBtn.addEventListener("click", () => show3());
 var pressBtn = $("#pressbtn");
 mountPress($("#press"), () => pressBtn.setAttribute("aria-expanded", "false"));
 pressBtn.addEventListener("click", () => {

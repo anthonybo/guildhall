@@ -49,13 +49,78 @@ gets typed again. Intermittent — "all the time but not every time".
   input box, and text sent to it vanishes silently. Confirmed in a scratch session.
   This is a genuine cause of a lost send and is worth checking before anything else.
 
-### Where to look next
+### Found in the browser, where nobody had looked
 
-The browser and the network, which every local trial skipped: the 20-second
-`AbortSignal.timeout` in `web/terminal.ts`, and the `sending` guard that can
-swallow a tap. The distinguishing observation is whether a failed send later shows
-up in the session **twice** (client lied about a success) or **not at all** (the
-request never arrived).
+Every trial above tested the SERVER. The send path was measured 26 times and is
+not flaky, and that measurement kept the search on the wrong side of the network.
+
+**Send was the only control still acting on `click`.** A click is delivered only
+if the press and the release land on the same element, so anything that moves the
+button between them makes the browser discard the tap — correctly, and silently.
+Pressing Send is precisely when the keyboard starts to dismiss and the panel
+resizes. The button moves out from under the finger mid-tap and no request is ever
+made, which matches the one live observation nothing else explained: **the input
+box was empty**, so the text had not arrived at all.
+
+The same defect had already been found and fixed twice in this panel — Close
+opening pressroom, and the keypad toggle that would not close — and both times the
+fix was applied to the button in front of us instead of to every button. `tap()`
+existed, and Send was not using it. It is now.
+
+Do not call this solved until it has survived a few days of real use.
+
+### Still open if it recurs
+
+The 20-second `AbortSignal.timeout` in `web/terminal.ts`, and the `sending` guard.
+The distinguishing observation is whether a failed send later shows up in the
+session **twice** (client lied about a success) or **not at all** (the request
+never arrived).
+
+---
+
+## Starting a session from the browser
+
+**Status: built, but the last link is missing.** The spawn works; the new session
+cannot be typed into from the phone, which was the point.
+
+### Tried and did not work
+
+| # | Approach | Why it seemed right | What actually happened |
+|---|---|---|---|
+| 1 | Offer only directories with `hasTrustDialogAccepted` in `~/.claude.json` | Claude Code records its trust decisions there, so the flag should say which directories skip the modal | The flag disagrees with reality **in both directions**: `tidepool` says `false` and runs fine, `guildhall` is absent from the file entirely and runs fine, `kestrelbay` says `false` and does prompt. The list it produced excluded every project actually in use |
+| 2 | Detect the trust modal 3.5s after spawning and report it | Better to detect than predict | `claude` takes **25-30 seconds** to draw its first screen. A probe at 3.5s reads a blank terminal and reports success — measured, it passed a session that was sitting on the trust prompt |
+| 3 | `cmux workspace create --command claude` | One call makes the tab and starts the agent, and it does | cmux records **no agent information** for a workspace made this way. `terminal.agent` is null, `terminal.resumeBinding` is null, the `terminal` object is empty — checked at 30s, 60s and 90s. Creating it with no `--command` does not auto-start an agent either |
+| 4 | Match the orphan session to a tab by their shared DIRECTORY | cmux records `currentDirectory` per workspace, so both sides know it | Ambiguous, and dangerously so. Seven sessions here have `~/projects` as their cwd. The browser picked the lowest `stale` — the most recently active — and opened **an unrelated session's terminal, mid-conversation**, one keystroke from receiving a message meant for a new session |
+| 5 | Remember the workspace UUID at spawn time and claim it when the row appears | Exact — no inference at all | Correct but in-memory, and the dev watcher restarts the server on every source edit, so the claim was usually gone before the session registered 25-30s later. Bookkeeping that outlives nothing |
+
+**What actually worked: `ttyName`.** Every cmux panel records it, every Claude
+process has a tty, and a tty belongs to exactly one terminal. Nothing to infer,
+nothing to remember, and it fixes sessions cmux never tagged as agents — including
+ones already running. Measured: **13 of 13** live processes matched to a tab.
+
+It should have been the first thing tried. Three attempts were spent on keys that
+were *nearly* unique — a directory, a name, a remembered id — when an exactly
+unique one was sitting in the same file.
+
+### Why #3 is the blocker
+
+`cmuxMap()` matches a Claude session to a cmux tab through `terminal.agent.sessionId`
+or `terminal.resumeBinding.checkpointId`. Neither is ever written for a
+CLI-created workspace, so the row arrives with no `tab` and no `workspace` — and
+without a workspace there is no terminal panel and nothing to type into.
+
+Confirmed end to end: spawning into `~/projects` produced a real session that
+registered with Claude Code (`state=done`, idle at its prompt) and stayed
+`tab=undefined ws=none` across three minutes of polling.
+
+### The remaining option, not yet taken
+
+guildhall created the workspace, so it knows the UUID and the directory. It could
+remember that pairing and attach it to the first new session appearing in that
+directory. That works, but it is a departure worth deciding deliberately: every
+other mapping here is read from something Claude Code or cmux already wrote, and
+this one would be guildhall's own bookkeeping. Contained to sessions guildhall
+started, and it should degrade to "no tab" rather than guess wrong.
 
 ---
 
@@ -70,10 +135,43 @@ different question than the one being asked. The number was real every time.
 | "the running server has stale code" | The build ARTIFACT's mtime, not the source's — a rebuild of unchanged source makes it look newer | Reading what the running bundle contained |
 | "the GIF is fixed" | The GIF file, not the GIF as the browser scales it — an 800px image displayed at 620 CSS px on a 2× screen | Being told three times it looked identical |
 | "the nameplates are blurry because of the encoder" | Dithering and scaling, when the plate was being drawn with a 4×6 font in a 16px-wide box | Reading `pick()` in nameplate.ts, which had the answer all along |
+| "the terminal is not smaller, the type is smaller because the grid is wide" | The FONT SIZE, twice, while the report was about the PANEL being narrow — two different numbers, and only one of them was the complaint | Being told a third time, then measuring panel width: 659px beside a neighbor at 1400px |
 
-**The rule that would have caught all four:** measure the thing the person is
+**The rule that would have caught all five:** measure the thing the person is
 looking at, at the last step of the chain, not the artifact one layer upstream of
-it.
+it. When a report is repeated after an explanation, the explanation is answering a
+different question than the one being asked — measure before explaining again.
+
+---
+
+## One terminal looking narrower than the others
+
+**Status: fixed on the fourth try.** Three of those tries shipped.
+
+The panes really are different sizes — read from the ptys, most are 193 columns,
+one is 79, and the one being reported is **70**. But the report was never about the
+column count; it was that the pane did not reach the edge of its window.
+
+| # | Change | What was reported back |
+|---|---|---|
+| 1 | Type cap 15 → 32, so a narrow grid magnifies | "now zoomed in but still not full width" — the panel was STILL being shrink-wrapped to the text, so bigger type only moved the edge |
+| 2 | Removed the shrink-wrap, cap back to 16 | "the right width but all the text is on the far left" — the box filled, the text did not |
+| 3 | (the two above, in either order) | Each fixed one of the two things that had to change together |
+
+**What it was:** two independent limits, and fixing either alone leaves the symptom
+looking identical. `panel.style.maxWidth` shrank the box to the text, and
+`COMFORTABLE` capped how wide the text could grow. Both had to go.
+
+**The rule the cap encoded was wrong, not just mistuned.** "Shrink to fit, never
+magnify to fill" — argued in a comment on the grounds that stretching 70 columns is
+"not full width so much as zoomed in — the columns to fill it do not exist". True,
+and beside the point: a terminal that stops halfway across its own window reads as
+a fault in the window. No value of the cap fixes that, which is why three were
+tried. Type size now has no ceiling at all.
+
+**Do not re-measure the panes.** `stty -f /dev/ttysNNN size` reads the real
+dimensions; `cmux`'s state file does not record them, and cols/rows are absent from
+every panel object in it.
 
 ---
 
