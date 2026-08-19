@@ -45,7 +45,7 @@ test('several links on one line all come back', () => {
 test('the surrounding prose survives intact', () => {
 	// The parts must reassemble into the original line, or the terminal would be
 	// drawing something different from what the session printed.
-	const line = 'Reload at http://100.100.100.100:5190/?v=3. Then tell me.' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const line = 'Reload at http://100.100.100.100:5190/?v=3. Then tell me.' // allow-personal: a synthetic address, replacing a real one
 	assert.equal(
 		linkParts(line)
 			.map((p) => p.text)

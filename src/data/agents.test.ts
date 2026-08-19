@@ -6,7 +6,7 @@ import { liveSessions } from './registry.ts'
 
 /** A real payload from `claude agents --json`, trimmed to two records. */
 const REAL = JSON.stringify([
-	{ id: '3f239506', cwd: '/x/quillfeather', kind: 'background', startedAt: 1785814301517, sessionId: '11111111-2222-3333-4444-555555555555', name: 'Build a dashboard', state: 'blocked' },
+	{ id: '3f239506', cwd: '/x/quillfeather', kind: 'background', startedAt: 1785814301517, sessionId: '11111111-2222-3333-4444-555555555555', name: 'Build a widget', state: 'blocked' },
 	{ id: '86031b90', cwd: '/x/projects', kind: 'interactive', startedAt: 1786033920777, sessionId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'projects-a2', pid: 5100, status: 'busy' },
 ])
 

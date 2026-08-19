@@ -223,22 +223,48 @@ const key = (k: string, meaning: string) => `${fg(C.gold)}${k.padEnd(5)}${R}${fg
  * showing through the gaps. The caller suppresses the image layer entirely while
  * this is open, since kitty images always draw above text.
  */
-export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo): string[] {
+/**
+ * How many lines of the help are off the bottom at this size.
+ *
+ * The panel used to build every line, centre the block, and then `slice(0, rows)`
+ * — which silently threw away everything past the last row. It needs 41 rows to
+ * fit, so on any shorter terminal the address and passcode section simply did not
+ * exist, with nothing on screen to say so. Reported from a second machine as not
+ * being able to reach the port section.
+ */
+export function overflow(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo): number {
+	return Math.max(0, lines(cols, share, control).length - rows)
+}
+
+/** The panel's lines before centring or scrolling, which is what decides both. */
+function lines(cols: number, share?: ShareInfo, control?: ControlInfo): string[] {
 	const items = body(share, control)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
 	const boxW = Math.min(cols - 2, Math.max(46, inner))
 	const left = Math.max(0, Math.floor((cols - boxW) / 2))
 	const pad = ' '.repeat(left)
-
-	const out: string[] = []
 	const edge = `${fg(C.rule)}${'─'.repeat(boxW)}${R}`
+	const out: string[] = [pad + edge]
+	for (const item of items) out.push(pad + ' '.repeat(PAD) + (typeof item === 'string' ? item : format(item)))
 	out.push(pad + edge)
-	for (const item of items) {
-		const line = typeof item === 'string' ? item : format(item)
-		out.push(pad + ' '.repeat(PAD) + line)
+	return out
+}
+
+export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): string[] {
+	const out = lines(cols, share, control)
+
+	// Taller than the window: scroll it instead of throwing the bottom away, and
+	// say so on the last row — a panel that silently ends is indistinguishable from
+	// a panel that has nothing more to show.
+	if (out.length > rows) {
+		const max = out.length - rows + 1 // +1 for the row the hint occupies
+		const at = Math.max(0, Math.min(scroll, max))
+		const view = out.slice(at, at + rows - 1)
+		const more = at < max ? `${at > 0 ? '↑' : ' '} ${max - at} more line${max - at === 1 ? '' : 's'} — ↑↓ or space to scroll` : '↑ top with ↑'
+		view.push(`${fg(C.faint)}  ${more}${R}`)
+		return view.map((l) => clip(l, cols))
 	}
-	out.push(pad + edge)
 
 	// centre vertically, so it reads as a panel rather than a wall of text
 	const top = Math.max(0, Math.floor((rows - out.length) / 2))

@@ -287,6 +287,27 @@ let faultsOnly = false
 let labels = true
 /** the help panel, which suppresses the image layer while it is up */
 let showHelp = false
+/**
+ * First line of the help shown, when it is taller than the window.
+ *
+ * Reset every time the panel opens: reopening it and finding yourself halfway
+ * down somebody else's scroll position is worse than starting at the top.
+ */
+let helpScroll = 0
+
+/**
+ * What the help panel is told about sharing and control.
+ *
+ * Built here rather than inline at the draw call because the key handler needs
+ * the same values to work out how far the panel can scroll. Two copies of this
+ * would drift, and the symptom would be a scroll limit that does not match the
+ * panel it is limiting.
+ */
+const shareInfo = () => {
+	const net = addresses()
+	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }
+}
+const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
 /** digits typed so far while changing the passcode, or null when not changing it */
 let pin: string | null = null
 /**
@@ -376,14 +397,14 @@ function draw() {
 		// No image layer at all while this is up. Kitty images always draw above
 		// text, so a panel with sprites still placed would have characters walking
 		// across the sentence explaining them.
-		const net = addresses()
 		// While something is being typed, the bottom row carries the prompt instead
-		// of the footer. The panel is taller than a real terminal, so anything that
-		// lives inside it can be scrolled off — and a field you cannot see is a
-		// field you cannot use.
-		// The panel does not fit a real terminal, so anything it needs you to DO has
-		// to be on the bottom row as well — a key you cannot see is a key you will
-		// never press. Control being armed with no password is exactly that case.
+		// of the footer.
+		//
+		// The panel is taller than a short terminal, so anything inside it can be
+		// scrolled off — which is why ↑↓ now scroll it rather than dismiss it. Even
+		// so, anything it needs you to DO stays on the bottom row: a key you cannot
+		// see is a key you will never press, and control armed with no password is
+		// exactly that case.
 		const needsPass = cfg.control && !hasControlPass()
 		const entry =
 			ctlPass !== null
@@ -395,7 +416,7 @@ function draw() {
 						: null
 		paint(
 			[
-				...H.panel(cols, rows + 1, { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote }, { on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote }),
+				...H.panel(cols, rows + 1, shareInfo(), controlInfo(), helpScroll),
 				entry ?? T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() }),
 			],
 			'',
@@ -677,6 +698,18 @@ function onKey(b: Buffer) {
 
 	if (k === 'q' || k === '\x03') return cleanup()
 	if (showHelp) {
+		// Scroll, when there is more than the window can hold. This has to come
+		// before the catch-all below, which dismisses on any key: an arrow pressed at
+		// a help panel that ran off the bottom used to CLOSE it, so the sections past
+		// the fold — the address and the passcode — could not be reached at all on a
+		// terminal shorter than 41 rows.
+		const hidden = H.overflow(geom.cols, geom.rows + 1, shareInfo(), controlInfo())
+		if (hidden > 0 && (k === '\x1b[A' || k === '\x1b[B' || k === 'k' || k === 'j' || k === ' ')) {
+			const by = k === '\x1b[A' || k === 'k' ? -1 : k === ' ' ? Math.max(1, geom.rows - 3) : 1
+			helpScroll = Math.max(0, Math.min(helpScroll + by, hidden + 1))
+			draw()
+			return
+		}
 		// `p` starts a passcode change; anything else dismisses the panel, because
 		// hunting for the right key to close a help panel is its own small indignity
 		if (k === 'p') {
@@ -701,6 +734,7 @@ function onKey(b: Buffer) {
 	}
 	if (k === '?') {
 		showHelp = true
+		helpScroll = 0
 		prev = []
 		eraseDisplay()
 		OUT.write(clearAll())

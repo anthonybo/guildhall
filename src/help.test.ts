@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import * as H from './help.ts'
 import { panel } from './help.ts'
 import { footer } from './table.ts'
 import { LOOK } from './theme.ts'
@@ -51,4 +52,23 @@ test('the help hint is the last thing a narrow terminal loses', () => {
 	for (const w of [130, 100, 80, 60, 46, 30]) {
 		assert.match(strip(footer(w, 0, false, 'split')), /\? help/, `lost the help hint at ${w} columns`)
 	}
+})
+
+test('a help panel taller than the window scrolls instead of losing its bottom', () => {
+	// It needs about 90 rows and a real terminal has far fewer, so everything past
+	// the fold — the address to open, the passcode keys — used to be silently cut
+	// off. Reported from a second machine as not being able to reach the port.
+	const share = { on: true, port: 4318, token: 'x', lan: ['192.168.1.24'], vpn: [], pin: null, pinNote: '' }
+	const rows = 30
+	const hidden = H.overflow(120, rows, share)
+	assert.ok(hidden > 0, 'this size was expected to overflow, so the rest of the test proves nothing')
+	// the port is NOT on the first screen, and IS reachable by scrolling
+	assert.ok(!H.panel(120, rows, share, undefined, 0).join('\n').includes('4318'), 'nothing to scroll to')
+	const reached = Array.from({ length: hidden + 2 }, (_, s) => H.panel(120, rows, share, undefined, s).join('\n')).some((t) => t.includes('4318'))
+	assert.ok(reached, 'the port section cannot be reached by scrolling')
+	// every screen says there is more, and scrolling past the end still renders
+	assert.match(H.panel(120, rows, share, undefined, 0).join('\n'), /more line/)
+	assert.ok(H.panel(120, rows, share, undefined, 9999).filter((l) => l.trim()).length > 5, 'over-scrolling blanks the panel')
+	// and a window tall enough is left exactly as it was, with no hint
+	assert.doesNotMatch(H.panel(120, 200, share).join('\n'), /more line/)
 })
