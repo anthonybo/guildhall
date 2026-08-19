@@ -10,6 +10,10 @@ import { execFileSync, spawn } from 'node:child_process'
 import {
 	clearAll,
 	WATCH_OFF,
+	MOUSE_ON,
+	MOUSE_OFF,
+	MOUSE_PRESS,
+	clipboard,
 	WATCH_ON,
 	clearPlacements,
 	demux,
@@ -61,7 +65,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
   guildhall --serve      share read-only over the network (off by default)
   guildhall --no-serve   force sharing off for this run
 
-keys   ? help · s share · o port (in help) · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+keys   ? help (click to edit · y copies the address) · s share · ↑↓ move · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
 env    GUILDHALL_CMUX    path to the cmux binary
        GUILDHALL_NO_IMAGES  force half-block rendering`)
 	process.exit(0)
@@ -338,6 +342,19 @@ let portNote = ''
  * The old listener is closed first because binding the new port while the old one
  * is held is not what "change the port" means — one process, one address.
  */
+/**
+ * Put an address on the clipboard, and say so on the port line.
+ *
+ * OSC 52 has no reply, so there is nothing to check: some terminals refuse it
+ * outright and none of them answer. The note therefore says what was sent rather
+ * than that it arrived — claiming a copy that silently failed is worse than
+ * saying nothing, because the address is then pasted from memory.
+ */
+function copyAddress(url: string) {
+	OUT.write(clipboard(url))
+	portNote = `sent ${url} to the clipboard`
+}
+
 function movePort(next: number) {
 	const was = cfg.port
 	server?.close()
@@ -637,7 +654,11 @@ function drawMonitors() {
 
 function cleanup() {
 	server?.close()
-	if (alt) OUT.write(clearAll() + WATCH_OFF + '\x1b[?25h\x1b[?1049l')
+	// MOUSE_OFF unconditionally, even though it is only turned on for the help
+	// panel: quitting with the panel open would otherwise hand the shell back a
+	// terminal that still reports clicks, and the person would find selection
+	// broken in a program that is no longer running.
+	if (alt) OUT.write(clearAll() + WATCH_OFF + MOUSE_OFF + '\x1b[?25h\x1b[?1049l')
 	process.exit(0)
 }
 
@@ -772,6 +793,33 @@ function onKey(b: Buffer) {
 			draw()
 			return
 		}
+		// A click on a line that does something. Both the picture and the map come
+		// from H.view, so a row can never carry a different line's action.
+		//
+		// Release events (`m`) are swallowed rather than acted on, or every click
+		// would fire twice — and the second one would land on whatever the first
+		// just drew.
+		const press = MOUSE_PRESS.exec(k)
+		if (press || /\x1b\[<\d+;\d+;\d+m/.test(k)) {
+			if (press) {
+				const v = H.view(geom.cols, geom.rows + 1, shareInfo(), controlInfo(), helpScroll)
+				// paint() puts line i on screen row i+1, so a 1-based click row maps back
+				// by subtracting one
+				const hit = v.hits.find((h) => h.row === Number(press[3]) - 1)
+				if (hit?.act.kind === 'port' && cfg.serve) ((portEntry = ''), (portNote = ''))
+				else if (hit?.act.kind === 'passcode') ((pin = ''), (pinNote = ''))
+				else if (hit?.act.kind === 'control') ((ctlPass = ''), (ctlNote = ''))
+				else if (hit?.act.kind === 'copy') copyAddress(hit.act.text)
+				draw()
+			}
+			return
+		}
+		if (k === 'y') {
+			const first = [...shareInfo().vpn, ...shareInfo().lan][0]
+			if (first) copyAddress(`http://${first}:${cfg.port}`)
+			draw()
+			return
+		}
 		// `p` starts a passcode change; anything else dismisses the panel, because
 		// hunting for the right key to close a help panel is its own small indignity
 		if (k === 'p') {
@@ -797,6 +845,8 @@ function onKey(b: Buffer) {
 		}
 		showHelp = false
 		pinNote = ''
+		// Selection belongs to the terminal again the moment the panel closes.
+		OUT.write(MOUSE_OFF)
 		prev = []
 		eraseDisplay()
 		layout()
@@ -806,6 +856,8 @@ function onKey(b: Buffer) {
 	if (k === '?') {
 		showHelp = true
 		helpScroll = 0
+		// Mouse on only while the panel is up; see MOUSE_ON for why not app-wide.
+		OUT.write(MOUSE_ON)
 		prev = []
 		eraseDisplay()
 		OUT.write(clearAll())

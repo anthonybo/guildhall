@@ -14,7 +14,18 @@ import { available } from './update.ts'
 
 const PAD = 2
 
-type Line = { text: string; kind?: 'title' | 'head' | 'dim' }
+/**
+ * What clicking a line does.
+ *
+ * `copy` carries its own payload rather than a row number, because the thing
+ * being copied is an address that only exists in the line that renders it.
+ */
+export type Act = { kind: 'port' } | { kind: 'passcode' } | { kind: 'control' } | { kind: 'copy'; text: string }
+
+/** A clickable line, as a screen row index into what `panel()` returned. */
+export type Hit = { row: number; act: Act }
+
+type Line = { text: string; kind?: 'title' | 'head' | 'dim'; act?: Act }
 
 /** Colour a leading glyph, so the legend shows the mark you actually see. */
 function stateLine(state: State, meaning: string) {
@@ -39,7 +50,7 @@ export type ShareInfo = {
 }
 
 /** The passcode line: what it is now, or what is being typed instead. */
-function passcodeLines(share: ShareInfo): string[] {
+function passcodeLines(share: ShareInfo): (string | Line)[] {
 	if (share.pin !== null && share.pin !== undefined) {
 		const typed = '●'.repeat(share.pin.length) + '○'.repeat(4 - share.pin.length)
 		return [
@@ -48,8 +59,8 @@ function passcodeLines(share: ShareInfo): string[] {
 		]
 	}
 	return [
-		`${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`,
-		`${fg(C.faint)}p to change it${R}${share.pinNote ? `${fg(C.muted)} · ${share.pinNote}${R}` : ''}`,
+		{ text: `${fg(C.muted)}and enter the passcode  ${bold}${fg(C.gold)}${share.token}${R}`, act: { kind: 'passcode' } },
+		{ text: `${fg(C.faint)}p to change it, or click it${R}${share.pinNote ? `${fg(C.muted)} · ${share.pinNote}${R}` : ''}`, act: { kind: 'passcode' } },
 	]
 }
 
@@ -93,9 +104,12 @@ function controlLines(control?: ControlInfo): (string | Line)[] {
 		return [`${fg(C.fillWarn)}○ control off${R}${fg(C.muted)} — no browser can type into any session.${R}`]
 	}
 	return [
-		control.isSet
-			? `${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — password set. ${bold}c${R}${fg(C.muted)} to change it.${R}`
-			: `${fg(C.fillWarn)}◉ control on, but no password set${R}${fg(C.muted)} — press ${bold}c${R}${fg(C.muted)} to set one.${R}`,
+		{
+			text: control.isSet
+				? `${fg(C.screenAgent)}◉ control on${R}${fg(C.muted)} — password set. ${bold}c${R}${fg(C.muted)} or click to change it.${R}`
+				: `${fg(C.fillWarn)}◉ control on, but no password set${R}${fg(C.muted)} — press ${bold}c${R}${fg(C.muted)} or click to set one.${R}`,
+			act: { kind: 'control' } as Act,
+		},
 		...(control.note ? [`${fg(C.faint)}${control.note}${R}`] : []),
 	]
 }
@@ -124,12 +138,16 @@ function shareLines(share?: ShareInfo): (string | Line)[] {
 		]
 	}
 	return [
-		`${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`,
+		{ text: `${fg(C.screenAgent)}◉ sharing on port ${share.port}${R}${fg(C.muted)} — open this on the other machine:${R}`, act: { kind: 'port' } as Act },
 		...(urls.length
-			? urls.slice(0, 3).map((u) => `${fg(C.gold)}${u}${R}`)
+			? // Clicking an address copies it. Enabling the mouse costs drag-to-select
+				// in this panel, and the address is the one thing here anybody needs to
+				// get onto another machine — so it has to be copyable by the mechanism
+				// that replaced selection, not in spite of it.
+				urls.slice(0, 3).map((u) => ({ text: `${fg(C.gold)}${u}${R}`, act: { kind: 'copy', text: u } as Act }))
 			: [`${fg(C.fillWarn)}no network address found — is wifi off?${R}`]),
 		...passcodeLines(share),
-		`${fg(C.faint)}o to change the port${R}${share.portNote ? `${fg(C.muted)} · ${share.portNote}${R}` : ''}`,
+		{ text: `${fg(C.faint)}o to change the port, or click it · y copies the address${R}${share.portNote ? `${fg(C.muted)} · ${share.portNote}${R}` : ''}`, act: { kind: 'port' } as Act },
 		`${fg(C.muted)}Asked once per device, then remembered. Five wrong tries and${R}`,
 		`${fg(C.muted)}that device waits, doubling each time — which is what makes${R}`,
 		`${fg(C.muted)}four digits safe. Changing it signs every device out.${R}`,
@@ -254,7 +272,7 @@ export function overflow(cols: number, rows: number, share?: ShareInfo, control?
 }
 
 /** The panel's lines before centring or scrolling, which is what decides both. */
-function lines(cols: number, share?: ShareInfo, control?: ControlInfo): string[] {
+function lines(cols: number, share?: ShareInfo, control?: ControlInfo): { text: string; act?: Act }[] {
 	const items = body(share, control)
 	const plain = (l: string | Line) => (typeof l === 'string' ? l : l.text)
 	const inner = Math.max(...items.map((l) => width(stripLine(plain(l))))) + PAD * 2
@@ -262,14 +280,30 @@ function lines(cols: number, share?: ShareInfo, control?: ControlInfo): string[]
 	const left = Math.max(0, Math.floor((cols - boxW) / 2))
 	const pad = ' '.repeat(left)
 	const edge = `${fg(C.rule)}${'─'.repeat(boxW)}${R}`
-	const out: string[] = [pad + edge]
-	for (const item of items) out.push(pad + ' '.repeat(PAD) + (typeof item === 'string' ? item : format(item)))
-	out.push(pad + edge)
+	const out: { text: string; act?: Act }[] = [{ text: pad + edge }]
+	for (const item of items) {
+		const text = pad + ' '.repeat(PAD) + (typeof item === 'string' ? item : format(item))
+		out.push(typeof item === 'string' ? { text } : { text, act: item.act })
+	}
+	out.push({ text: pad + edge })
 	return out
 }
 
-export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): string[] {
+/**
+ * The panel and its clickable rows, from one layout pass.
+ *
+ * Both come from here rather than from two functions that each work out where a
+ * line ended up. Scrolling and vertical centring both move every row, so a hit map
+ * computed separately would agree with the picture only until somebody changed one
+ * of them — and the failure would be clicking a line and getting the action of a
+ * different one, which is worse than no clicking at all.
+ */
+export function view(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): { rows: string[]; hits: Hit[] } {
 	const out = lines(cols, share, control)
+	const done = (list: { text: string; act?: Act }[], offset: number) => ({
+		rows: list.map((l) => clip(l.text, cols)),
+		hits: list.flatMap((l, i) => (l.act ? [{ row: i + offset, act: l.act }] : [])),
+	})
 
 	// Taller than the window: scroll it instead of throwing the bottom away, and
 	// say so on the last row — a panel that silently ends is indistinguishable from
@@ -277,17 +311,23 @@ export function panel(cols: number, rows: number, share?: ShareInfo, control?: C
 	if (out.length > rows) {
 		const max = out.length - rows + 1 // +1 for the row the hint occupies
 		const at = Math.max(0, Math.min(scroll, max))
-		const view = out.slice(at, at + rows - 1)
+		const slice = out.slice(at, at + rows - 1)
 		const more = at < max ? `${at > 0 ? '↑' : ' '} ${max - at} more line${max - at === 1 ? '' : 's'} — ↑↓ or space to scroll` : '↑ top with ↑'
-		view.push(`${fg(C.faint)}  ${more}${R}`)
-		return view.map((l) => clip(l, cols))
+		const shown = done(slice, 0)
+		shown.rows.push(clip(`${fg(C.faint)}  ${more}${R}`, cols))
+		return shown
 	}
 
 	// centre vertically, so it reads as a panel rather than a wall of text
 	const top = Math.max(0, Math.floor((rows - out.length) / 2))
-	const filled = [...Array.from({ length: top }, () => ''), ...out]
+	const shown = done(out, top)
+	const filled = [...Array.from({ length: top }, () => ''), ...shown.rows]
 	while (filled.length < rows) filled.push('')
-	return filled.slice(0, rows).map((l) => clip(l, cols))
+	return { rows: filled.slice(0, rows).map((l) => clip(l, cols)), hits: shown.hits.filter((h) => h.row < rows) }
+}
+
+export function panel(cols: number, rows: number, share?: ShareInfo, control?: ControlInfo, scroll = 0): string[] {
+	return view(cols, rows, share, control, scroll).rows
 }
 
 function format(l: Line) {

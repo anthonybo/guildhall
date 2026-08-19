@@ -87,3 +87,33 @@ test('the port can be changed from the panel, not just read off it', () => {
 	// and a rejected change explains itself rather than silently reverting
 	assert.match(strip(panel(100, 200, { ...share, portNote: '4472 is in use — kept 4318' }).join(' ')), /in use/)
 })
+
+test('the clickable rows line up with the picture, at any scroll', () => {
+	// The picture and the hit map come from one pass on purpose. If they were
+	// computed separately, scrolling or vertical centring would shift one and not
+	// the other, and the failure is a click doing a DIFFERENT line's action — worse
+	// than not being clickable at all. So the test is that the row a hit names
+	// really does contain the thing it claims.
+	const share = { on: true, port: 4318, token: 'x', lan: ['192.168.1.24'], vpn: [], pin: null, pinNote: '' }
+	const control = { on: true, isSet: true, typing: null, note: '' }
+	const check = (rows: number, scroll: number) => {
+		const v = H.view(120, rows, share, control, scroll)
+		for (const h of v.hits) {
+			const line = strip(v.rows[h.row] ?? '')
+			if (h.act.kind === 'copy') assert.ok(line.includes(h.act.text), `copy hit on row ${h.row} is not the address line: ${line}`)
+			if (h.act.kind === 'port') assert.match(line, /port/, `port hit on row ${h.row} is not a port line: ${line}`)
+			if (h.act.kind === 'passcode') assert.match(line, /passcode|change it/, `passcode hit on row ${h.row} is wrong: ${line}`)
+			if (h.act.kind === 'control') assert.match(line, /control/, `control hit on row ${h.row} is wrong: ${line}`)
+		}
+		return v.hits.length
+	}
+	// tall enough to centre, short enough to scroll, and part-way down
+	assert.ok(check(200, 0) > 0, 'a centred panel offered nothing to click')
+	assert.ok(check(30, 0) >= 0)
+	for (const s of [1, 5, 12, 20, 40]) check(30, s)
+	// the address is copyable, which is what pays for losing drag-select
+	assert.ok(
+		H.view(120, 200, share, control).hits.some((h) => h.act.kind === 'copy'),
+		'no way to copy the address',
+	)
+})

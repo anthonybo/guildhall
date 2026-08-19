@@ -108,6 +108,38 @@ export const WATCH_ON = '\x1b[?2033h\x1b[?2048h\x1b[?1004h\x1b[16t'
 export const WATCH_OFF = '\x1b[?2033l\x1b[?2048l\x1b[?1004l'
 
 /**
+ * Click reporting, in SGR coordinates — on only while the help panel is up.
+ *
+ * 1000 is press/release and nothing else. 1002 and 1003 add motion, which this
+ * has no use for and which would put a report on stdin for every mouse move
+ * across the window.
+ *
+ * SGR (1006) rather than the original encoding, which packs a coordinate into one
+ * byte and so cannot address a column past 223 — ordinary on a wide terminal.
+ *
+ * **Not on for the whole app, deliberately.** An application that grabs the mouse
+ * takes drag-to-select with it, and this panel exists to show an address you copy
+ * onto another machine. It is on for the panel because the panel is where the
+ * clickable settings are, and the address is copyable there by other means (`y`,
+ * or clicking it) precisely because selection is what this costs.
+ */
+export const MOUSE_ON = '\x1b[?1000h\x1b[?1006h'
+export const MOUSE_OFF = '\x1b[?1000l\x1b[?1006l'
+
+/** A press, as `CSI < button ; col ; row M`. Release is the same with `m`. */
+export const MOUSE_PRESS = /\x1b\[<(\d+);(\d+);(\d+)M/
+
+/**
+ * Hand `text` to the system clipboard through the terminal (OSC 52).
+ *
+ * The terminal does the copying, so this works over ssh and inside a multiplexer
+ * without a helper binary — which `pbcopy` would not. Terminals cap what they will
+ * accept and some refuse it entirely; there is no reply to wait for either way, so
+ * the caller says what it tried to do rather than claiming it succeeded.
+ */
+export const clipboard = (text: string) => `\x1b]52;c;${Buffer.from(text, 'utf8').toString('base64')}\x07`
+
+/**
  * Replies these modes produce.
  *
  * 2033 is the correct signal but cmux's libghostty fork does not implement it —
