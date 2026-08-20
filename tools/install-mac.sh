@@ -108,8 +108,27 @@ install_agent() {
 	# bootout first: launchd caches the job definition, so a plist edit alone
 	# changes nothing about a job it is already holding.
 	launchctl bootout "gui/$UID_NUM/$label" 2>/dev/null || true
-	launchctl bootstrap "gui/$UID_NUM" "$dest"
-	ok "$label loaded"
+	# And WAIT for it, because bootout is asynchronous. It returns as soon as the
+	# request is accepted, not when the job is gone — a GUI app still has to finish
+	# quitting. Bootstrapping into that window fails with
+	# `Bootstrap failed: 5: Input/output error`, which is launchd's way of saying the
+	# label is already loaded, and it failed only for whoever's app was slower to exit.
+	n=0
+	while launchctl print "gui/$UID_NUM/$label" >/dev/null 2>&1 && [ "$n" -lt 40 ]; do
+		sleep 0.25
+		n=$((n + 1))
+	done
+	if launchctl bootstrap "gui/$UID_NUM" "$dest" 2>/dev/null; then
+		ok "$label loaded"
+	elif launchctl print "gui/$UID_NUM/$label" >/dev/null 2>&1; then
+		# Bootstrap refused but the job IS loaded. Saying "failed" here would send
+		# somebody debugging a working service.
+		ok "$label already loaded (launchd kept the running one)"
+	else
+		warn "$label could not be loaded — launchctl said:"
+		launchctl bootstrap "gui/$UID_NUM" "$dest" 2>&1 | sed 's/^/    /' >&2 || true
+		exit 1
+	fi
 }
 
 NODE=$(command -v node || true)
@@ -131,7 +150,7 @@ fi
 # stdout is noise (compile progress); stderr is not — it carries "could not build
 # the app icon" and any real build error. Swallowing both meant a bundle could land
 # in /Applications with no icon and nothing said so.
-if command -v swift >/dev/null 2>&1 && sh swift/build.sh --install >/dev/null; then
+if command -v swift >/dev/null 2>&1 && sh swift/build.sh --install --no-reload >/dev/null; then
 	say "The menu bar app"
 	ok "/Applications/GuildhallBar.app"
 	install_agent dev.guildhall.bar

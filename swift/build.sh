@@ -146,7 +146,17 @@ if [ "${1:-}" = "--install" ]; then
 	LSREG=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
 	[ -x "$LSREG" ] && "$LSREG" -f /Applications/GuildhallBar.app >/dev/null 2>&1 || true
 
-	if [ "$RELOAD" = yes ] && [ -f "$AGENT" ]; then
+	# Bring it back, UNLESS the caller said it will.
+	#
+	# The bootout above always happens — it is what makes the window safe, since a
+	# bundle replaced under a running app gets the process SIGKILLed. Only the
+	# re-bootstrap is conditional: install-mac.sh installs the plist and loads the job
+	# right after calling this, and with both of us bootstrapping, the job was
+	# bootstrapped twice. launchd answers a bootstrap for an already-loaded label with
+	# `Bootstrap failed: 5: Input/output error`. It was intermittent because `bootout`
+	# returns before the job is really gone — a GUI app still has to finish quitting —
+	# so it failed only for whoever's app was slower to exit.
+	if [ "$RELOAD" = yes ] && [ "${2:-}" != "--no-reload" ] && [ -f "$AGENT" ]; then
 		launchctl bootstrap "gui/$(id -u)" "$AGENT" 2>/dev/null || true
 	fi
 	echo "installed /Applications/GuildhallBar.app"
