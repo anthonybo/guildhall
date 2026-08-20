@@ -170,7 +170,7 @@ struct Panel: View {
 		case .stopped:
 			return "The service is installed but not running. Start it below."
 		default:
-			return "The service is loaded but nothing is answering — usually something else is holding the port. Check /tmp/guildhall-headless.log."
+			return "The service is loaded but nothing is answering — usually something else is holding the port. Check ~/Library/Logs/guildhall-headless.log."
 		}
 	}
 

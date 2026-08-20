@@ -151,7 +151,7 @@ final class Model: ObservableObject {
 	private func set(daemon next: Daemon.State) { if daemon != next { daemon = next } }
 
 	/// One line per change, to stderr — which the LaunchAgent sends to
-	/// /tmp/guildhall-bar.log.
+	/// ~/Library/Logs/guildhall-bar.log.
 	///
 	/// A menu bar app has one glyph to say everything with, so when it says the
 	/// wrong thing there is nowhere to look. Repeats are collapsed so an idle machine

@@ -46,12 +46,26 @@ enum Cmux {
 		{
 			return set
 		}
+		// `Resources/bin/cmux`, which is what `cmux` on PATH resolves to. This list
+		// disagreed with src/data/cmux-bin.ts and every entry was wrong in a way that
+		// failed silently:
+		//
+		//   - `Resources/cmux` (first choice) does not exist
+		//   - `MacOS/cmux` DOES exist and is the app bundle's GUI executable, confirmed
+		//     with `plutil -extract CFBundleExecutable`. So focus() ran the GUI binary
+		//     with `select-workspace --workspace <uuid>`, which does not bring a tab to
+		//     the front and may launch a second copy of the app
+		//   - both streams go to /dev/null, so none of it was reported
+		//
+		// That is why clicking a session row did nothing. The node side has had the
+		// right path all along; the two are kept in the same order now.
+		let home = FileManager.default.homeDirectoryForCurrentUser
 		let candidates = [
-			"/Applications/cmux.app/Contents/Resources/cmux",
-			"/Applications/cmux.app/Contents/MacOS/cmux",
+			"/Applications/cmux.app/Contents/Resources/bin/cmux",
+			home.appendingPathComponent("Applications/cmux.app/Contents/Resources/bin/cmux").path,
 			"/usr/local/bin/cmux",
 			"/opt/homebrew/bin/cmux",
-			FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".local/bin/cmux").path,
+			home.appendingPathComponent(".local/bin/cmux").path,
 		]
 		return candidates.first { FileManager.default.isExecutableFile(atPath: $0) }
 	}
