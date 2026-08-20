@@ -138,7 +138,43 @@ export function controlAllowed(offered: string | undefined): boolean {
  * wait that doubles, capped at half an hour. */
 
 type Attempts = { fails: number; until: number; last: number }
-const byAddress = new Map<string, Attempts>()
+
+/**
+ * On disk, for the same reason the passcode's is: a restart must not forgive an
+ * attacker.
+ *
+ * This one matters more, not less. The passcode guards reading session summaries;
+ * this guards typing into every session on the machine. And the process it lives
+ * in exits deliberately when it cannot bind — 1,366 restarts in four hours on this
+ * machine — so an in-memory count was cleared roughly every ten seconds.
+ */
+const throttleFile = () => path.join(dir(), 'control-throttle.json')
+
+function loadThrottle(): Map<string, Attempts> {
+	try {
+		const raw = JSON.parse(fs.readFileSync(throttleFile(), 'utf8')) as Record<string, Attempts>
+		const now = Date.now()
+		// Forgiveness is applied on read too, so the file does not accumulate every
+		// address that ever mistyped.
+		return new Map(Object.entries(raw).filter(([, a]) => a.until > now || now - a.last < FORGIVE_MS))
+	} catch {
+		return new Map()
+	}
+}
+
+let loaded: Map<string, Attempts> | null = null
+/** Lazily loaded, because FORGIVE_MS below is not initialised yet at module top. */
+function attempts(): Map<string, Attempts> {
+	if (!loaded) loaded = loadThrottle()
+	return loaded
+}
+
+function saveThrottle() {
+	try {
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(throttleFile(), JSON.stringify(Object.fromEntries(attempts())), { mode: 0o600 })
+	} catch {}
+}
 const FREE_TRIES = 5
 const BASE_LOCK = 15_000
 const MAX_LOCK = 30 * 60_000
@@ -156,17 +192,18 @@ const FORGIVE_MS = 15 * 60_000
 
 /** Milliseconds this address must wait, or 0. */
 export function controlLockedFor(addr: string, now = Date.now()) {
-	return Math.max(0, (byAddress.get(addr)?.until ?? 0) - now)
+	return Math.max(0, (attempts().get(addr)?.until ?? 0) - now)
 }
 
 /** Record an attempt and say whether it was right. */
 export function controlAttempt(addr: string, offered: string | undefined, now = Date.now()): boolean {
 	if (controlLockedFor(addr, now) > 0) return false
 	if (controlAllowed(offered)) {
-		byAddress.delete(addr)
+		attempts().delete(addr)
+		saveThrottle()
 		return true
 	}
-	const prior = byAddress.get(addr)
+	const prior = attempts().get(addr)
 	// a long quiet spell means the last burst is over; do not hold it against them
 	const a = prior && now - prior.last < FORGIVE_MS ? prior : { fails: 0, until: 0, last: now }
 	a.fails++
@@ -175,12 +212,16 @@ export function controlAttempt(addr: string, offered: string | undefined, now = 
 		const over = a.fails - FREE_TRIES
 		a.until = now + Math.min(BASE_LOCK * 2 ** over, MAX_LOCK)
 	}
-	byAddress.set(addr, a)
+	attempts().set(addr, a)
+	saveThrottle()
 	return false
 }
 
 /** Visible for testing. */
-export const resetControlThrottle = () => byAddress.clear()
+export const resetControlThrottle = () => {
+	attempts().clear()
+	saveThrottle()
+}
 
 /**
  * Whether an address may control at all, regardless of the passphrase.

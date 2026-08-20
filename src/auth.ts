@@ -151,7 +151,50 @@ function rotateSessions() {
 /* ── throttle ── */
 
 type Attempts = { fails: number; until: number }
-const byAddress = new Map<string, Attempts>()
+
+/**
+ * Failed attempts, kept on disk rather than in the heap.
+ *
+ * The safety argument for a four-digit code is entirely the throttle: doubling
+ * from 15s gives a patient attacker roughly twenty guesses an hour, so ten
+ * thousand codes take years. That argument silently assumed the process lives a
+ * long time, and nothing enforced it.
+ *
+ * It does not. The headless service exits when it cannot bind and launchd
+ * restarts it, and on this machine that produced **1,366 restarts in four hours**
+ * — one every 10.6 seconds — because a room already held the port. An in-memory
+ * Map cleared on every one of them: five free tries per restart is about 1,700
+ * guesses an hour, and the whole code space in six hours, reachable from anywhere
+ * on the LAN.
+ *
+ * So it is persisted, and pruned as it is read so the file cannot grow without
+ * bound. Best-effort: a machine where this file cannot be written is no worse off
+ * than it was before, because before there was no file at all.
+ */
+const throttleFile = () => path.join(dir(), 'throttle.json')
+
+function loadThrottle(): Map<string, Attempts> {
+	try {
+		const raw = JSON.parse(fs.readFileSync(throttleFile(), 'utf8')) as Record<string, Attempts>
+		const now = Date.now()
+		return new Map(
+			// Drop entries that have served their wait AND are stale, so a fat-fingered
+			// attempt last week does not count against you today.
+			Object.entries(raw).filter(([, a]) => a.until > now || (a.fails > 0 && a.until > now - 24 * 60 * 60_000)),
+		)
+	} catch {
+		return new Map()
+	}
+}
+
+const byAddress = loadThrottle()
+
+function saveThrottle() {
+	try {
+		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
+		fs.writeFileSync(throttleFile(), JSON.stringify(Object.fromEntries(byAddress)), { mode: 0o600 })
+	} catch {}
+}
 
 const FREE_TRIES = 5
 const BASE_LOCK = 15_000
@@ -172,6 +215,7 @@ export function attempt(addr: string, code: string, now = Date.now()) {
 	const good = /^\d{4}$/.test(code) && equal(code, passcode())
 	if (good) {
 		byAddress.delete(addr)
+		saveThrottle()
 		return { ok: true, locked: false }
 	}
 	const a = byAddress.get(addr) ?? { fails: 0, until: 0 }
@@ -181,6 +225,7 @@ export function attempt(addr: string, code: string, now = Date.now()) {
 		a.until = now + Math.min(BASE_LOCK * 2 ** over, 30 * 60_000)
 	}
 	byAddress.set(addr, a)
+	saveThrottle()
 	return { ok: false, locked: lockedFor(addr, now) > 0 }
 }
 
@@ -191,4 +236,7 @@ export function triesLeft(addr: string) {
 }
 
 /** Testing only: forget every recorded attempt. */
-export const resetThrottle = () => byAddress.clear()
+export const resetThrottle = () => {
+	byAddress.clear()
+	saveThrottle()
+}

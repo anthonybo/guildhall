@@ -11,6 +11,11 @@
   To stop it, or to stop it starting at login:
     launchctl unload ~/Library/LaunchAgents/dev.guildhall.headless.plist
 
+  The log goes to ~/Library/Logs, not /tmp: /tmp is world-readable, so project
+  and session names would be visible to any local user, and a symlink planted at
+  that path would have launchd — running as you — truncate a file of their
+  choosing.
+
   It is running when this answers:
     curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4318/    # 401 = up
 
@@ -53,10 +58,21 @@
 	<true/>
 	<key>KeepAlive</key>
 	<true/>
+	<!--
+		A floor under the restart rate. launchd's default throttle is 10 seconds, and
+		with KeepAlive plus a deliberate non-zero exit when the port is taken, that
+		produced 1,366 restarts in four hours on this machine — about 2.5% of a core,
+		continuously, for a service that never once managed to serve.
+
+		60 seconds still recovers on its own once the port frees; it just does not
+		spin while it waits.
+	-->
+	<key>ThrottleInterval</key>
+	<integer>60</integer>
 
 	<key>StandardOutPath</key>
-	<string>/tmp/guildhall-headless.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-headless.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/guildhall-headless.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-headless.log</string>
 </dict>
 </plist>
