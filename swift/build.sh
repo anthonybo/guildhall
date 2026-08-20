@@ -59,6 +59,29 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 	<true/>
 PLIST
 
+# The Finder icon, built before the Info.plist is closed so its key can go inside.
+#
+# Allowed to fail without failing the build: the icon is a nicety, and an older
+# macOS without the symbol should still get a working app. But when it works it
+# matters more than it sounds — with no icon the bundle is a blank sheet in
+# /Applications and shows nothing in Spotlight, so when the menu bar item goes away
+# there is no obvious thing to click to get it back.
+ICON_KEY=""
+if command -v iconutil >/dev/null 2>&1; then
+	ICONSET=".build/GuildhallBar.iconset"
+	rm -rf "$ICONSET"
+	if swiftc -O -o .build/make-icon icon.swift >/dev/null 2>&1 &&
+		.build/make-icon "$ICONSET" >/dev/null 2>&1 &&
+		iconutil -c icns "$ICONSET" -o .build/AppIcon.icns >/dev/null 2>&1; then
+		mkdir -p "$APP/Contents/Resources"
+		cp .build/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+		ICON_KEY="	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>"
+	else
+		echo "note: could not build the app icon, continuing without one" >&2
+	fi
+fi
+
 # Where to find guildhall itself, baked in at build time.
 #
 # The app shells out to `guildhall --set-control-password` so the control password
@@ -78,6 +101,7 @@ cat >> "$APP/Contents/Info.plist" <<PATHS
 	<string>$(esc "$NODE")</string>
 	<key>GHEntry</key>
 	<string>$(esc "$ENTRY")</string>
+$ICON_KEY
 </dict>
 PATHS
 echo '</plist>' >> "$APP/Contents/Info.plist"
@@ -90,8 +114,22 @@ echo "built $(cd "$(dirname "$APP")" && pwd)/$(basename "$APP")"
 
 if [ "${1:-}" = "--install" ]; then
 	[ -w /Applications ] || { echo "/Applications is not writable by you" >&2; exit 1; }
-	# Quit it first. `rm -rf` on a running bundle leaves Launch Services holding a
-	# cached copy, so `open -a` can start the old binary or fail outright.
+	# Take the launchd job down for the duration, not just the process.
+	#
+	# `pkill` is an abnormal exit, and the agent now restarts on those — deliberately,
+	# because a bundle replaced under a running app gets the process SIGKILLed for an
+	# invalid code signature and the icon used to just vanish until the next login. The
+	# consequence is that pkill alone would have launchd relaunch the app in the middle
+	# of `rm -rf`/`cp -R` and start a half-copied binary. Booting the job out first
+	# makes the window empty, and it is bootstrapped again at the end.
+	LABEL="gui/$(id -u)/dev.guildhall.bar"
+	AGENT="$HOME/Library/LaunchAgents/dev.guildhall.bar.plist"
+	RELOAD=no
+	if launchctl print "$LABEL" >/dev/null 2>&1; then
+		launchctl bootout "$LABEL" 2>/dev/null || true
+		RELOAD=yes
+	fi
+	# And any copy started by hand, which launchd knows nothing about.
 	pkill -x GuildhallBar 2>/dev/null || true
 	# Replace rather than merge: a stale executable inside an existing bundle is a
 	# genuinely confusing thing to debug.
@@ -101,6 +139,16 @@ if [ "${1:-}" = "--install" ]; then
 	# distribution — the cdhash changes every build, so any TCC grant is re-prompted
 	# — but an unsigned bundle is a different class of odd behaviour to debug.
 	codesign --force --sign - --identifier dev.guildhall.bar /Applications/GuildhallBar.app >/dev/null 2>&1 || true
+
+	# Tell Launch Services the bundle changed, so Finder picks up the icon and
+	# Spotlight can find it. Without this the old blank icon can persist from cache,
+	# and `open -a` may still resolve the bundle that was just deleted.
+	LSREG=/System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister
+	[ -x "$LSREG" ] && "$LSREG" -f /Applications/GuildhallBar.app >/dev/null 2>&1 || true
+
+	if [ "$RELOAD" = yes ] && [ -f "$AGENT" ]; then
+		launchctl bootstrap "gui/$(id -u)" "$AGENT" 2>/dev/null || true
+	fi
 	echo "installed /Applications/GuildhallBar.app"
-	echo "open it with: open -a GuildhallBar"
+	echo "open it with: open -a GuildhallBar, or double-click it in /Applications"
 fi
