@@ -87,15 +87,32 @@ const PATTERNS = [
 	{
 		what: 'this account name',
 		re: new RegExp(`\\b${os.userInfo().username}\\b`, 'i'),
-		unless: /copyright|github\.com\/|githubusercontent|Co-Authored-By/i,
+		// Anchored to THIS repository's own URLs, not to the words "github.com" or
+		// "copyright" anywhere on the line. As written, `git clone
+		// https://github.com/<user>/<private-repo>` was exempt — a leak of both the
+		// handle and a private repo name — and so was any line containing "copyright".
+		unless: /github\.com\/[A-Za-z0-9-]+\/(guildhall|pressroom)\b|githubusercontent\.com\/[A-Za-z0-9-]+\/(guildhall|pressroom)\b|(^|\s)Copyright \(c\)|Co-Authored-By/,
 	},
 	// Cents were required, so a per-day figure with no cents — one of which was
 	// sitting in a doc — sailed through. Three digits or more is a bill, not a
 	// price in prose.
-	{ what: 'a dollar amount that looks like a bill', re: /\$\s?\d{3,}(\.\d{2})?\b|\$\s?\d[\d,]*\.\d{2}\b/ },
+	// A figure does not stop being spend because it is comma-grouped or because the
+	// symbol comes after it: `$N,NNN`, `NNNN.NN USD` and `usdNNN.NN` all passed.
+	//
+	// But it must still take THREE digits, a comma group, or cents. Dropping that
+	// requirement to catch the above immediately flagged `"$1"` in four shell scripts
+	// and `$0` in a fifth — shell positional parameters. A check that cries wolf gets
+	// turned off, so the shape of a real figure is what is matched, not a `$`.
+	{
+		what: 'a dollar amount that looks like a bill',
+		re: /\$\s?(\d{3,}(\.\d{2})?|\d{1,3}(,\d{3})+(\.\d{2})?|\d+\.\d{2})\b|\b(\d{3,}(\.\d{2})?|\d{1,3}(,\d{3})+(\.\d{2})?|\d+\.\d{2})\s?(USD|usd)\b|\b(USD|usd)\s?(\d{3,}(\.\d{2})?|\d{1,3}(,\d{3})+(\.\d{2})?|\d+\.\d{2})\b/,
+	},
 	// The old version demanded the literal word "used", which one phrasing happens
 	// to use and a bare percentage next to "context" does not.
-	{ what: 'a usage figure tied to an account', re: /\d{1,3}\s*%\s*(used|context|of (the )?(quota|plan|window))|\b(quota|weekly|session)\b[^.\n]{0,20}\d{1,3}\s*%/i },
+	// `We are at NN% of the weekly limit` and `Sitting at NN percent of the plan` both
+	// passed: the first wanted the literal words used/context/quota/plan/window right
+	// after the %, the second wanted a literal `%`.
+	{ what: 'a usage figure tied to an account', re: /\d{1,3}\s*(%|percent)\s*(used|context|of (the )?(quota|plan|window|limit))|\b(quota|weekly|session|plan|limit)\b[^.\n]{0,24}\d{1,3}\s*(%|percent)|\d{1,3}\s*(%|percent)[^.\n]{0,24}\b(quota|weekly|plan|limit)\b/i },
 	// A tailnet address identifies a machine on the owner's network. 100.64/10 is
 	// CGNAT, which on a laptop means Tailscale.
 	{
@@ -108,15 +125,27 @@ const PATTERNS = [
 		// line mentioning a range of anything — including a range of costs. The
 		// notation itself (`/10`) and the words that only appear when describing the
 		// block rather than using an address are enough.
-		unless: /\/10\b|CGNAT|boundar|fixture|synthetic|address (block|range)/i,
+		// `fixture` and `synthetic` have to name the ADDRESS, not merely appear on the
+		// line: `a fixture for the office at 100.<CGNAT>.x.y` was exempt, and that is a
+		// real address in a sentence about something else.
+		unless: /\/10\b|CGNAT|boundar|address (block|range)|(synthetic|invented|made-up|placeholder|example)[^.\n]{0,24}(address|literal|host|fixture)|(address|literal|host|fixture)[^.\n]{0,24}(synthetic|invented|made-up|placeholder|example)/i,
 	},
 	{ what: 'an email address', re: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/ },
 	// The hostname check is appended below, once the machine's own names are known.
 	// A pid is only interesting when it was copied off a real machine; an obvious
 	// placeholder is the fix, not the leak.
-	{ what: 'a pid from a real run', re: /\bpid (?!1234\b)\d{3,}\b/i, replaces: 'pid' },
+	// `pid=NNNNN`, `pid:NNNNN` and `PID  NNNNN` all passed — the pattern demanded the
+	// word, then exactly one space. `replaces: 'pid'` was dead; nothing read it.
+	//
+	// Round values are treated as placeholders. Widening the separator immediately
+	// flagged eleven struct fields and loop counters — `pid: 4242`, `pid: 1000 +
+	// c.tab`, `let pid = 200` — which is the cry-wolf failure that gets a check turned
+	// off. A real pid ending in `00` is a 1-in-100 coincidence; a fixture ending in
+	// `00` is somebody typing a round number, which is what all of these were.
+	{ what: 'a pid from a real run', re: /\bpid\s*[=:]?\s*(?!1234\b|4242\b|\d{1,3}00\b)\d{3,}\b/i },
 	// A tty and a pid are both copied off a real machine when they appear in prose.
-	{ what: 'a tty from a real machine', re: /\bttys\d{3}\b/ },
+	// `/dev/pts/N` is the same disclosure on Linux, and was not matched at all.
+	{ what: 'a tty from a real machine', re: /\bttys\d{3}\b|\bpts\/\d+\b/ },
 ]
 
 /**
@@ -163,9 +192,19 @@ const staged = () => {
 // release staging a regenerated bundle would have done that thousands of times.
 const NAMES = privateNames().map((n) => ({
 	name: n,
-	// Leading boundary only for longer names, so `nameApp` and `name_v2` are caught
-	// too. A trailing boundary let a glued form through.
-	re: new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}${n.length >= 6 ? '' : '\\b'}`, 'i'),
+	// NO boundary at either end for a name long enough to be unambiguous.
+	//
+	// The comment here used to claim the leading boundary was dropped for longer
+	// names. It was not — only the trailing one was — and `\b` can never match
+	// between two word characters, so every glued-on-the-left form passed:
+	// `getNimbusledgerBoard()`, `class MyNimbusledgerClient`, `theNimbusledgerRoot`
+	// were all missed while the bare word was caught. 2 of 5 forms detected.
+	// Glued-on-the-left is exactly how a project name appears in source, which is
+	// where "eight private project names across sixty places in the source" came
+	// from. Short names keep both boundaries, or `awake` matches `awakened`.
+	re: n.length >= 6
+		? new RegExp(n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
+		: new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'),
 }))
 
 /**
@@ -208,6 +247,50 @@ function hostCheck() {
 const HOST = hostCheck()
 if (HOST) PATTERNS.push(HOST)
 
+/**
+ * Scan one line, and decide whether an exemption on it is honest.
+ *
+ * `allow-personal: <why>` exempts a LINE, and a line can be a whole file. One
+ * minified bundle, one-line JSON blob or CSV row carrying a single comment was
+ * exempt wholesale — measured: a 300-character line holding a private name, a home
+ * path, a spend figure and a tailnet address, plus one exemption, gave "nothing of
+ * yours". `web/app.js` is 3847 lines today, but adding `--minify` to the build
+ * would make it one.
+ *
+ * The first attempt capped the line LENGTH, which was the wrong measure: it refused
+ * the exemption on an ordinary 300-character line of real code in
+ * readme-preview.mjs, i.e. it cried wolf at the honest case while still permitting
+ * a compact dishonest one. What actually distinguishes abuse is how much a single
+ * comment is being asked to cover, so that is what is counted. Three findings is a
+ * line with a genuine cluster — an address and its port and a hostname; ten is
+ * somebody hiding a file.
+ *
+ * The reason must also be words. `\s*\S` accepted `allow-personal: x`, which made
+ * "the reason is required" nominal.
+ */
+const MAX_EXEMPT_HITS = 3
+function scanLine(text, label) {
+	const hits = []
+	for (const p of PATTERNS) {
+		if (p.unless?.test(text)) continue
+		const m = p.re.exec(text)
+		if (m) hits.push({ file: label, what: p.what, hit: m[0], text })
+	}
+	for (const n of NAMES) {
+		if (n.re.test(text)) hits.push({ file: label, what: 'the name of a project beside this one', hit: n.name, text })
+	}
+	if (!hits.length) return hits
+	const m = /allow-personal:\s*(.*)$/.exec(text)
+	const why = m ? m[1].trim() : ''
+	const honest = why.length >= 8 && /[A-Za-z]{3}/.test(why)
+	if (honest && hits.length <= MAX_EXEMPT_HITS) return []
+	if (honest) {
+		return hits.map((h) => ({ ...h, what: `${h.what} — the exemption on this line covers ${hits.length} findings, which is too many to vouch for` }))
+	}
+	if (m) return hits.map((h) => ({ ...h, what: `${h.what} — allow-personal needs a real reason, not "${why}"` }))
+	return hits
+}
+
 const found = []
 let file = ''
 const args = process.argv.slice(2)
@@ -246,20 +329,7 @@ for (const line of (msgFile ? '' : staged()).split('\n')) {
 	}
 	if (!line.startsWith('+') || line.startsWith('+++ ')) continue
 	const text = line.slice(1)
-	if (/allow-personal:\s*\S/.test(text)) continue
-	for (const p of PATTERNS) {
-		// `unless` applies HERE too. It was honored only in --all mode, so a pattern
-		// that had already reasoned about its own false positive still blocked the
-		// commit that introduced the line — this file's own comment naming the
-		// `100.64.0.0/10` range was refused by the check it documents. An escape
-		// valve the common path ignores is not an escape valve.
-		if (p.unless?.test(text)) continue
-		const m = p.re.exec(text)
-		if (m) found.push({ file, what: p.what, hit: m[0], text })
-	}
-	for (const n of NAMES) {
-		if (n.re.test(text)) found.push({ file, what: 'the name of a project beside this one', hit: n.name, text })
-	}
+	found.push(...scanLine(text, file))
 }
 
 // The commit message, which is where the spend actually leaked.
@@ -268,17 +338,25 @@ for (const line of (msgFile ? '' : staged()).split('\n')) {
 // message may legitimately discuss a sibling project — and the very next commit
 // after this gate landed put a private project name in its message. The exemption
 // is what the legitimate case is for.
-if (msgFile && fs.existsSync(msgFile)) {
+if (msgFile && !fs.existsSync(msgFile)) {
+	// It printed "nothing of yours in the diff" and exited 0 for a message file that
+	// did not exist, having read nothing at all.
+	console.error(`check-personal was given a message file that does not exist: ${msgFile}`)
+	console.error('Refusing to pass. A check that cannot look must not report clean.')
+	process.exit(1)
+}
+if (msgFile) {
 	for (const line of fs.readFileSync(msgFile, 'utf8').split('\n')) {
-		if (line.startsWith('#') || /allow-personal:\s*\S/.test(line)) continue
-		for (const p of PATTERNS) {
-			if (p.unless?.test(line)) continue
-			const m = p.re.exec(line)
-			if (m) found.push({ file: 'the commit message', what: p.what, hit: m[0], text: line })
-		}
-		for (const n of NAMES) {
-			if (n.re.test(line)) found.push({ file: 'the commit message', what: 'the name of a project beside this one', hit: n.name, text: line })
-		}
+		// `#` lines are NOT skipped any more.
+		//
+		// Only the EDITOR path strips them (cleanup mode `strip`); `git commit -m` uses
+		// cleanup `whitespace`, which keeps them. So
+		//   git commit -m 'Real subject' -m '# <project> cost $NNN.NN today'
+		// committed both of the leak classes this gate exists for, in the exact place
+		// they actually leaked, and the commit-time gate waved it through. The only
+		// thing skipping them protected was git's own template, whose comment lines
+		// list repo paths that are already checked.
+		found.push(...scanLine(line, 'the commit message'))
 	}
 }
 
@@ -297,27 +375,52 @@ if (ALL) {
 	// Binary files are not text, and reading one as UTF-8 produces byte noise that
 	// matches almost anything — three "home directory paths" came out of a sprite
 	// sheet. The PATH is still checked below.
-	const BINARY = /\.(png|jpg|jpeg|gif|svg|ico|woff2?|ttf|otf|zip|gz|mov|mp4|pdf|icns)$/i
-	for (const name of out('git', ['ls-files']).split('\n').filter(Boolean)) {
+	//
+	// `svg` is NOT on this list, though it was. An SVG is text: `docs/room.svg` here
+	// carries a whole text layer of session names. With it skipped, a file containing
+	// a private name, a home path and a spend figure scored five findings in the diff
+	// scan and ZERO in the tree and history scans — so anything committed before this
+	// gate existed, or by merge, or with --no-verify, was invisible to the only pass
+	// that reads history.
+	const BINARY = /\.(png|jpg|jpeg|gif|ico|woff2?|ttf|otf|zip|gz|mov|mp4|pdf|icns)$/i
+	// `-z`, and read the blob from git rather than from disk.
+	//
+	// This was `git ls-files` (newline-separated, so a non-ASCII name came back
+	// C-quoted as "caf\303\251-notes.md") plus `fs.readFileSync` of the WORKING
+	// DIRECTORY, with every miss swallowed by `catch { continue }`. So the "tree"
+	// scan was a worktree scan that failed open four ways, all measured:
+	//   - sparse checkout: 144 tracked files, 13 on disk -> 0 findings (3 when full)
+	//   - tracked file deleted from the worktree without `git rm` -> 3 findings to 0
+	//   - a non-ASCII filename: ENOENT on the quoted name -> 0, while a byte-identical
+	//     plain-named file scored 3
+	//   - a symlink: readFileSync follows it, so it read the TARGET instead of the
+	//     blob, which is neither what is committed nor necessarily present
+	// The stated reason for that catch was wrong too: readFileSync(…, 'utf8') does
+	// not throw on binary content, so the catch only ever fired on the fail-open
+	// cases. Reading `git cat-file` against the index has none of these properties.
+	for (const name of out('git', ['ls-files', '-z']).split('\0').filter(Boolean)) {
+		for (const n of NAMES) {
+			// The filename check the tree scan never had. Diff mode and range mode both
+			// check names against paths; this one only checked PATTERNS, so
+			// `<private-name>-plan.md` with harmless contents gave 2 findings in diff
+			// mode, 3 in range mode and "nothing of yours" here. Once such a path is
+			// pushed it is invisible forever.
+			if (n.re.test(name)) found.push({ file: name, what: 'a project name in the FILENAME', hit: n.name, text: name })
+		}
 		if (BINARY.test(name)) continue
 		let body = ''
 		try {
-			body = fs.readFileSync(path.join(root, name), 'utf8')
-		} catch {
-			continue // binary or unreadable; the path itself is still checked below
+			body = execFileSync('git', ['cat-file', '-p', `:${name}`], { encoding: 'utf8', cwd: root, maxBuffer: 256 << 20 })
+		} catch (e) {
+			// Fail CLOSED. A tracked file this cannot read is the one case that must not
+			// pass silently — that is the whole history of this check.
+			console.error(`check-personal could not read ${name} from the index: ${e.message}`)
+			console.error('Refusing to pass. A check that cannot look must not report clean.')
+			process.exit(1)
 		}
 		const lines = body.split('\n')
 		for (const [i, text] of lines.entries()) {
-			if (/allow-personal:\s*\S/.test(text)) continue
-			for (const p of PATTERNS) {
-				if (p.unless?.test(text)) continue
-				for (const m of text.matchAll(new RegExp(p.re.source, p.re.flags.includes('g') ? p.re.flags : p.re.flags + 'g'))) {
-					found.push({ file: `${name}:${i + 1}`, what: p.what, hit: m[0], text })
-				}
-			}
-			for (const n of NAMES) {
-				if (n.re.test(text)) found.push({ file: `${name}:${i + 1}`, what: 'the name of a project beside this one', hit: n.name, text })
-			}
+			found.push(...scanLine(text, `${name}:${i + 1}`))
 		}
 		for (const p of PATTERNS) {
 			const m = p.re.exec(name)
@@ -333,15 +436,7 @@ if (ALL) {
 	const revs = RANGE.split(/\s+/).filter(Boolean)
 	if (revs.length) {
 		for (const line of out('git', ['log', '--format=%B', ...revs]).split('\n')) {
-			if (/allow-personal:\s*\S/.test(line)) continue
-			for (const p of PATTERNS) {
-				if (p.unless?.test(line)) continue
-				const m = p.re.exec(line)
-				if (m) found.push({ file: `a commit message in ${RANGE}`, what: p.what, hit: m[0], text: line })
-			}
-			for (const n of NAMES) {
-				if (n.re.test(line)) found.push({ file: `a commit message in ${RANGE}`, what: 'a project name', hit: n.name, text: line })
-			}
+			found.push(...scanLine(line, `a commit message in ${RANGE}`))
 		}
 
 		// And the CONTENT of every object in the range, which is the hole this check
@@ -356,6 +451,11 @@ if (ALL) {
 		// material was.
 		//
 		// Deduplicated by blob, so a file unchanged across 20 commits is read once.
+		// Paths are checked for EVERY (sha, path) pair; only the CONTENT read is
+		// deduplicated. Two empty files share one blob, and `rev-list --objects` emits
+		// that blob once with a single path — so skipping repeats by sha meant a
+		// private-named path that happened to share a blob with an innocent one was
+		// never examined.
 		const seen = new Set()
 		const objects = out('git', ['rev-list', '--objects', ...revs]).split('\n')
 		for (const entry of objects) {
@@ -363,8 +463,7 @@ if (ALL) {
 			if (sp < 0) continue // a commit, which has no path
 			const sha = entry.slice(0, sp)
 			const name = entry.slice(sp + 1)
-			if (!name || seen.has(sha)) continue
-			seen.add(sha)
+			if (!name) continue
 			for (const p of PATTERNS) {
 				const m = p.re.exec(name)
 				if (m) found.push({ file: `${name} in ${RANGE}`, what: `${p.what}, in a HISTORICAL filename`, hit: m[0], text: name })
@@ -372,38 +471,85 @@ if (ALL) {
 			for (const n of NAMES) {
 				if (n.re.test(name)) found.push({ file: `${name} in ${RANGE}`, what: 'a project name in a HISTORICAL filename', hit: n.name, text: name })
 			}
-			if (BINARY.test(name)) continue
+			if (BINARY.test(name) || seen.has(sha)) continue
+			seen.add(sha)
+			// Trees and submodule links are not blobs and have nothing to read; anything
+			// else that fails here is the ENOBUFS incident again, at 256MB instead of
+			// 1MiB, and this catch used to swallow it. Measured: a 300MB text blob with
+			// the leak on its last line gave "nothing of yours in the tree or the range"
+			// and exit 0, while the same content at 200MB gave five findings.
+			if (out('git', ['cat-file', '-t', sha]).trim() !== 'blob') continue
 			let body = ''
 			try {
-				body = execFileSync('git', ['cat-file', '-p', sha], { encoding: 'utf8', cwd: root, maxBuffer: 256 << 20 })
-			} catch {
-				continue // a tree, a submodule, or too big to read as text
+				body = execFileSync('git', ['cat-file', '-p', sha], { encoding: 'utf8', cwd: root, maxBuffer: 1024 << 20 })
+			} catch (e) {
+				console.error(`check-personal could not read blob ${sha} (${name}): ${e.message}`)
+				console.error('Refusing to pass. A check that cannot look must not report clean.')
+				process.exit(1)
 			}
 			// One report per blob per pattern. A generated bundle can hold the same
 			// name in 400 places, and 400 identical lines is a wall nobody reads.
 			for (const [i, text] of body.split('\n').entries()) {
-				if (/allow-personal:\s*\S/.test(text)) continue
-				for (const p of PATTERNS) {
-					if (p.unless?.test(text)) continue
-					const m = p.re.exec(text)
-					if (m) found.push({ file: `${name}:${i + 1} in history`, what: p.what, hit: m[0], text })
-				}
-				for (const n of NAMES) {
-					if (n.re.test(text)) found.push({ file: `${name}:${i + 1} in history`, what: 'a project name', hit: n.name, text })
-				}
+				found.push(...scanLine(text, `${name}:${i + 1} in history`))
 			}
 		}
 	}
 }
 
-// Staged paths, checked as paths rather than as content.
-if (!msgFile && !ALL) {
+// Paths, checked as paths rather than as content.
+//
+// This ran only in diff mode, behind `if (!msgFile && !ALL)` — so the two checks
+// aimed squarely at the 222MB incident were performed ONLY by the gate that
+// `git commit --no-verify` skips, and by nothing at push time. Measured: a
+// committed `node_modules/pkg/index.js` and a 2.2MB `dist/main.mjs` gave 2 findings
+// in diff mode and "nothing of yours in the tree or the range" in both --all and
+// --range. They run in every mode now, over whichever set of paths that mode has.
+if (!msgFile) {
 	let names = []
-	try {
-		names = execFileSync('git', ['diff', '--cached', '--name-only', '--diff-filter=ACM'], { encoding: 'utf8', cwd: root })
-			.split('\n').filter(Boolean)
-	} catch {}
-	for (const name of names) {
+	const out2 = (a) => {
+		try {
+			// `-z`, because a non-ASCII name comes back C-quoted otherwise and every
+			// consumer of it then misses. Two identical 2.2MB files: `plain big.bin` was
+			// reported, `café-big.bin` was not, because statSync on the quoted name threw
+			// into an empty catch and the size stayed 0.
+			return execFileSync('git', a, { encoding: 'utf8', cwd: root, maxBuffer: 256 << 20 }).split('\0').filter(Boolean)
+		} catch (e) {
+			console.error(`check-personal could not list paths: ${e.message}`)
+			console.error('Refusing to pass. A check that cannot look must not report clean.')
+			process.exit(1)
+		}
+	}
+	if (ALL) {
+		names = out2(['ls-files', '-z'])
+		// Plus every path the range introduces, which is where a generated artifact
+		// committed earlier and deleted since still ships.
+		if (RANGE.split(/\s+/).filter(Boolean).length) {
+			for (const entry of execFileSync('git', ['rev-list', '--objects', ...RANGE.split(/\s+/).filter(Boolean)], { encoding: 'utf8', cwd: root, maxBuffer: 256 << 20 }).split('\n')) {
+				const sp = entry.indexOf(' ')
+				if (sp > 0) names.push(entry.slice(sp + 1))
+			}
+		}
+	} else {
+		// `R` for renames. A pure `git mv` produces `rename from/to` with no `+++ b/`
+		// header and no `+` lines, and `ACM` excluded it — so `git mv innocent.md
+		// <private-name>-roadmap.md` and `git mv innocent.md dist/innocent.md` both
+		// passed the content scan, the filename scan AND this path check. Same bug as
+		// the already-fixed "the PATH is content too", left open for renames.
+		names = out2(['diff', '--cached', '--name-only', '--diff-filter=ACMR', '-z'])
+	}
+	for (const name of new Set(names)) {
+		// The PATH is content. Adding `R` to the filter above got renamed paths into
+		// this loop, but the loop only tested FORBIDDEN_PATHS and size — so `git mv
+		// innocent.md <private-name>-roadmap.md` still passed everything, because the
+		// name check lived in the `+++ b/` header handler and a pure rename produces no
+		// such header and no `+` lines.
+		for (const p2 of PATTERNS) {
+			const m = p2.re.exec(name)
+			if (m) found.push({ file: name, what: `${p2.what}, in the FILENAME`, hit: m[0], text: name })
+		}
+		for (const n of NAMES) {
+			if (n.re.test(name)) found.push({ file: name, what: 'a project name in the FILENAME', hit: n.name, text: name })
+		}
 		if (FORBIDDEN_PATHS.test(name)) {
 			found.push({ file: name, what: 'a generated path that must not be committed', hit: name, text: '' })
 			continue
@@ -411,25 +557,52 @@ if (!msgFile && !ALL) {
 		let size = 0
 		try {
 			size = fs.statSync(path.join(root, name)).size
-		} catch {}
+		} catch {
+			// not on disk — a range path from a commit that deleted it. FORBIDDEN_PATHS
+			// above is what guards that case; a size we cannot read is not a finding.
+		}
 		if (size > BIG) {
 			found.push({ file: name, what: `a ${Math.round(size / 1024 / 1024)}MB file, which is almost certainly generated`, hit: name, text: '' })
 		}
 	}
-	// A binary diff has no lines to scan, so nothing above can see inside it. The
-	// screenshot that showed which other apps are installed was exactly this case.
-	// Not an error — a prompt to have looked.
-	if (names.length > 400) {
-		found.push({ file: `${names.length} staged files`, what: 'more files than a hand-made change has', hit: `${names.length}`, text: '' })
-	}
-	const binaries = staged().split('\n').filter((l) => l.startsWith('Binary files')).length
-	if (binaries) {
-		console.log(`personal: ${binaries} binary file(s) staged — nothing here can see inside them, so look before you commit`)
+	// The rest is about a single staged change, and says nothing useful about a whole
+	// tree — 141 tracked files is not "more files than a hand-made change has".
+	if (!ALL) {
+		// A binary diff has no lines to scan, so nothing above can see inside it. The
+		// screenshot that showed which other apps are installed was exactly this case.
+		// Not an error — a prompt to have looked.
+		if (names.length > 400) {
+			found.push({ file: `${names.length} staged files`, what: 'more files than a hand-made change has', hit: `${names.length}`, text: '' })
+		}
+		const binaries = staged().split('\n').filter((l) => l.startsWith('Binary files')).length
+		if (binaries) {
+			console.log(`personal: ${binaries} binary file(s) staged — nothing here can see inside them, so look before you commit`)
+		}
 	}
 }
 
 if (!found.length) {
-	console.log(ALL ? 'personal: nothing of yours in the tree or the range' : 'personal: nothing of yours in the diff')
+	// Say WHAT was checked, not just that nothing was found.
+	//
+	// The private-name list is derived from sibling directories, and it goes silently
+	// empty in several ordinary situations: a fresh clone with no siblings, a
+	// CI-shaped checkout (`…/guildhall/guildhall`, whose only sibling is its own name
+	// and is auto-allowlisted), an unreadable HOME, or a `public-words` file that
+	// happens to list the siblings. In every one of those a staged private project
+	// name produced this exact line and exit 0 — byte-identical to a real pass.
+	//
+	// That is the same defect shape as all four prior incidents: no way to tell
+	// "checked and clean" from "did not check". So the counts are printed, and in
+	// --all mode an empty name list is a refusal rather than a pass, because --all is
+	// the mode that stands between the material and a remote.
+	const scope = ALL ? 'the tree or the range' : 'the diff'
+	if (ALL && !NAMES.length) {
+		console.error(`check-personal derived ZERO private project names (looked beside ${root}).`)
+		console.error('So the name check did nothing, and "clean" would mean "did not look".')
+		console.error('If this machine genuinely has no sibling projects, run with --no-names to say so deliberately.')
+		if (!args.includes('--no-names')) process.exit(1)
+	}
+	console.log(`personal: nothing of yours in ${scope} (${NAMES.length} names, ${PATTERNS.length} patterns)`)
 	process.exit(0)
 }
 

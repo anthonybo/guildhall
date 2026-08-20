@@ -3,43 +3,57 @@
 #
 # Every other check reads a diff or a message at the moment it is made, which
 # leaves three ways for something to reach the remote unexamined: it was committed
-# before the check existed, it arrived by cherry-pick or revert (neither runs
-# commit-msg), or a filter-branch rewrote a message without revalidating it.
-#
-# Measured: three real leaks were clean at the tip and present in 15 to 24 commits
-# of unpushed history. Nothing but a push-time scan of the range could have caught
-# them.
+# before the check existed, it arrived by cherry-pick, merge or revert, or a
+# filter-branch rewrote it. Measured: three real leaks were clean at the tip and
+# present in 15 to 24 commits of unpushed history.
 set -e
 
-# The range comes from git on stdin, NOT from a hardcoded origin/main..HEAD.
-#
-# The first version hardcoded it, which is the same class of mistake as reading `$?`
-# after a pipe: a real check over the wrong commits, reporting clean about material
-# it never read. It would have examined nothing on a push of any other branch, and
-# on a first push of a new branch it would have compared against a ref that does
-# not exist.
-#
-# Each line is: <local ref> <local sha> <remote ref> <remote sha>
+# git passes the remote NAME as $1 and its URL as $2. Using it matters: the first
+# version hardcoded `--remotes=origin`, so pushing the same history to a second
+# remote — a fork, a mirror, or the moment a private repo is first published —
+# excluded everything the ORIGIN already had and scanned 0 objects while the push
+# sent 2027. It reported clean and the leak landed in the receiving repo.
+remote="${1:-origin}"
+
 NULL=0000000000000000000000000000000000000000
-ranges=''
+args=''
+new=no
+# Each line is: <local ref> <local sha> <remote ref> <remote sha>
 while read -r _local_ref local_sha _remote_ref remote_sha; do
-	[ "$local_sha" = "$NULL" ] && continue          # a deletion sends no objects
+	[ "$local_sha" = "$NULL" ] && continue # a deletion sends no objects
 	if [ "$remote_sha" = "$NULL" ]; then
-		# A ref the remote does not have yet: everything reachable from it that is
-		# not already on some other remote branch is about to be sent.
-		ranges="$ranges $local_sha --not --remotes=origin"
+		# A ref the remote does not have. Its exclusion is added ONCE, below.
+		args="$args $local_sha"
+		new=yes
 	else
-		ranges="$ranges $remote_sha..$local_sha"
+		# `^X Y` rather than `X..Y`: explicit negation is immune to the toggle below.
+		args="$args ^$remote_sha $local_sha"
 	fi
 done
 
+# ONE trailing `--not`, after every positive tip.
+#
+# `--not` is an XOR toggle over all FOLLOWING revisions, not a prefix on the next
+# one. Emitting it per-ref meant the second occurrence toggled negation back off,
+# the trailing `--remotes=` became a positive tip, and the second branch became
+# negative — marking the very commits being pushed uninteresting. Measured on this
+# repository: the correct form enumerates 290 objects, the accumulated form
+# enumerates 0. That is the whole failure, on `git push --tags`, `--all`,
+# `--mirror`, or any push of two or more new refs.
+if [ "$new" = yes ]; then
+	if git remote get-url "$remote" >/dev/null 2>&1; then
+		args="$args --not --remotes=$remote"
+	else
+		# Pushing to a bare URL: there are no tracking refs to exclude, so scan
+		# everything reachable from the new tips. Slower and noisier, never blind.
+		echo "  ($remote is not a configured remote — scanning all history behind the new refs)"
+	fi
+fi
+
 echo "pre-push: personal details in the tree and everything about to be sent"
-if [ -n "$ranges" ]; then
-	node tools/check-personal.mjs --all --range="$ranges"
+if [ -n "$args" ]; then
+	node tools/check-personal.mjs --all --range="$args"
 else
-	# stdin was empty, which happens when the hook is run by hand. Scanning the tree
-	# alone is better than scanning nothing, and saying so is better than implying
-	# the history was read.
 	echo "  (no refs on stdin — scanning the tree only)"
 	node tools/check-personal.mjs --all
 fi
