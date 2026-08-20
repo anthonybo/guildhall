@@ -48,9 +48,9 @@ actor UsageStore {
 		// cpu-s each, per 15-minute cycle. Only one at a time, and never faster than
 		// the window, whatever the file says.
 		lastTried = Date()
-		guard let node = Bundle.main.object(forInfoDictionaryKey: "GHNode") as? String,
-			let entry = Bundle.main.object(forInfoDictionaryKey: "GHEntry") as? String
-		else { return }
+		// Resolved at run time rather than trusting the baked path: see Config.tools().
+		guard let found = Config.tools() else { return }
+		let (node, entry) = found
 		refreshing = true
 		let task = Process()
 		task.executableURL = URL(fileURLWithPath: node)

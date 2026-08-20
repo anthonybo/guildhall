@@ -128,17 +128,48 @@ struct Config {
 		try await guildhall(["--set-control-password"], stdin: password)
 	}
 
+	/// Where node and guildhall are, resolved at RUN time.
+	///
+	/// The build bakes both paths into Info.plist, and that path is a hint rather
+	/// than an answer. `command -v node` on a machine using nvm gives something like
+	/// `~/.nvm/versions/node/v22.0.0/bin/node`, which stops existing the next time
+	/// anybody runs `nvm install` — on the same machine, never mind a different one.
+	/// And the entry point lives in `dist/`, which is gitignored, so on a fresh
+	/// checkout it does not exist until something builds it.
+	///
+	/// So: an environment override first, then the baked hint, then the same kind of
+	/// candidate search `Cmux.binary()` already does. Nothing here is allowed to
+	/// assume one machine's layout.
+	static func tools() -> (node: String, entry: String)? {
+		let env = ProcessInfo.processInfo.environment
+		let baked = { (key: String) in Bundle.main.object(forInfoDictionaryKey: key) as? String }
+
+		let nodeCandidates = [
+			env["GUILDHALL_NODE"], baked("GHNode"),
+			"/opt/homebrew/bin/node", "/usr/local/bin/node", "/usr/bin/node",
+		].compactMap { $0 }
+		// Any nvm version, newest first, so an upgrade is picked up rather than fatal.
+		let nvm = (try? FileManager.default.contentsOfDirectory(atPath: home + "/.nvm/versions/node"))?
+			.sorted(by: >)
+			.map { home + "/.nvm/versions/node/\($0)/bin/node" } ?? []
+		guard let node = (nodeCandidates + nvm).first(where: { FileManager.default.isExecutableFile(atPath: $0) })
+		else { return nil }
+
+		let entryCandidates = [env["GUILDHALL_ENTRY"], baked("GHEntry")].compactMap { $0 }
+		guard let entry = entryCandidates.first(where: { FileManager.default.fileExists(atPath: $0) })
+		else { return nil }
+		return (node, entry)
+	}
+
+	private static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
+
 	/// Run guildhall with a secret on stdin, and surface its own words on refusal.
 	private static func guildhall(_ args: [String], stdin secret: String) async throws {
-		guard let node = Bundle.main.object(forInfoDictionaryKey: "GHNode") as? String,
-			let entry = Bundle.main.object(forInfoDictionaryKey: "GHEntry") as? String,
-			FileManager.default.isExecutableFile(atPath: node),
-			FileManager.default.fileExists(atPath: entry)
-		else { throw Failure.noCLI }
+		guard let found = tools() else { throw Failure.noCLI }
 
 		let task = Process()
-		task.executableURL = URL(fileURLWithPath: node)
-		task.arguments = [entry] + args
+		task.executableURL = URL(fileURLWithPath: found.node)
+		task.arguments = [found.entry] + args
 		let input = Pipe(), output = Pipe()
 		task.standardInput = input
 		task.standardOutput = output
@@ -180,7 +211,11 @@ struct Config {
 			case .unreadable:
 				return "~/.config/guildhall/config.json could not be read, so saving would overwrite real settings. Fix or delete it first."
 			case .noCLI:
-				return "Can't find guildhall itself. Rebuild the app with swift/build.sh so it records where node and dist/main.mjs are."
+				// Names both halves, because they fail for different reasons: node moves
+				// when nvm upgrades, and dist/ is gitignored so a fresh checkout has none
+				// until something builds it. Telling somebody to rebuild the Swift app
+				// when the real problem is a missing dist/ sends them the wrong way.
+				return "Can't find node or guildhall's dist/main.mjs. Run `guildhall --upgrade`, or set GUILDHALL_NODE and GUILDHALL_ENTRY."
 			case .refused(let why): return why.isEmpty ? "Refused." : why
 			}
 		}
