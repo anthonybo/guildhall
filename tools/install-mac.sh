@@ -130,7 +130,10 @@ fi
 # alone provide the swift binary while `swift build` fails for want of an SDK, and
 # `set -e` then killed the installer here — AFTER the headless agent was loaded, so
 # the summary never printed and the user was told nothing.
-if command -v swift >/dev/null 2>&1 && sh swift/build.sh --install >/dev/null 2>&1; then
+# stdout is noise (compile progress); stderr is not — it carries "could not build
+# the app icon" and any real build error. Swallowing both meant a bundle could land
+# in /Applications with no icon and nothing said so.
+if command -v swift >/dev/null 2>&1 && sh swift/build.sh --install >/dev/null; then
 	say "The menu bar app"
 	ok "/Applications/GuildhallBar.app"
 	install_agent dev.guildhall.bar
