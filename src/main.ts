@@ -338,7 +338,10 @@ function syncServe() {
 			// fault, and the fault it suggested — something is broken, sharing is down —
 			// is the opposite of the truth, since the browser view is being served by
 			// the thing that took the port.
-			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} already served — the daemon has it` : (e.code ?? 'failed')
+			// Do not name a culprit that may not be the culprit. This said "the daemon has
+			// it", and the thing holding the port is just as often an interactive room —
+			// which is what made a real conflict read like a daemon problem.
+			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} is already served by another process` : (e.code ?? 'failed')
 			server = null
 			cfg.serve = false
 		})

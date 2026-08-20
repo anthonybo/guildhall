@@ -408,3 +408,36 @@ only ever sees what is being added, so anything committed before the check exist
 anything arriving by cherry-pick or revert (neither runs `commit-msg`), and
 anything a `filter-branch` rewrote are all invisible to it. The scan of history at
 push time is not redundancy; it is the only pass that reads them.
+
+---
+
+## Reporting that a service started
+
+`--set-serve on` printed **"serving"** over a service that never bound a port, three
+different ways, and the symptom each time was a person turning the switch on and
+finding nothing in their browser.
+
+- **`launchctl bootstrap` succeeding says nothing about whether the program runs.**
+  It means launchd accepted the job. The process then starts, fails to bind, exits
+  1, and launchd retries it forever — measured here as a loop respawning every 60s
+  for hours, with `last exit code = 1` and a log full of `serve failed`.
+- **Probing the port cannot tell your service from something else on it.** An
+  interactive `guildhall` room serves on the same port, so `curl` returning 401
+  proved only that *something* answered. My verification of this feature was
+  contaminated by exactly that: a room was holding 4318 the whole time, and I
+  reported the feature working. Compare the LISTENER'S PID with the pid launchd has
+  for the job; nothing weaker is an answer.
+- **Checking only the exit code fails the other way.** Node takes **over two
+  seconds** from launch to listening, so a two-second check reported failure over a
+  service that was about to work. The fix has to wait for the positive condition,
+  not the absence of a negative one.
+- **A port already in use must be refused BEFORE touching launchd,** and the holder
+  named. Bootstrapping into a conflict leaves a job that respawns forever, and the
+  message people then see blames the wrong thing — this codebase said
+  `port 4318 already served — the daemon has it` when the holder was, more often, a
+  room in a terminal.
+
+**And a control that takes seconds needs to say so.** The honest check waits up to
+ten seconds, which without a spinner and a disabled switch is indistinguishable from
+a dead control. The first version reported instantly and lied; the second was
+truthful and looked broken.

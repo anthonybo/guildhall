@@ -23,6 +23,12 @@ import SwiftUI
 private struct SwitchRow: View {
 	let title: String
 	let caption: String?
+	/// Draw the caption as a problem rather than as an explanation.
+	var captionIsError = false
+	/// Something is happening that takes seconds. Starting the service means waiting
+	/// for node to launch and bind, which is about seven — without a spinner and a
+	/// disabled switch, that reads as a dead control.
+	var busy = false
 	@Binding var isOn: Bool
 
 	var body: some View {
@@ -31,12 +37,16 @@ private struct SwitchRow: View {
 				Text(title).font(.system(size: 13, weight: .medium))
 				if let caption {
 					Text(caption)
-						.font(.caption).foregroundStyle(.secondary)
+						.font(.caption)
+						.foregroundStyle(captionIsError ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
 						.fixedSize(horizontal: false, vertical: true)
 				}
 			}
 			Spacer(minLength: 0)
-			Toggle("", isOn: $isOn).toggleStyle(.switch).labelsHidden()
+			if busy {
+				ProgressView().controlSize(.small)
+			}
+			Toggle("", isOn: $isOn).toggleStyle(.switch).labelsHidden().disabled(busy)
 		}
 	}
 }
@@ -58,6 +68,12 @@ struct SettingsView: View {
 	/// cannot answer this question — the only truthful answer is whether the service
 	/// is loaded.
 	@State private var serving = false
+	/// Reported next to the switch that caused it, not at the far end of the page.
+	/// The shared note lives below the control password, so a failure from the top
+	/// row appeared inches away from the thing that failed.
+	@State private var serveNote = ""
+	@State private var serveFailed = false
+	@State private var serveBusy = false
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
@@ -96,9 +112,15 @@ struct SettingsView: View {
 			// config — so the plist has one definition rather than a second one in Swift.
 			SwitchRow(
 				title: "Serve the browser view",
-				caption: serving
-					? "A browser can reach this machine. The settings below apply to it."
-					: "Off. Nothing is served — the menu bar icon works either way.",
+				caption: serveBusy
+					? (serving ? "Starting it — node has to launch and bind the port." : "Stopping it.")
+					: !serveNote.isEmpty
+						? serveNote
+						: serving
+							? "A browser can reach this machine. The settings below apply to it."
+							: "Off. Nothing is served — the menu bar icon works either way.",
+				captionIsError: serveFailed,
+				busy: serveBusy,
 				isOn: Binding(
 					get: { serving },
 					set: { want in
@@ -136,7 +158,14 @@ struct SettingsView: View {
 
 			Divider()
 
-			SwitchRow(title: "Let the browser type into sessions", caption: nil, isOn: $config.control)
+			// Immediate, like the switch above. These used to need the Apply button while
+			// the top switch did not, which is a panel where identical-looking controls
+			// behave differently — and Apply is easy to miss, so a flipped switch could
+			// look like it had done something when it had not.
+			SwitchRow(title: "Let the browser type into sessions", caption: nil, isOn: Binding(
+				get: { config.control },
+				set: { config.control = $0; saveNow() }
+			))
 			// The risk, next to the switch that takes it. The terminal panel keeps this
 			// visible whether its explanations are open or not, for the same reason.
 			Text(
@@ -169,7 +198,10 @@ struct SettingsView: View {
 
 			Divider()
 
-			SwitchRow(title: "Hold the screen on while sessions work", caption: nil, isOn: $config.awakeDisplay)
+			SwitchRow(title: "Hold the screen on while sessions work", caption: nil, isOn: Binding(
+				get: { config.awakeDisplay },
+				set: { config.awakeDisplay = $0; saveNow() }
+			))
 			Picker("Project labels", selection: $config.labels) {
 				Text("beside the desk").tag("vertical")
 				Text("under it").tag("horizontal")
@@ -181,9 +213,13 @@ struct SettingsView: View {
 					.fixedSize(horizontal: false, vertical: true)
 			}
 
-			HStack {
+			HStack(spacing: 8) {
+				Text("The switches apply as you flip them.")
+					.font(.caption).foregroundStyle(.secondary)
 				Spacer()
-				Button("Apply") { apply() }.keyboardShortcut(.defaultAction)
+				// Named for what it does. "Apply" alone read as "apply the whole page",
+				// which is why flipping a switch and then pressing it felt necessary.
+				Button("Apply port & passcode") { apply() }.keyboardShortcut(.defaultAction)
 			}
 		}
 		.padding(14)
@@ -198,23 +234,47 @@ struct SettingsView: View {
 	/// Flip the service, then report what launchd actually did rather than what was
 	/// asked for.
 	private func setServing(_ want: Bool) async {
+		serveBusy = true
+		serveNote = ""
+		serveFailed = false
+		defer { serveBusy = false }
 		guard let (node, entry) = Config.tools() else {
-			note = "cannot find guildhall itself — set GUILDHALL_ENTRY, or reinstall"
-			failed = true
+			serveNote = "Cannot find guildhall itself — reinstall, or set GUILDHALL_ENTRY."
+			serveFailed = true
 			serving = await Daemon.loaded()
 			return
 		}
+		// This blocks for as long as it takes to know the answer — up to about ten
+		// seconds, because `--set-serve` waits until the service is genuinely the thing
+		// listening rather than merely loaded. Which is the point: it used to return
+		// instantly and say "serving" over a job that was respawning and never bound.
 		let (status, out) = await Daemon.run(node, [entry, "--set-serve", want ? "on" : "off"])
 		let said = out.trimmingCharacters(in: .whitespacesAndNewlines)
 		serving = await Daemon.loaded()
+		config = Config.load()
 		if status == 0 {
-			note = want ? "Serving. Press ? in the room for the address." : "Stopped serving."
-			failed = false
+			serveNote = ""
+			serveFailed = false
 		} else {
-			note = said.isEmpty ? "could not change it (exit \(status))" : said
+			serveNote = said.isEmpty ? "Could not change it (exit \(status))." : said
+			serveFailed = true
+			// Show what is true, not what was asked for.
+			serving = false
+		}
+	}
+
+	/// Write the config for a switch that takes effect immediately, and restart the
+	/// service so it is actually in effect rather than merely saved.
+	private func saveNow() {
+		do {
+			try config.save()
+			note = "Saved."
+			failed = false
+			if serving { model.act { await Daemon.restart() } }
+		} catch {
+			note = error.localizedDescription
 			failed = true
 		}
-		config = Config.load()
 	}
 
 	private func setControl() {

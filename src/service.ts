@@ -24,11 +24,55 @@ const root = () => path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const agentDir = () => path.join(os.homedir(), 'Library', 'LaunchAgents')
 const agentFile = () => path.join(agentDir(), `${LABEL}.plist`)
 const domain = () => `gui/${process.getuid?.() ?? 0}`
+/** The port the service will use, from the one place that owns it. */
+function port(): number {
+	try {
+		const raw = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.config', 'guildhall', 'config.json'), 'utf8'))
+		return Number.isInteger(raw.port) ? raw.port : 4318
+	} catch {
+		return 4318
+	}
+}
 
 /** `&`, `<` and `>` are the three that make a plist unparseable rather than wrong. */
 const xml = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
 export type ServiceResult = { ok: true; note: string } | { ok: false; why: string }
+
+/**
+ * Who is listening on a port, if anyone.
+ *
+ * Because the failure this exists to catch is invisible otherwise: the service
+ * starts, cannot bind, exits 1, and launchd retries it forever — while the thing
+ * that asked for it reported success. That is what "I turned it on and the browser
+ * shows nothing" is, every time.
+ *
+ * A port probe alone cannot tell them apart: an interactive room answering on the
+ * same port looks exactly like a working service. So the holder is identified by
+ * pid, not by whether something replies.
+ */
+export function portHolder(port: number): { pid: string; cmd: string } | null {
+	try {
+		const out = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-F', 'pc'], {
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore'],
+		})
+		// -F pc emits `p<pid>` then `c<command>` on separate lines.
+		const pid = /^p(\d+)/m.exec(out)?.[1]
+		const cmd = /^c(.+)/m.exec(out)?.[1]
+		return pid ? { pid, cmd: cmd ?? 'something' } : null
+	} catch {
+		// lsof missing, or nothing listening — both mean "no known holder".
+		return null
+	}
+}
+
+/** The job's last exit code, or null when launchd has no opinion yet. */
+function lastExit(): number | null {
+	const r = spawnSync('/bin/launchctl', ['print', `${domain()}/${LABEL}`], { encoding: 'utf8' })
+	const m = /last exit code = (\d+)/.exec(r.stdout ?? '')
+	return m ? Number(m[1]) : null
+}
 
 /** Is the job loaded right now? The only honest answer to "is it serving". */
 export function serviceLoaded(): boolean {
@@ -96,6 +140,15 @@ function writeAgent(): ServiceResult {
 /** Turn the browser-view service on: install the agent if needed, then load it. */
 export function serviceOn(): ServiceResult {
 	if (process.platform !== 'darwin') return { ok: false, why: 'launchd is macOS only' }
+	// Refuse before touching launchd if the port is already taken. Bootstrapping into
+	// that situation produces a job that respawns forever and never serves.
+	const before = portHolder(port())
+	if (before && !serviceLoaded()) {
+		return {
+			ok: false,
+			why: `port ${port()} is already served by ${before.cmd} (pid ${before.pid}). If that is a guildhall room in a terminal, quit it with q — it serves on the same port — or choose another port first.`,
+		}
+	}
 	const written = writeAgent()
 	if (!written.ok) return written
 	// Always bootout first: launchd caches the job definition, so writing the plist
@@ -103,14 +156,52 @@ export function serviceOn(): ServiceResult {
 	spawnSync('/bin/launchctl', ['bootout', `${domain()}/${LABEL}`], { stdio: 'ignore' })
 	settle()
 	const r = spawnSync('/bin/launchctl', ['bootstrap', domain(), agentFile()], { encoding: 'utf8' })
-	if (r.status !== 0) {
-		// Refused, but loaded, is success — reporting a failure here sends somebody to
-		// debug a service that is running.
-		if (serviceLoaded()) return { ok: true, note: 'already running' }
+	if (r.status !== 0 && !serviceLoaded()) {
 		const said = `${r.stdout ?? ''}${r.stderr ?? ''}`.trim()
 		return { ok: false, why: said || `launchctl bootstrap exited ${r.status}` }
 	}
-	return { ok: true, note: 'serving' }
+	// Wait until OUR job is the thing listening, and say so only then.
+	//
+	// Three weaker versions of this check were wrong in a way that mattered. Returning
+	// as soon as bootstrap succeeded reported success over a process that had not
+	// started. Checking that something answers the port cannot tell our service from
+	// an interactive room on the same port — which is how a real conflict looked like
+	// a working service. Checking only the exit code misses the case where the job is
+	// alive but has not bound yet: measured, node takes over two seconds from launch
+	// to listening, so a two-second check reported failure over a service that was
+	// about to work perfectly.
+	//
+	// The port holder's pid MATCHING the job's pid is the one unambiguous answer, and
+	// it is the last step of the chain — what a browser would actually reach.
+	for (let i = 0; i < 40; i++) {
+		const code = lastExit()
+		if (code !== null && code !== 0) {
+			const tail = logTail()
+			return { ok: false, why: `it starts and immediately exits (code ${code})${tail ? `: ${tail}` : ''}` }
+		}
+		const holder = portHolder(port())
+		if (holder && holder.pid === servicePid()) return { ok: true, note: 'serving' }
+		spawnSync('/bin/sleep', ['0.25'])
+	}
+	const tail = logTail()
+	return { ok: false, why: `it loaded but is not listening on port ${port()} after ten seconds${tail ? `: ${tail}` : ''}` }
+}
+
+/** The pid launchd currently has for the job, as a string to compare with lsof's. */
+function servicePid(): string | null {
+	const r = spawnSync('/bin/launchctl', ['print', `${domain()}/${LABEL}`], { encoding: 'utf8' })
+	return /pid = (\d+)/.exec(r.stdout ?? '')?.[1] ?? null
+}
+
+/** The last line of the service's own log, which usually says exactly what failed. */
+function logTail(): string {
+	try {
+		const f = path.join(os.homedir(), 'Library', 'Logs', 'guildhall-headless.log')
+		const lines = fs.readFileSync(f, 'utf8').trim().split('\n')
+		return lines[lines.length - 1]?.replace(/^\S+ \S+\s+/, '') ?? ''
+	} catch {
+		return ''
+	}
 }
 
 /**
