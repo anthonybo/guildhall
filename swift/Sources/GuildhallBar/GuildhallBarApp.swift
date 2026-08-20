@@ -51,9 +51,10 @@ final class Model: ObservableObject {
 			// loaded but unable to bind — is exactly the case that used to go unnoticed.
 			if daemon == .loadedNotServing { daemon = .running }
 			log("ok: \(sessions.count) sessions, \(needsYou.count) need you, \(working.count) working")
-			// Its own cache on the server, so asking every poll costs a local request and
-			// no third-party call.
-			usage = try? await client.usage()
+			// Straight off disk, and it refreshes itself when stale. Deliberately not an
+			// HTTP call: that tied these numbers to the age of whatever process held the
+			// port, and a room started before the endpoint existed hid them completely.
+			usage = UsageStore.load()
 		} catch {
 			sessions = []
 			reachable = false

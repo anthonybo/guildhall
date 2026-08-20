@@ -79,6 +79,20 @@ if (process.argv.includes('--set-control-password')) {
 	console.log(r.ok ? 'ok' : r.why)
 	process.exit(r.ok ? 0 : 1)
 }
+/**
+ * Print the plan quota and today's spend, refreshing the cache first.
+ *
+ * So anything on this machine can have these numbers without going through the
+ * server. The menu bar reads the cache file directly and runs this when it is
+ * stale, which means it does not care whether the process holding the port is old
+ * enough to have the endpoint — a dependency that had the quota invisible for
+ * hours purely because a long-running room predated it.
+ */
+if (process.argv.includes('--usage')) {
+	const { fetchNow } = await import('./data/usage.ts')
+	console.log(JSON.stringify((await fetchNow()) ?? { limits: [], at: 0 }))
+	process.exit(0)
+}
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
 	console.log(`guildhall ${BUILD} — every live Claude Code session as a pixel office
 

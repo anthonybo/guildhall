@@ -38,6 +38,8 @@ export type Limit = {
 
 export type Usage = {
 	limits: Limit[]
+	/** when the cost was last fetched; its window is far longer than the quota's */
+	costAt?: number
 	/** today's spend in dollars, when ccusage could be run */
 	cost?: number
 	/** when this was fetched */
@@ -132,7 +134,41 @@ function limitsOf(payload: unknown): Limit[] {
 	})
 }
 
-let inFlight: Promise<void> | null = null
+let inFlight: Promise<unknown> | null = null
+
+/**
+ * The two halves, each behind its own window.
+ *
+ * They were one function, and that coupled them: a rate-limited quota returned
+ * early and the daily cost — which ccusage reads out of local files and could not
+ * care less about Anthropic's rate limiter — went unfetched for the whole fifteen
+ * minute backoff. Separate sources, separate windows, and one failing must not
+ * silence the other.
+ */
+function both(): Promise<unknown> {
+	return Promise.allSettled([maybeQuota(), maybeCost()])
+}
+
+/** Fresh enough to leave alone? Backoff applies when the last try failed. */
+function fresh(u: Usage | null, ttl: number, backoff: number): boolean {
+	if (!u) return false
+	return Date.now() - u.at <= (u.error ? backoff : ttl)
+}
+
+/**
+ * Fetch now and wait for it, for callers that have nothing to render.
+ *
+ * `usage()` deliberately never blocks, which is right for a server answering a
+ * request and useless for a one-shot command whose job is to refresh the file.
+ *
+ * It respects the same windows. It did not, and that is how repeated manual runs
+ * walked into a rate limit that then persisted: a command which refetches on every
+ * invocation has no backoff at all, whatever the cache says.
+ */
+export async function fetchNow(): Promise<Usage | null> {
+	await (inFlight ?? (inFlight = both().finally(() => (inFlight = null))))
+	return read()
+}
 
 /**
  * The cached usage, refreshing in the background when it is old.
@@ -144,20 +180,19 @@ let inFlight: Promise<void> | null = null
  * describes a five-hour window.
  */
 export function usage(): Usage | null {
-	const cached = read()
-	const age = cached ? Date.now() - cached.at : Infinity
-	const stale = age > (cached?.error ? QUOTA_BACKOFF : QUOTA_TTL)
-	if (stale && !inFlight) inFlight = refresh().finally(() => (inFlight = null))
-	return cached
+	if (!inFlight) inFlight = both().finally(() => (inFlight = null))
+	return read()
 }
 
-async function refresh() {
+/** The plan quota, from Anthropic. */
+async function maybeQuota() {
 	const previous = read()
+	if (fresh(previous, QUOTA_TTL, QUOTA_BACKOFF)) return
 	const t = token()
 	if (!t) {
 		// No token is a settled fact, not a transient failure: nothing will change
 		// until Claude Code is signed in, so record it and stop asking.
-		write({ limits: previous?.limits ?? [], cost: previous?.cost, at: Date.now(), error: 'not signed in to Claude' })
+		write({ ...(previous ?? { limits: [] }), limits: previous?.limits ?? [], at: Date.now(), error: 'not signed in to Claude' })
 		return
 	}
 	try {
@@ -166,23 +201,28 @@ async function refresh() {
 			signal: AbortSignal.timeout(8000),
 		})
 		const body = (await res.json()) as Record<string, unknown>
+		const current = read()
 		if (body.error || !res.ok) {
 			// Keep the numbers, note the failure. A rate_limit_error is the one thing
 			// this must not turn into "your plan has nothing left".
-			write({ limits: previous?.limits ?? [], cost: previous?.cost, at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
+			write({ limits: current?.limits ?? [], cost: current?.cost, at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
 			return
 		}
-		write({ limits: limitsOf(body), cost: previous?.cost, at: Date.now() })
+		write({ limits: limitsOf(body), cost: current?.cost, at: Date.now() })
 	} catch (e) {
-		write({ limits: previous?.limits ?? [], cost: previous?.cost, at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
-		return
+		const current = read()
+		write({ limits: current?.limits ?? [], cost: current?.cost, at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
 	}
-	// Spend is fetched only after the quota succeeded, and only when its own, much
-	// longer window has passed. It is the expensive half — about seven seconds of
-	// Node — and it is a running daily total, so it is never the urgent number.
-	const now = read()
-	const costAge = now?.cost === undefined ? Infinity : Date.now() - (now.at ?? 0)
-	if (costAge > (now?.error ? COST_BACKOFF : COST_TTL)) void spend()
+}
+
+/** Today's spend, from ccusage, on its own much longer window. */
+async function maybeCost() {
+	const previous = read()
+	// Its own clock: `costAt`, not the quota's `at`, or a quota refresh every five
+	// minutes would keep declaring the cost fresh and it would never be fetched.
+	const age = previous?.costAt ? Date.now() - previous.costAt : Infinity
+	if (age <= (previous?.cost === undefined ? COST_BACKOFF : COST_TTL)) return
+	await spend()
 }
 
 /**
@@ -194,8 +234,10 @@ async function refresh() {
  * better than a wrong number and better than a dependency this project would
  * then have to carry.
  */
-function spend() {
+function spend(): Promise<void> {
 	const runners = ['bunx', 'npx']
+	let settle: () => void = () => {}
+	const done = new Promise<void>((r) => (settle = r))
 	// The LOCAL date, assembled by hand.
 	//
 	// `toISOString()` is UTC, and this was written with it: after 5pm in a US timezone
@@ -206,17 +248,25 @@ function spend() {
 	const d = new Date()
 	const today = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
 	const tryNext = (i: number) => {
-		if (i >= runners.length) return
+		if (i >= runners.length) return settle()
 		execFile(runners[i]!, ['-y', 'ccusage', 'daily', '--json', '--since', today], { timeout: 60_000, maxBuffer: 8 << 20 }, (err, stdout) => {
 			if (err || !stdout) return tryNext(i + 1)
 			try {
 				const total = JSON.parse(stdout)?.totals?.totalCost
-				if (typeof total === 'number') {
-					const current = read()
-					write({ limits: current?.limits ?? [], cost: total, at: current?.at ?? Date.now(), error: current?.error })
-				}
+				const current = read()
+				// Stamped even when ccusage gave nothing usable, so a machine without a
+				// runner does not retry a slow spawn every five minutes forever.
+				write({
+					limits: current?.limits ?? [],
+					cost: typeof total === 'number' ? total : current?.cost,
+					costAt: Date.now(),
+					at: current?.at ?? Date.now(),
+					error: current?.error,
+				})
 			} catch {}
+			settle()
 		})
 	}
 	tryNext(0)
+	return done
 }
