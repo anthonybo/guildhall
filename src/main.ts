@@ -88,6 +88,41 @@ if (process.argv.includes('--set-control-password')) {
  * enough to have the endpoint — a dependency that had the quota invisible for
  * hours purely because a long-running room predated it.
  */
+/**
+ * Set the view passcode from another program, reading it from STDIN.
+ *
+ * The menu bar was writing the passcode FILE directly, which looked equivalent and
+ * was not: `setPasscode` also refuses the weak list and rotates the session key, so
+ * a code set from the bar was accepted when the terminal would have refused it —
+ * `1234` among them — and every paired device stayed signed in while the panel
+ * said "signs every device out". Cookies survive a restart by design, so restarting
+ * the service did not cover for it either.
+ *
+ * Same rule as the control password: one implementation of storing a credential,
+ * whatever types it in.
+ */
+if (process.argv.includes('--set-passcode')) {
+	const r = setPasscode(fs.readFileSync(0, 'utf8').trim())
+	console.log(r.ok ? 'ok' : r.why)
+	process.exit(r.ok ? 0 : 1)
+}
+/**
+ * Refuse an unknown flag rather than starting the room.
+ *
+ * Anything unrecognised used to fall through to the full interactive app. A caller
+ * that shelled out with a flag this build does not have — a menu bar app against a
+ * stale `dist/` — got a whole guildhall running detached, holding the sleep
+ * assertion, while the caller blocked forever on a child that was never going to
+ * exit.
+ */
+{
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|set-control-password|set-passcode)$|^-[vh]$/
+	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
+	if (stray.length) {
+		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
+		process.exit(2)
+	}
+}
 if (process.argv.includes('--usage')) {
 	const { fetchNow } = await import('./data/usage.ts')
 	console.log(JSON.stringify((await fetchNow()) ?? { limits: [], at: 0 }))

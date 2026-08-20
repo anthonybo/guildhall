@@ -33,11 +33,25 @@ struct Config {
 	/// Only ever read, never written. See `setControlPassword` below.
 	private static var controlFile: String { dir + "/control-pass" }
 
+	/// Whether the file on disk could not be parsed.
+	///
+	/// Carried on the value rather than in a static, both because a mutable global is
+	/// a data race the compiler now rejects, and because it belongs to the snapshot
+	/// that was read — not to the type.
+	///
+	/// Distinguished from absent, because `save()` does a read-modify-write and
+	/// writing over an unparseable file would destroy real settings, including the
+	/// unknown keys the merge exists to preserve. Opening Settings and pressing Apply
+	/// after a corrupt read used to do exactly that.
+	var unreadable = false
+
 	static func load() -> Config {
 		var c = Config()
-		guard let data = FileManager.default.contents(atPath: file),
-			let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-		else { return c }
+		guard let data = FileManager.default.contents(atPath: file) else { return c }
+		guard let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+			c.unreadable = true
+			return c
+		}
 		c.serve = o["serve"] as? Bool ?? c.serve
 		c.port = o["port"] as? Int ?? c.port
 		c.host = o["host"] as? String ?? c.host
@@ -53,6 +67,7 @@ struct Config {
 	/// app does not know about is preserved instead of being dropped — a future
 	/// setting added on the server side must not be erased by an older bar app.
 	func save() throws {
+		if unreadable { throw Failure.unreadable }
 		var o: [String: Any] = [:]
 		if let data = FileManager.default.contents(atPath: Config.file),
 			let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -74,15 +89,17 @@ struct Config {
 			.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 	}
 
-	/// Four digits, and only four digits.
+	/// Set the view passcode, by handing it to guildhall.
 	///
-	/// The same rule the terminal enforces. It is not the security — the throttle
-	/// is — but a code of a different length would simply never match.
-	static func setPasscode(_ code: String) throws {
-		guard code.count == 4, code.allSatisfy(\.isNumber) else {
-			throw Failure.badPasscode
-		}
-		try write(Data(code.utf8), to: passcodeFile)
+	/// It used to write the file directly, which looked equivalent and was not.
+	/// `setPasscode` on the other side also refuses a list of weak codes and rotates
+	/// the session key — so a code set here was accepted when the terminal would have
+	/// refused it (`1234` included, which was this field's own placeholder), and every
+	/// paired device stayed signed in while the panel said "signs every device out".
+	/// Cookies survive a restart by design, so the restart did not cover for it.
+	static func setPasscode(_ code: String) async throws {
+		guard code.count == 4, code.allSatisfy(\.isNumber) else { throw Failure.badPasscode }
+		try await guildhall(["--set-passcode"], stdin: code)
 	}
 
 	/// Whether a control password exists. Its VALUE is never read here.
@@ -108,6 +125,11 @@ struct Config {
 	/// to run — and scrypt is deliberately slow. Called inline from a @MainActor view
 	/// it froze the whole app for something like a second on every "Set".
 	static func setControlPassword(_ password: String) async throws {
+		try await guildhall(["--set-control-password"], stdin: password)
+	}
+
+	/// Run guildhall with a secret on stdin, and surface its own words on refusal.
+	private static func guildhall(_ args: [String], stdin secret: String) async throws {
 		guard let node = Bundle.main.object(forInfoDictionaryKey: "GHNode") as? String,
 			let entry = Bundle.main.object(forInfoDictionaryKey: "GHEntry") as? String,
 			FileManager.default.isExecutableFile(atPath: node),
@@ -116,7 +138,7 @@ struct Config {
 
 		let task = Process()
 		task.executableURL = URL(fileURLWithPath: node)
-		task.arguments = [entry, "--set-control-password"]
+		task.arguments = [entry] + args
 		let input = Pipe(), output = Pipe()
 		task.standardInput = input
 		task.standardOutput = output
@@ -130,7 +152,11 @@ struct Config {
 			}
 			do {
 				try task.run()
-				input.fileHandleForWriting.write(Data(password.utf8))
+					// The throwing overload: the non-throwing one raises an Objective-C
+				// NSFileHandleOperationException on EPIPE, which Swift cannot catch — a
+				// crash, not an error — and EPIPE is reachable whenever the child exits
+				// before reading stdin.
+				try input.fileHandleForWriting.write(contentsOf: Data(secret.utf8))
 				// Closed so the child's read of stdin ends; without this it waits forever.
 				try? input.fileHandleForWriting.close()
 			} catch {
@@ -145,11 +171,14 @@ struct Config {
 
 	enum Failure: Error, LocalizedError {
 		case badPasscode
+		case unreadable
 		case noCLI
 		case refused(String)
 		var errorDescription: String? {
 			switch self {
 			case .badPasscode: return "A passcode is exactly four digits."
+			case .unreadable:
+				return "~/.config/guildhall/config.json could not be read, so saving would overwrite real settings. Fix or delete it first."
 			case .noCLI:
 				return "Can't find guildhall itself. Rebuild the app with swift/build.sh so it records where node and dist/main.mjs are."
 			case .refused(let why): return why.isEmpty ? "Refused." : why
@@ -163,9 +192,25 @@ struct Config {
 	/// it is read at startup — so the failure would be a service that no longer
 	/// starts. 0600 because two of these files are credentials.
 	private static func write(_ data: Data, to path: String) throws {
+		// The directory first. On a machine where guildhall has never run, every save
+		// threw a raw Cocoa error about a missing folder; node's own save does
+		// mkdirSync(recursive, 0o700) and this did not.
+		try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
 		let tmp = path + ".tmp"
-		try data.write(to: URL(fileURLWithPath: tmp), options: .atomic)
-		try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp)
-		_ = try FileManager.default.replaceItemAt(URL(fileURLWithPath: path), withItemAt: URL(fileURLWithPath: tmp))
+		do {
+			try data.write(to: URL(fileURLWithPath: tmp), options: .atomic)
+			try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tmp)
+			// `.usingNewMetadataOnly`, or the replace PRESERVES THE DESTINATION'S mode
+			// and the 0600 above is silently discarded. Measured: replacing a file that
+			// was already 0644 left a credential at 0644. It only looks fine because
+			// node happens to create these at 0600 — it fails in exactly the recovery
+			// cases, a restore or an `echo 1234 >`.
+			_ = try FileManager.default.replaceItemAt(
+				URL(fileURLWithPath: path), withItemAt: URL(fileURLWithPath: tmp), options: .usingNewMetadataOnly)
+		} catch {
+			// Never leave a temp file holding a credential behind.
+			try? FileManager.default.removeItem(atPath: tmp)
+			throw error
+		}
 	}
 }

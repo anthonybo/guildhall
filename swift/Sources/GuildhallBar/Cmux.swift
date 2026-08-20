@@ -13,12 +13,10 @@ import Foundation
 /// interpreted as something else and acts on the wrong tab. A UUID is the only
 /// form this passes.
 enum Cmux {
-	private static let uuid = try! NSRegularExpression(
-		pattern: "^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$")
-
 	static func focus(workspace id: String) {
-		let range = NSRange(id.startIndex..<id.endIndex, in: id)
-		guard uuid.firstMatch(in: id, range: range) != nil else { return }
+		// `UUID(uuidString:)` accepts exactly the 8-4-4-4-12 hex form and nothing else,
+		// which is the whole check — no regex to build and no static to initialise.
+		guard UUID(uuidString: id) != nil else { return }
 		guard let bin = binary() else { return }
 		let task = Process()
 		task.executableURL = URL(fileURLWithPath: bin)
@@ -27,7 +25,13 @@ enum Cmux {
 		// nothing here wants its output or its exit code.
 		task.standardOutput = FileHandle.nullDevice
 		task.standardError = FileHandle.nullDevice
-		task.environment = ["CMUX_QUIET": "1", "HOME": FileManager.default.homeDirectoryForCurrentUser.path]
+		// The inherited environment plus one variable, not a replacement for it.
+		// Replacing it dropped TMPDIR — the per-user Darwin directory macOS CLIs use
+		// for their sockets — so a cmux that reaches its app that way would fail with
+		// both streams pointed at /dev/null and nothing to show for it.
+		var env = ProcessInfo.processInfo.environment
+		env["CMUX_QUIET"] = "1"
+		task.environment = env
 		try? task.run()
 	}
 

@@ -128,7 +128,9 @@ for (const file of walk(ROOT)) {
 	const markdown = file.endsWith('.md')
 	// Tests are excluded: their names are read by whoever runs the suite, not by a
 	// user, and `test('a colour is kept')` is not prose anybody ships.
-	const code = /^(src|web)\//.test(rel) && /\.(ts|tsx|html)$/.test(file) && !/\.test\.ts$/.test(file)
+	// swift/Sources too: the menu bar app puts sentences on screen, and those were
+	// exempt from the gate the rest of the project's user-visible text has to pass.
+	const code = /^(src|web|swift\/Sources)\//.test(rel) && /\.(ts|tsx|html|swift)$/.test(file) && !/\.test\.ts$/.test(file)
 	// app.js and app.css are generated from web/ sources; flagging both would
 	// report every hit twice and the fix only ever belongs upstream.
 	if (/^web\/app\.(js|css)$/.test(rel)) continue

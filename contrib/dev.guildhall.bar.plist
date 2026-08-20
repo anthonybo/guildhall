@@ -19,6 +19,11 @@
   is built locally and not signed, so the agent is the thing that actually works.
   It also matches how the other menu bar apps on this machine are started.
 
+  The log goes to ~/Library/Logs, not /tmp: /tmp is world-writable and
+  world-readable, so session and project names would be visible to any local
+  user, and a symlink pre-planted at that path would have launchd — running as
+  you — truncate a file of their choosing.
+
   This is only the icon. The browser view is dev.guildhall.headless, and it does
   not need this to be running — quitting the icon does not stop the service.
 -->
@@ -38,8 +43,8 @@
 	<false/>
 
 	<key>StandardOutPath</key>
-	<string>/tmp/guildhall-bar.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-bar.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/guildhall-bar.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-bar.log</string>
 </dict>
 </plist>

@@ -1,4 +1,4 @@
-// swift-tools-version: 5.9
+// swift-tools-version: 6.0
 //
 // The menu bar app.
 //
@@ -20,6 +20,12 @@ let package = Package(
 		.macOS(.v13)
 	],
 	targets: [
-		.executableTarget(name: "GuildhallBar", path: "Sources/GuildhallBar")
+		// Swift 6 language mode, so strict concurrency is ENFORCED rather than
+		// mentioned. The package was 5.9, which meant the 6.2 compiler reported data
+		// races as warnings nobody saw — including a genuine one, a mutable global
+		// written from the main thread and from a process termination handler.
+		.executableTarget(
+			name: "GuildhallBar", path: "Sources/GuildhallBar",
+			swiftSettings: [.swiftLanguageMode(.v6)])
 	]
 )

@@ -36,7 +36,7 @@ struct Session: Decodable, Identifiable, Equatable {
 	}
 
 	/// What the room calls this, which is the project rather than the session id.
-	var label: String { proj?.isEmpty == false ? proj! : name }
+	var label: String { proj.flatMap { $0.isEmpty ? nil : $0 } ?? name }
 
 	/// Whether this one is waiting on a person. The room draws a placard for it and
 	/// the menu bar exists mostly to answer this question without opening anything.
@@ -64,18 +64,27 @@ struct Limit: Decodable, Identifiable {
 		}
 	}
 
-	/// Two shared parsers.
+	/// Two shared parsers, built once.
+	///
+	/// `nonisolated(unsafe)` rather than `@MainActor`: they are read from a computed
+	/// property on a value type that view bodies use, so main-actor isolation makes
+	/// the property itself unusable from anywhere else. `ISO8601DateFormatter` is
+	/// documented as thread-safe for parsing, and nothing here mutates it after
+	/// construction — the unsafe marker is the accurate statement of that, rather
+	/// than a claim the compiler can check.
+	///
+	/// The point of hoisting them at all:
 	///
 	/// Built once, at module scope. `ISO8601DateFormatter()` is expensive to create —
 	/// milliseconds, not microseconds — and these were constructed inside a computed
 	/// property read from a SwiftUI view body, so every render of the quota section
 	/// built two of them per limit.
-	private static let fractional: ISO8601DateFormatter = {
+	nonisolated(unsafe) private static let fractional: ISO8601DateFormatter = {
 		let f = ISO8601DateFormatter()
 		f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
 		return f
 	}()
-	private static let plain = ISO8601DateFormatter()
+	nonisolated(unsafe) private static let plain = ISO8601DateFormatter()
 
 	/// How long until this window rolls over, worded the way the room words ages.
 	var resets: String? {
@@ -141,7 +150,12 @@ actor Client {
 	/// Re-read the config, in case the port moved while this was running.
 	func reload() { settings = Settings.load() }
 
-	var baseURL: URL { URL(string: "http://127.0.0.1:\(settings.port)")! }
+	/// Clamped, because the port is read off disk and nothing else validates it. A
+	/// junk value would otherwise force-unwrap a nil URL and crash the app.
+	var baseURL: URL {
+		let port = (1024...65535).contains(settings.port) ? settings.port : 4318
+		return URL(string: "http://127.0.0.1:\(port)")!
+	}
 
 	enum Failure: Error, Equatable {
 		case notRunning
@@ -149,29 +163,16 @@ actor Client {
 		case badResponse
 	}
 
-	/// Plan quota and today's spend, from guildhall's cache.
-	///
-	/// A separate request from the sessions one because the server keeps them apart:
-	/// this is fetched from Anthropic's API on a five-minute cache, and putting it in
-	/// the two-second session poll would have tied a third-party call to guildhall's
-	/// own tick.
-	func usage() async throws -> Usage {
-		if cookie == nil { try await authenticate() }
-		var req = URLRequest(url: baseURL.appendingPathComponent("api/usage"))
-		req.timeoutInterval = 5
-		if let cookie { req.setValue("gh_sid=\(cookie)", forHTTPHeaderField: "Cookie") }
-		let (data, response) = try await send(req)
-		guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw Failure.badResponse }
-		return try JSONDecoder().decode(Usage.self, from: data)
-	}
-
 	func sessions() async throws -> [Session] {
 		do {
 			return try await fetch()
 		} catch Failure.refused {
-			// The cookie is a session id and the server issues a new signing key on every
-			// start, so a restarted daemon invalidates it. One silent re-auth rather than
-			// surfacing an error the person can do nothing about.
+			// One silent re-auth rather than surfacing an error nobody can act on.
+			//
+			// NOT because a restart invalidates the cookie — an earlier comment claimed
+			// that and the server says the opposite in as many words: the signing key is
+			// persisted precisely so restarts do not sign devices out. What does
+			// invalidate it is a passcode change, which rotates the key.
 			cookie = nil
 			return try await fetch()
 		}
@@ -198,7 +199,7 @@ actor Client {
 		let (_, response) = try await send(req)
 		guard let http = response as? HTTPURLResponse,
 			let header = http.value(forHTTPHeaderField: "Set-Cookie"),
-			let value = header.split(separator: ";").first?.split(separator: "=").last
+			let value = header.split(separator: ";").first?.split(separator: "=", maxSplits: 1).last
 		else { throw Failure.refused }
 		cookie = String(value)
 	}

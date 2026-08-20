@@ -94,22 +94,28 @@ enum Daemon {
 	/// `terminationHandler` rather than `waitUntilExit()`, which sleeps ~64ms on a
 	/// run loop no matter how fast the child is.
 	private static func run(_ path: String, _ args: [String]) async -> (status: Int32, out: String) {
-		await withCheckedContinuation { continuation in
-			let task = Process()
-			task.executableURL = URL(fileURLWithPath: path)
-			task.arguments = args
-			let pipe = Pipe()
-			task.standardOutput = pipe
-			task.standardError = pipe
-			// Read before the handler resumes, or a child that fills the pipe buffer
-			// deadlocks against a reader that never runs.
-			task.terminationHandler = { finished in
-				let data = pipe.fileHandleForReading.readDataToEndOfFile()
-				continuation.resume(returning: (finished.terminationStatus, String(data: data, encoding: .utf8) ?? ""))
-			}
-			do { try task.run() } catch {
-				continuation.resume(returning: (-1, "\(error)"))
-			}
+		let task = Process()
+		task.executableURL = URL(fileURLWithPath: path)
+		task.arguments = args
+		let pipe = Pipe()
+		task.standardOutput = pipe
+		task.standardError = pipe
+
+		// The pipe is drained WHILE the child runs, on its own task.
+		//
+		// The previous version read it inside `terminationHandler`, with a comment
+		// claiming that avoided a deadlock — it caused one. Nothing read while the
+		// child was alive, so a child that filled the 64KB pipe buffer would block on
+		// write, never exit, never fire the handler, and leave the continuation
+		// unresumed forever: a permanently frozen call rather than a slow one. It does
+		// not bite today only because `launchctl print` emits about 2KB.
+		let draining = Task.detached { pipe.fileHandleForReading.readDataToEndOfFile() }
+
+		let status: Int32 = await withCheckedContinuation { continuation in
+			task.terminationHandler = { continuation.resume(returning: $0.terminationStatus) }
+			do { try task.run() } catch { continuation.resume(returning: -1) }
 		}
+		let data = await draining.value
+		return (status, String(data: data, encoding: .utf8) ?? "")
 	}
 }

@@ -19,7 +19,7 @@
 		"dev": "tsx src/main.ts",
 		"once": "tsx src/main.ts --once",
 		"bench": "tsx src/main.ts --bench",
-		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web && npm run check:perf && npm run check:secrets && npm run check:spelling",
+		"check": "npm run check:types && npm test && npm run check:docs && npm run check:web && npm run check:perf && npm run check:swift && npm run check:secrets && npm run check:spelling",
 		"check:types": "tsc --noEmit",
 		"test": "node --import tsx --test \"src/**/*.test.ts\"",
 		"format": "prettier --write .",
@@ -33,7 +33,8 @@
 		"check:secrets": "node tools/check-secrets.mjs",
 		"check:spelling": "node tools/check-spelling.mjs",
 		"readme": "node tools/readme-preview.mjs",
-		"prepare": "npm run --silent build"
+		"prepare": "npm run --silent build",
+		"check:swift": "sh tools/check-swift.sh"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

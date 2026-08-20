@@ -49,7 +49,7 @@ struct SettingsView: View {
 				}
 				GridRow {
 					Text("Passcode")
-					TextField("1234", text: $passcode)
+					TextField("8317", text: $passcode)
 						.frame(width: 80)
 					Text("four digits · signs every device out").font(.caption).foregroundStyle(.secondary)
 				}
@@ -144,11 +144,13 @@ struct SettingsView: View {
 		}
 	}
 
-	private func apply() {
+	private func apply() { Task { await applyNow() } }
+
+	private func applyNow() async {
 		do {
 			// The passcode first: if it is malformed, nothing else should be written
 			// either, or the person is left guessing which half of Apply took effect.
-			if passcode != Config.passcode() { try Config.setPasscode(passcode) }
+			if passcode != Config.passcode() { try await Config.setPasscode(passcode) }
 			guard config.port >= 1024, config.port <= 65535 else {
 				note = "A port is 1024 to 65535."
 				failed = true
