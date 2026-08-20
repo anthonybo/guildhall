@@ -34,7 +34,8 @@
 		"check:spelling": "node tools/check-spelling.mjs",
 		"readme": "node tools/readme-preview.mjs",
 		"prepare": "npm run --silent build",
-		"check:swift": "sh tools/check-swift.sh"
+		"check:swift": "sh tools/check-swift.sh",
+		"install:mac": "sh tools/install-mac.sh"
 	},
 	"dependencies": {
 		"ink": "^7.1.1",

@@ -41,7 +41,18 @@ npm install
 npm start
 ```
 
-Or put it on your PATH once, and run it from anywhere:
+On a Mac, one command sets up everything — the command on your PATH, the browser
+view as a service that starts at login, and the menu bar icon:
+
+```
+npm run install:mac
+```
+
+Run it again after a `git pull` and it rebuilds, reinstalls and reloads. It does
+not choose your passcode or control password; those are credentials, not something
+an installer should generate.
+
+Or do the parts by hand. Just the command on your PATH:
 
 ```
 npm link                    # from the project, once
@@ -283,6 +294,44 @@ and assert the same thing.
 
 The room is then optional. Open `guildhall` in a terminal when you want to watch
 it, quit it when you do not, and the browser view carries on either way.
+
+### The menu bar
+
+`npm run install:mac` also builds a small macOS menu bar app, so the answer to
+"does anything need me" is a glance at the top of the screen rather than opening
+anything.
+
+<img src="docs/menubar.png" alt="The menu bar icon: a green hall glyph with the number of working sessions beside it." width="420">
+
+The icon carries the state, and the shape changes with the color so it does not
+depend on color vision:
+
+| | |
+|---|---|
+| **green** filled hall, with a count | that many sessions are working |
+| **orange** warning triangle, with a count | that many are waiting on you |
+| plain hall, no count | everything is idle or finished |
+| plain hall and a dash | the service is not answering |
+
+Clicking it lists every session grouped by project, foldable, with what each one
+is doing, how full its context window is, and its cmux tab — click a row to bring
+that terminal to the front. Underneath, the plan's five-hour and weekly quota and
+what today has cost, read from Anthropic's usage endpoint and `ccusage` and cached
+so the numbers cost nothing to look at.
+
+Settings changes the port, the passcode, whether the browser may type into
+sessions, the screen hold and the label placement, and can start, stop or restart
+the service — everything the terminal's `?` panel can do. It sets the control
+password too, by handing it to guildhall on stdin rather than hashing it itself,
+so there is one implementation of storing that credential.
+
+It needs Xcode to build, is not code-signed, and therefore runs on the machine
+that built it — which is why the installer builds it rather than shipping a binary.
+Quitting the icon does not stop the browser view; they are separate services.
+
+```
+launchctl bootout gui/$(id -u)/dev.guildhall.bar   # stop the icon coming back
+```
 
 ### Reaching it from anywhere — Tailscale
 
