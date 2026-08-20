@@ -13,6 +13,34 @@ import SwiftUI
 /// Every change writes the config file and then restarts the service, because
 /// the port and the passcode are read at startup — a setting that is saved but
 /// not in effect is worse than one that is obviously not saved.
+/// A settings row: what it is on the left, the switch on the right.
+///
+/// Extracted because there were three toggles in three shapes — one right-aligned
+/// with a caption, two hugging their own labels — which looks like three different
+/// people wrote them. `.toggleStyle(.switch)` lives here once, and it is the whole
+/// difference between a switch and a CHECKBOX: a bare `Toggle` on macOS renders as
+/// a checkbox, which reads like a form field rather than a thing that is on or off.
+private struct SwitchRow: View {
+	let title: String
+	let caption: String?
+	@Binding var isOn: Bool
+
+	var body: some View {
+		HStack(alignment: .center, spacing: 12) {
+			VStack(alignment: .leading, spacing: 2) {
+				Text(title).font(.system(size: 13, weight: .medium))
+				if let caption {
+					Text(caption)
+						.font(.caption).foregroundStyle(.secondary)
+						.fixedSize(horizontal: false, vertical: true)
+				}
+			}
+			Spacer(minLength: 0)
+			Toggle("", isOn: $isOn).toggleStyle(.switch).labelsHidden()
+		}
+	}
+}
+
 struct SettingsView: View {
 	@ObservedObject var model: Model
 	/// Called to go back to the list. A closure rather than `@Environment(\.dismiss)`,
@@ -66,17 +94,19 @@ struct SettingsView: View {
 			//
 			// `guildhall --set-serve` writes the LaunchAgent, loads it, and updates the
 			// config — so the plist has one definition rather than a second one in Swift.
-			Toggle("Serve the browser view", isOn: Binding(
-				get: { serving },
-				set: { want in
-					serving = want
-					Task { await setServing(want) }
-				}
-			))
-			Text(serving
-				? "A browser can reach this machine. The three settings below apply to it."
-				: "Off. Nothing is served, and the menu bar icon works either way.")
-				.font(.caption).foregroundStyle(.secondary)
+			SwitchRow(
+				title: "Serve the browser view",
+				caption: serving
+					? "A browser can reach this machine. The settings below apply to it."
+					: "Off. Nothing is served — the menu bar icon works either way.",
+				isOn: Binding(
+					get: { serving },
+					set: { want in
+						serving = want
+						Task { await setServing(want) }
+					}
+				)
+			)
 
 			Divider()
 
@@ -106,7 +136,7 @@ struct SettingsView: View {
 
 			Divider()
 
-			Toggle("Let the browser type into sessions", isOn: $config.control)
+			SwitchRow(title: "Let the browser type into sessions", caption: nil, isOn: $config.control)
 			// The risk, next to the switch that takes it. The terminal panel keeps this
 			// visible whether its explanations are open or not, for the same reason.
 			Text(
@@ -139,7 +169,7 @@ struct SettingsView: View {
 
 			Divider()
 
-			Toggle("Hold the screen on while sessions work", isOn: $config.awakeDisplay)
+			SwitchRow(title: "Hold the screen on while sessions work", caption: nil, isOn: $config.awakeDisplay)
 			Picker("Project labels", selection: $config.labels) {
 				Text("beside the desk").tag("vertical")
 				Text("under it").tag("horizontal")
