@@ -38,7 +38,7 @@ test('the project is never dropped, however narrow the table gets', () => {
 		// assuming an order
 		for (const r of rows(list, w)) {
 			const out = strip(r.line)
-			assert.ok(/foxglo|borrow/.test(out), `identity gone at width ${w}: ${out}`)
+			assert.ok(/foxglo|brookw/.test(out), `identity gone at width ${w}: ${out}`)
 		}
 		assert.match(strip(header(w)), /PROJECT/, `header lost PROJECT at width ${w}`)
 	}
