@@ -1,0 +1,45 @@
+#!/bin/sh
+# The last gate, and the only one that sees HISTORY.
+#
+# Every other check reads a diff or a message at the moment it is made, which
+# leaves three ways for something to reach the remote unexamined: it was committed
+# before the check existed, it arrived by cherry-pick or revert (neither runs
+# commit-msg), or a filter-branch rewrote a message without revalidating it.
+#
+# Measured: three real leaks were clean at the tip and present in 15 to 24 commits
+# of unpushed history. Nothing but a push-time scan of the range could have caught
+# them.
+set -e
+
+# The range comes from git on stdin, NOT from a hardcoded origin/main..HEAD.
+#
+# The first version hardcoded it, which is the same class of mistake as reading `$?`
+# after a pipe: a real check over the wrong commits, reporting clean about material
+# it never read. It would have examined nothing on a push of any other branch, and
+# on a first push of a new branch it would have compared against a ref that does
+# not exist.
+#
+# Each line is: <local ref> <local sha> <remote ref> <remote sha>
+NULL=0000000000000000000000000000000000000000
+ranges=''
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+	[ "$local_sha" = "$NULL" ] && continue          # a deletion sends no objects
+	if [ "$remote_sha" = "$NULL" ]; then
+		# A ref the remote does not have yet: everything reachable from it that is
+		# not already on some other remote branch is about to be sent.
+		ranges="$ranges $local_sha --not --remotes=origin"
+	else
+		ranges="$ranges $remote_sha..$local_sha"
+	fi
+done
+
+echo "pre-push: personal details in the tree and everything about to be sent"
+if [ -n "$ranges" ]; then
+	node tools/check-personal.mjs --all --range="$ranges"
+else
+	# stdin was empty, which happens when the hook is run by hand. Scanning the tree
+	# alone is better than scanning nothing, and saying so is better than implying
+	# the history was read.
+	echo "  (no refs on stdin — scanning the tree only)"
+	node tools/check-personal.mjs --all
+fi
