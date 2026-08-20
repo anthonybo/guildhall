@@ -72,7 +72,7 @@ test('a long quiet spell forgives an address', () => {
 	// forgetful rather than for being an attacker.
 	resetControlThrottle()
 	setControlPass(GOOD)
-	const who = '100.64.0.11' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const who = '100.64.0.11' // allow-personal: synthetic CGNAT boundaries, which are what this test exercises
 	const t0 = 1_000_000
 	for (let i = 0; i < 5; i++) controlAttempt(who, 'wrong guess here', t0 + i)
 	assert.ok(controlLockedFor(who, t0 + 10) > 0, 'five wrong tries did not lock')
@@ -90,7 +90,7 @@ test('a burst is still throttled across the forgiving window', () => {
 	// coming, keep counting. Only silence resets it.
 	resetControlThrottle()
 	setControlPass(GOOD)
-	const who = '100.64.0.12' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const who = '100.64.0.12' // allow-personal: synthetic CGNAT boundaries, which are what this test exercises
 	const start = 2_000_000
 	let t = start
 	for (let i = 0; i < 5; i++) {
@@ -106,7 +106,7 @@ test('a burst is still throttled across the forgiving window', () => {
 test('a correct answer clears the count', () => {
 	resetControlThrottle()
 	setControlPass(GOOD)
-	const who = '100.64.0.10' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const who = '100.64.0.10' // allow-personal: synthetic CGNAT boundaries, which are what this test exercises
 	controlAttempt(who, 'nope nope nope')
 	controlAttempt(who, 'nope nope nope')
 	assert.ok(controlAttempt(who, GOOD))
@@ -115,7 +115,7 @@ test('a correct answer clears the count', () => {
 })
 
 test('only loopback and a tailnet may control; a LAN address may not', () => {
-	for (const ok of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '100.64.0.1', '100.100.100.100', '100.127.255.254']) { // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	for (const ok of ['127.0.0.1', '::1', '::ffff:127.0.0.1', '100.64.0.1', '100.100.100.100', '100.127.255.254']) { // allow-personal: synthetic CGNAT boundaries, which are what this test exercises
 		assert.ok(controlReachable(ok), `${ok} should be allowed`)
 	}
 	for (const no of ['192.168.1.20', '10.0.0.5', '172.16.4.4', '100.63.255.255', '100.128.0.1', '8.8.8.8', undefined]) {

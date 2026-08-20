@@ -4,10 +4,10 @@ import test from 'node:test'
 import { parseAgents } from './agents.ts'
 import { liveSessions } from './registry.ts'
 
-/** A real payload from `claude agents --json`, trimmed to two records. */
+/** Shaped like a `claude agents --json` payload, with invented ids and titles. */
 const REAL = JSON.stringify([
-	{ id: '3f239506', cwd: '/x/quillfeather', kind: 'background', startedAt: 1785814301517, sessionId: '11111111-2222-3333-4444-555555555555', name: 'Build a widget', state: 'blocked' },
-	{ id: '86031b90', cwd: '/x/projects', kind: 'interactive', startedAt: 1786033920777, sessionId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'projects-a2', pid: 5100, status: 'busy' },
+	{ id: 'aaaa1111', cwd: '/x/quillfeather', kind: 'background', startedAt: 1700000000000, sessionId: '11111111-2222-3333-4444-555555555555', name: 'Build a widget', state: 'blocked' },
+	{ id: 'bbbb2222', cwd: '/x/projects', kind: 'interactive', startedAt: 1700000600000, sessionId: '66666666-7777-8888-9999-aaaaaaaaaaaa', name: 'orchard-a2', pid: 4242, status: 'busy' },
 ])
 
 test('a CLI payload becomes registry entries', () => {
@@ -17,12 +17,12 @@ test('a CLI payload becomes registry entries', () => {
 	// the file registry never contained one either
 	assert.equal(out.length, 1)
 	assert.deepEqual(out[0], {
-		pid: 5100,
+		pid: 4242,
 		sessionId: '66666666-7777-8888-9999-aaaaaaaaaaaa',
 		cwd: '/x/projects',
-		name: 'projects-a2',
+		name: 'orchard-a2',
 		status: 'busy',
-		startedAt: 1786033920777,
+		startedAt: 1700000600000,
 		kind: 'interactive',
 	})
 })

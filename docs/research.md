@@ -169,7 +169,7 @@ session.
 **Free — the data is already parsed**
 
 - Cost and model per row. Someone in the thread burned a month of quota in two days
-  without noticing; tidepool ran at its context limit and a day of budget here and nothing said so.
+  without noticing; a session ran out of context and burned a day's budget and nothing said so.
 - Plan burn in the footer: the five-hour and weekly windows. Already on Claude Code's own
   status line; agentacct and Scape both ship it.
 - Context-cliff warning past ~90%, rather than a gauge you have to read.

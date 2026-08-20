@@ -19,7 +19,7 @@ const PPID = process.ppid
 
 /** An ordinary terminal session, present so the list is never empty and the
  *  supported-lookup fallback stays out of these tests. */
-const TERMINAL = { pid: PPID, sessionId: 'terminal', cwd: '/x/projects', kind: 'interactive', name: 'projects-e8', status: 'idle' }
+const TERMINAL = { pid: PPID, sessionId: 'terminal', cwd: '/x/projects', kind: 'interactive', name: 'orchard-e8', status: 'idle' }
 
 function write(dir: string, entries: Record<string, unknown>[]) {
 	fs.mkdirSync(dir, { recursive: true })
@@ -32,7 +32,7 @@ const dirWith = (entries: Record<string, unknown>[]) => write(fs.mkdtempSync(pat
 test('an unclaimed spare is not a session', () => {
 	// Verbatim shape of the spare that produced a third `tidepool` row: named after
 	// its own job id, idle, and with no job directory behind it. The daemon logged
-	// it as `bg spawned 1537aa6a (spare)` and `claude agents --json` never listed it.
+	// it as `bg spawned abcd1234 (spare)` and `claude agents --json` never listed it.
 	const dir = dirWith([TERMINAL, { pid: PID, sessionId: 'spare-a', cwd: '/x/projects/tidepool', kind: 'bg', name: 'spare-job-a', jobId: 'spare-job-a', agent: 'claude', status: 'idle' }])
 	assert.deepEqual(
 		liveSessions(dir).map((s) => s.sessionId),
