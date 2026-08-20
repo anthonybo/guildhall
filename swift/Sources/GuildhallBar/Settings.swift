@@ -15,7 +15,9 @@ import SwiftUI
 /// not in effect is worse than one that is obviously not saved.
 struct SettingsView: View {
 	@ObservedObject var model: Model
-	@Environment(\.dismiss) private var dismiss
+	/// Called to go back to the list. A closure rather than `@Environment(\.dismiss)`,
+	/// which does nothing useful here: this is not presented, it is the content.
+	let done: () -> Void
 
 	@State private var config = Config.load()
 	@State private var passcode = Config.passcode()
@@ -27,9 +29,15 @@ struct SettingsView: View {
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
 			HStack {
-				Text("Settings").font(.headline)
+				Button(action: done) {
+					HStack(spacing: 3) {
+						Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+						Text("Back")
+					}
+				}
+				.buttonStyle(.plain)
 				Spacer()
-				Button("Done") { dismiss() }
+				Text("Settings").font(.headline)
 			}
 
 			Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
@@ -108,8 +116,10 @@ struct SettingsView: View {
 				Button("Apply") { apply() }.keyboardShortcut(.defaultAction)
 			}
 		}
-		.padding(16)
-		.frame(width: 420)
+		.padding(14)
+		// Same width as the list, so switching between them does not resize the popover
+		// under the pointer.
+		.frame(width: 380)
 	}
 
 	private func setControl() {

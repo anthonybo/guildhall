@@ -15,6 +15,35 @@ struct Panel: View {
 	@State private var collapsed: Set<String> = []
 
 	var body: some View {
+		// Settings are a PAGE, not a sheet.
+		//
+		// As a sheet it took several clicks to appear — a popover is not a real window
+		// and sheets over one are unreliable — and worse, dismissing it did not clear
+		// this flag, so the next time the icon was clicked the popover came back
+		// straight into settings and had to be dismissed again to reach the list.
+		//
+		// Swapping the content keeps one window, one piece of state, and no
+		// presentation machinery that can disagree with it.
+		Group {
+			if showSettings {
+				SettingsView(model: model, done: { showSettings = false })
+			} else {
+				list
+			}
+		}
+		.frame(width: 380)
+		.onAppear { model.start(open: true) }
+		.onDisappear {
+			model.start(open: false)
+			// Back to the list when the popover closes. SwiftUI keeps this view alive
+			// between openings, so without it the panel reopened on whatever page it was
+			// left on — which is how closing settings and clicking the icon landed
+			// straight back in settings.
+			showSettings = false
+		}
+	}
+
+	private var list: some View {
 		VStack(alignment: .leading, spacing: 0) {
 			header
 			Divider()
@@ -54,17 +83,6 @@ struct Panel: View {
 			Divider()
 			controls
 		}
-		.frame(width: 360)
-		// Instrumentation, temporary: whether the popover gets mouse events at all.
-		// "Nothing responds" and "the handler is wrong" need completely different
-		// fixes, and hover is the cheapest way to tell them apart.
-		.onHover { inside in model.note("panel hover \(inside ? "in" : "out")") }
-		.onAppear { model.start(open: true) }
-		.onDisappear { model.start(open: false) }
-		// A sheet rather than a separate window: the settings belong to this panel and
-		// should not outlive it or turn up in the window list of an app that has no
-		// windows.
-		.sheet(isPresented: $showSettings) { SettingsView(model: model) }
 	}
 
 	/// Sessions by project, each group sorted the way the room sorts.
