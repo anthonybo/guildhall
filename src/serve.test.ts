@@ -73,14 +73,14 @@ test('the panel shows the address once sharing is on', () => {
 	const off = strip(panel(100, 70).join('\n'))
 	assert.doesNotMatch(off, /http:\/\//, 'offered an address while not sharing')
 
-	const on = strip(panel(100, 70, { on: true, port: 4318, token: 'abc123', lan: ['192.168.1.9'], vpn: ['100.90.1.2'] }).join('\n')) // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const on = strip(panel(100, 70, { on: true, port: 4318, token: 'abc123', lan: ['192.168.1.9'], vpn: ['100.90.1.2'] }).join('\n')) // allow-personal: synthetic CGNAT fixtures
 	assert.match(on, /http:\/\/192\.168\.1\.9:4318/, 'no LAN address')
 	assert.match(on, /http:\/\/100\.90\.1\.2:4318/, 'no VPN address')
 	// the code must never ride along in the URL
 	assert.doesNotMatch(on, /k=abc123|:4318\/\?/, 'put the passcode in the address')
 	assert.match(on, /passcode\s+abc123/, 'never shows the code to type')
 	// the VPN address first: it is the one that works from anywhere
-	assert.ok(on.indexOf('100.90.1.2') < on.indexOf('192.168.1.9'), 'LAN listed above VPN') // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	assert.ok(on.indexOf('100.90.1.2') < on.indexOf('192.168.1.9'), 'LAN listed above VPN') // allow-personal: synthetic CGNAT fixtures
 })
 
 test('the help panel explains what sharing exposes', () => {

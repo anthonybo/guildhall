@@ -35,7 +35,7 @@ const FILE = args.find((a) => a.endsWith('.md')) ?? 'README.md'
 function render() {
 	const text = fs.readFileSync(path.join(ROOT, FILE), 'utf8')
 	try {
-		return execFileSync('gh', ['api', '-X', 'POST', '/markdown', '-f', 'mode=gfm', '-f', 'context=anthonybo/guildhall', '-f', `text=${text}`], { encoding: 'utf8', maxBuffer: 8 << 20 }) // allow-personal: this repository's own path, which the gh api call needs
+		return execFileSync('gh', ['api', '-X', 'POST', '/markdown', '-f', 'mode=gfm', '-f', 'context=anthonybo/guildhall', '-f', `text=${text}`], { encoding: 'utf8', maxBuffer: 8 << 20 }) // allow-personal: this repository's own path, which the command needs
 	} catch (e) {
 		const why = /not logged|authentication/i.test(String(e.stderr)) ? 'gh is not authenticated — run `gh auth login`' : String(e.stderr || e.message).trim().split('\n')[0]
 		console.error(`could not render: ${why}`)

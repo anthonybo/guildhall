@@ -56,7 +56,7 @@ test('guessing is throttled, which is what makes a chosen phrase safe', () => {
 	// this is what turns an online dictionary attack into something impractical.
 	resetControlThrottle()
 	setControlPass(GOOD)
-	const who = '100.64.0.9' // allow-personal: synthetic CGNAT literals, which are what this test exercises
+	const who = '100.64.0.9' // allow-personal: a synthetic CGNAT address; the range check is what this tests
 	for (let i = 0; i < 5; i++) assert.ok(!controlAttempt(who, 'wrong guess here'), 'a wrong guess was accepted')
 	assert.ok(controlLockedFor(who) > 0, 'five wrong tries did not lock the address')
 	// and the lock holds even against the CORRECT phrase, or it would be no lock
