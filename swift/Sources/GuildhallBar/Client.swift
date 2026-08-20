@@ -46,6 +46,44 @@ struct Session: Decodable, Identifiable {
 
 private struct Payload: Decodable { let sessions: [Session] }
 
+/// One of the plan's limits, as guildhall's /api/usage reports it.
+struct Limit: Decodable, Identifiable {
+	let kind: String
+	let model: String?
+	let percent: Double?
+	let resetsAt: String?
+	var id: String { kind + (model ?? "") }
+
+	/// "Session (5h)", "Weekly", and so on — the API's own kind, made readable.
+	var title: String {
+		switch kind {
+		case "session": return "Session (5h)"
+		case "weekly_all": return "Weekly"
+		case "weekly_scoped": return model.map { "Weekly · \($0)" } ?? "Weekly (scoped)"
+		default: return kind.replacingOccurrences(of: "_", with: " ")
+		}
+	}
+
+	/// How long until this window rolls over, worded the way the room words ages.
+	var resets: String? {
+		guard let iso = resetsAt else { return nil }
+		let f = ISO8601DateFormatter()
+		f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+		guard let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return nil }
+		let secs = date.timeIntervalSinceNow
+		if secs <= 0 { return "now" }
+		let h = Int(secs / 3600), m = Int(secs / 60) % 60
+		return h > 24 ? "in \(h / 24)d" : h > 0 ? "in \(h)h \(m)m" : "in \(m)m"
+	}
+}
+
+struct Usage: Decodable {
+	let limits: [Limit]
+	let cost: Double?
+	let at: Double
+	let error: String?
+}
+
 /// Where guildhall keeps its settings, and what it is listening on.
 ///
 /// Read from the config file rather than hardcoded, because the port is a setting
@@ -98,6 +136,22 @@ actor Client {
 		case notRunning
 		case refused
 		case badResponse
+	}
+
+	/// Plan quota and today's spend, from guildhall's cache.
+	///
+	/// A separate request from the sessions one because the server keeps them apart:
+	/// this is fetched from Anthropic's API on a five-minute cache, and putting it in
+	/// the two-second session poll would have tied a third-party call to guildhall's
+	/// own tick.
+	func usage() async throws -> Usage {
+		if cookie == nil { try await authenticate() }
+		var req = URLRequest(url: baseURL.appendingPathComponent("api/usage"))
+		req.timeoutInterval = 5
+		if let cookie { req.setValue("gh_sid=\(cookie)", forHTTPHeaderField: "Cookie") }
+		let (data, response) = try await send(req)
+		guard let http = response as? HTTPURLResponse, http.statusCode == 200 else { throw Failure.badResponse }
+		return try JSONDecoder().decode(Usage.self, from: data)
 	}
 
 	func sessions() async throws -> [Session] {

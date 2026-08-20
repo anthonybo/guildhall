@@ -47,10 +47,18 @@ struct Panel: View {
 				// missing entirely — while the app was holding all ten of them.
 				.frame(minHeight: 140, maxHeight: 360)
 			}
+			if let u = model.usage, !u.limits.isEmpty || u.cost != nil {
+				Divider()
+				quota(u)
+			}
 			Divider()
 			controls
 		}
 		.frame(width: 360)
+		// Instrumentation, temporary: whether the popover gets mouse events at all.
+		// "Nothing responds" and "the handler is wrong" need completely different
+		// fixes, and hover is the cheapest way to tell them apart.
+		.onHover { inside in model.note("panel hover \(inside ? "in" : "out")") }
 		.onAppear { model.start(open: true) }
 		.onDisappear { model.start(open: false) }
 		// A sheet rather than a separate window: the settings belong to this panel and
@@ -72,7 +80,11 @@ struct Panel: View {
 				if an != bn { return an }
 				let aw = a.sessions.contains(where: \.working), bw = b.sessions.contains(where: \.working)
 				if aw != bw { return aw }
-				return a.name < b.name
+				// Then most recently active first. This fell back to the project NAME,
+				// which is why the list looked arbitrary: alphabetical order has nothing
+				// to do with what you were last working on, and a project you touched
+				// two minutes ago could sit below one untouched for a week.
+				return (a.sessions.map(\.stale).min() ?? .infinity) < (b.sessions.map(\.stale).min() ?? .infinity)
 			}
 	}
 
@@ -126,6 +138,55 @@ struct Panel: View {
 		default:
 			return "The service is loaded but nothing is answering — usually something else is holding the port. Check /tmp/guildhall-headless.log."
 		}
+	}
+
+	/// The plan, and what today has cost.
+	///
+	/// Both come from outside guildhall — the quota from Anthropic's OAuth usage
+	/// endpoint, the spend from ccusage — and the server caches them, so this view
+	/// is only ever reading numbers that are already on this machine.
+	private func quota(_ u: Usage) -> some View {
+		VStack(alignment: .leading, spacing: 6) {
+			HStack {
+				Text("Plan").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+				Spacer()
+				if let cost = u.cost {
+					Text("today $\(cost, specifier: "%.2f")").font(.system(size: 11)).foregroundStyle(.secondary)
+				}
+			}
+			ForEach(u.limits) { limit in
+				if let percent = limit.percent {
+					VStack(alignment: .leading, spacing: 2) {
+						HStack(spacing: 4) {
+							Text(limit.title).font(.system(size: 11))
+							Spacer()
+							Text("\(Int(percent))% used")
+								.font(.system(size: 11))
+								.foregroundStyle(percent > 85 ? .red : percent > 60 ? .orange : .green)
+							if let resets = limit.resets {
+								Text("· \(resets)").font(.system(size: 10)).foregroundStyle(.secondary)
+							}
+						}
+						GeometryReader { geo in
+							ZStack(alignment: .leading) {
+								Capsule().fill(Color.secondary.opacity(0.22))
+								Capsule()
+									.fill(percent > 85 ? Color.red : percent > 60 ? Color.orange : Color.green)
+									.frame(width: geo.size.width * min(1, percent / 100))
+							}
+						}
+						.frame(height: 4)
+					}
+				}
+			}
+			// Said plainly rather than hidden: a stale quota shown as if it were current
+			// is the one failure this must not have, and the note there is that an
+			// error payload must never blank the numbers.
+			if let why = u.error {
+				Text("quota may be stale — \(why)").font(.system(size: 10)).foregroundStyle(.orange)
+			}
+		}
+		.padding(.horizontal, 12).padding(.vertical, 8)
 	}
 
 	private var controls: some View {

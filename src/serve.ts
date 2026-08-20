@@ -33,6 +33,7 @@ import { ask, press as pressKey, readGrid, spawn } from './control.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { spawnable } from './data/projects.ts'
+import { usage } from './data/usage.ts'
 import type { Session } from './data.ts'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -347,6 +348,22 @@ export function createServer(opts: ServeOptions) {
 		if (!valid(sessionOf(req))) {
 			const wait = lockedFor(addr)
 			return login(res, 401, wait > 0 ? { waitSeconds: Math.ceil(wait / 1000) } : {})
+		}
+
+		/**
+		 * Plan quota and today's spend.
+		 *
+		 * Its own endpoint rather than part of the session payload, which is fetched
+		 * every couple of seconds by every client: this changes on the scale of hours
+		 * and is fetched from someone else's API, so tying the two together would put
+		 * a third-party call behind guildhall's own poll.
+		 *
+		 * Answers from cache always, refreshing behind the request. `null` before the
+		 * first fetch lands, which the clients render as absent rather than as zero.
+		 */
+		if (url.pathname === '/api/usage') {
+			send(res, 200, MIME['.json'], JSON.stringify(usage() ?? { limits: [], at: 0 }))
+			return
 		}
 
 		if (url.pathname === '/api/sessions') {

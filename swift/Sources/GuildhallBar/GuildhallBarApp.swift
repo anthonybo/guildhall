@@ -7,6 +7,7 @@ final class Model: ObservableObject {
 	@Published var sessions: [Session] = []
 	@Published var reachable = false
 	@Published var daemon: Daemon.State = .notInstalled
+	@Published var usage: Usage?
 
 	private let client = Client()
 	private var timer: Timer?
@@ -50,6 +51,9 @@ final class Model: ObservableObject {
 			// loaded but unable to bind — is exactly the case that used to go unnoticed.
 			if daemon == .loadedNotServing { daemon = .running }
 			log("ok: \(sessions.count) sessions, \(needsYou.count) need you, \(working.count) working")
+			// Its own cache on the server, so asking every poll costs a local request and
+			// no third-party call.
+			usage = try? await client.usage()
 		} catch {
 			sessions = []
 			reachable = false
@@ -68,6 +72,9 @@ final class Model: ObservableObject {
 	///
 	/// Repeats are collapsed so an idle machine does not write a line every five
 	/// seconds forever.
+	/// Log a one-off line, for working out whether the panel is alive.
+	func note(_ line: String) { log(line) }
+
 	private var lastLine = ""
 	private func log(_ line: String) {
 		guard line != lastLine else { return }
