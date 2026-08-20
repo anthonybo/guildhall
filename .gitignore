@@ -4,4 +4,10 @@ node_modules/
 dist/
 
 # SwiftPM build output, and the assembled .app: artifacts, like dist/
+#
+# `*.app/` is not redundant with `swift/.build/`, which is where build.sh puts the
+# bundle today. It is there because the comment claimed the .app was covered and
+# only the build directory was — and the one leak this file exists to prevent was
+# 222MB of exactly this kind of output, committed because nothing refused it.
 swift/.build/
+*.app/
