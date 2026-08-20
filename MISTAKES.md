@@ -306,3 +306,55 @@ workspace (`cmux workspace create --focus false`), never a real session.
 - **Tailwind v4 scans the whole project**, not only the paths in `@source`. A word
   in a code comment became a CSS rule in the shipped bundle. `@import 'tailwindcss'
   source(none)` makes the `@source` lines authoritative.
+
+---
+
+## A privacy check that said clean
+
+Four dollar figures, twelve private project names and a home directory reached
+commits in a public repository, and the check written to stop that reported clean
+over the material three separate times. Each pass read something real. None read
+where the material was.
+
+- **`execFileSync` without `maxBuffer` fails OPEN.** Node's default is 1MiB. Over
+  it, the call throws ENOBUFS, and the `try/catch` around it returned `''` — which
+  is indistinguishable from a clean diff, so the check printed
+  "nothing of yours in the diff" and exited 0. Measured: the same file produced
+  three findings in a 261-byte diff and **zero** in a 1.27MB one. The gate was
+  therefore guaranteed to go silent at exactly the size of the largest leak it
+  existed for (222MB of build output). A check that cannot look must exit nonzero;
+  it must never report clean.
+- **Scanning the tree and the commit messages is not scanning what a push sends.**
+  The content fixes were made as one ordinary commit at the tip, so the tree was
+  clean and every message was clean while **23 of 25 commits** still carried the
+  originals — and `git push` sends all of them. The gate printed
+  "nothing of yours in the tree or the range" over all 23. Reading history means
+  `git rev-list --objects <range>` and `cat-file` on each blob; nothing less sees
+  it. Verified by reconstructing that exact shape in a throwaway clone — a figure
+  in one commit, redacted at the tip — where the old code passed it.
+- **A hook that hardcodes its range is a real check over the wrong commits.**
+  `pre-push` scanning `origin/main..HEAD` regardless of what is being pushed
+  examines nothing on any other branch, and on a first push compares against a ref
+  that does not exist. git hands the hook `<local ref> <local sha> <remote ref>
+  <remote sha>` on stdin; use it. Same family as reading `$?` after a pipe.
+- **`git filter-branch` leaves the old history reachable, twice over.** After a
+  rewrite, `refs/original/refs/heads/main` and any manual backup branch still point
+  at the originals, and reflogs hold the rest — **252MB** of it here, containing the
+  absolute paths the rewrite had just removed. Deleting both refs, then
+  `git reflog expire --expire=now --all && git gc --prune=now`, took the repository
+  to 1.77MB. Until that runs, the material is still on disk and still pushable.
+- **An exemption the common path ignores is not an exemption.** `unless` was
+  honored only in `--all` mode, so a pattern that had already reasoned about its own
+  false positive still blocked the commit introducing the line — this check's own
+  comment naming the `100.64.0.0/10` block was refused by the check it documents.
+- **Quieting a check with exemptions scattered through prose is how a check gets
+  deleted.** Matching any `<label>.local` flagged an invented hostname in a doc
+  comment and three test fixtures, and the first fix was four `allow-personal`
+  notes in documentation, one of them a `//` inside a JSDoc block. Match the labels
+  the machine actually answers to instead, so an invented name passes.
+
+**Two rules the diff-only design cannot satisfy.** A pattern check at commit time
+only ever sees what is being added, so anything committed before the check existed,
+anything arriving by cherry-pick or revert (neither runs `commit-msg`), and
+anything a `filter-branch` rewrote are all invisible to it. The scan of history at
+push time is not redundancy; it is the only pass that reads them.
