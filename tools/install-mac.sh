@@ -50,6 +50,18 @@ LOGS="$HOME/Library/Logs"
 UID_NUM=$(id -u)
 mkdir -p "$AGENTS" "$LOGS"
 
+# The commit gates, which are per-CLONE and off by default.
+#
+# `core.hooksPath` is repository-local and git does not carry it across a clone, so
+# a fresh checkout has NO pre-commit checks at all — not the privacy gate, not
+# secrets, not spelling, not the perf budget. That is the wrong default on a machine
+# somebody is about to commit from, and it is not something you remember to do.
+if [ -d .git ]; then
+	say "Commit gates"
+	npm run --silent hooks
+	ok "pre-commit, commit-msg, pre-merge-commit and pre-push are active in this clone"
+fi
+
 say "Building"
 npm run --silent build
 ok "dist/main.mjs and web/app.js"

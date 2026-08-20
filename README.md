@@ -56,8 +56,14 @@ npm run install:mac
 ```
 
 It puts `guildhall` on your PATH, installs the browser view as a service that
-starts at login, and builds and installs the menu bar app. It reports each part
-and whether it actually came up. Then choose a passcode, which it deliberately
+starts at login, builds and installs the menu bar app, and turns on this
+repository's commit gates. It reports each part and whether it actually came up.
+
+The gates are worth a sentence, because git will not do it for you:
+`core.hooksPath` is repository-local and is not carried across a clone, so a fresh
+checkout starts with no pre-commit checks — including the one that refuses to
+commit or push anything private. `npm run install:mac` switches them on; if you are
+not using it, run `npm run hooks` once per clone. Then choose a passcode, which it deliberately
 does not invent for you:
 
 ```
