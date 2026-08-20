@@ -1,0 +1,6 @@
+#!/bin/sh
+# The commit MESSAGE needs the same check as the diff, and it is the place the
+# leak actually happened: two messages carried a day's spend to the dollar, which
+# no diff check would ever have seen.
+set -e
+node tools/check-personal.mjs "$1"

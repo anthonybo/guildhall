@@ -27,7 +27,7 @@ gets typed again. Intermittent — "all the time but not every time".
 | # | Change | Why it seemed right | What actually happened |
 |---|---|---|---|
 | 1 | `terminal.input` with `text + \r` in ONE call, replacing `send` then `send-key Enter` | The two-call version had a ~150ms gap where the Enter could be lost | Real bug, real fix — `send` also mangles `\n` — but the symptom continued |
-| 2 | Refuse sends to folded rows (409) | tidepool's tab belonged to a parked terminal whose conversation had moved to a background job | Correct diagnosis, wrong remedy: it removed the only route to the session. Reverted in v0.5.2 |
+| 2 | Refuse sends to folded rows (409) | a session's tab belonged to a parked terminal whose conversation had moved to a background job | Correct diagnosis, wrong remedy: it removed the only route to the session. Reverted in v0.5.2 |
 | 3 | Warn instead of refusing on folded rows | Same cause, non-blocking | Right for that case, but the failure kept happening on ordinary rows with no folding |
 
 ### Measured, so do not re-measure
@@ -87,7 +87,7 @@ cannot be typed into from the phone, which was the point.
 
 | # | Approach | Why it seemed right | What actually happened |
 |---|---|---|---|
-| 1 | Offer only directories with `hasTrustDialogAccepted` in `~/.claude.json` | Claude Code records its trust decisions there, so the flag should say which directories skip the modal | The flag disagrees with reality **in both directions**: `tidepool` says `false` and runs fine, `guildhall` is absent from the file entirely and runs fine, `kestrelbay` says `false` and does prompt. The list it produced excluded every project actually in use |
+| 1 | Offer only directories with `hasTrustDialogAccepted` in `~/.claude.json` | Claude Code records its trust decisions there, so the flag should say which directories skip the modal | The flag disagrees with reality **in both directions**: `a project` says `false` and runs fine, `guildhall` is absent from the file entirely and runs fine, `another project` says `false` and does prompt. The list it produced excluded every project actually in use |
 | 2 | Detect the trust modal 3.5s after spawning and report it | Better to detect than predict | `claude` takes **25-30 seconds** to draw its first screen. A probe at 3.5s reads a blank terminal and reports success — measured, it passed a session that was sitting on the trust prompt |
 | 3 | `cmux workspace create --command claude` | One call makes the tab and starts the agent, and it does | cmux records **no agent information** for a workspace made this way. `terminal.agent` is null, `terminal.resumeBinding` is null, the `terminal` object is empty — checked at 30s, 60s and 90s. Creating it with no `--command` does not auto-start an agent either |
 | 4 | Match the orphan session to a tab by their shared DIRECTORY | cmux records `currentDirectory` per workspace, so both sides know it | Ambiguous, and dangerously so. Seven sessions here have `~/projects` as their cwd. The browser picked the lowest `stale` — the most recently active — and opened **an unrelated session's terminal, mid-conversation**, one keystroke from receiving a message meant for a new session |

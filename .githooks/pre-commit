@@ -13,6 +13,13 @@ set -e
 echo "pre-commit: secrets"
 node tools/check-secrets.mjs
 
+# Personal details second, and for the same reason: this repo is public and is
+# developed against private work, so the material at hand is the material most
+# likely to leak. It has: dollar figures in commit messages, private project names
+# across sixty places, and 222MB of build output carrying an absolute path.
+echo "pre-commit: personal details"
+node tools/check-personal.mjs
+
 echo "pre-commit: perf budget"
 node tools/check-perf.mjs
 

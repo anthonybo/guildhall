@@ -3,7 +3,7 @@
  *
  * Both numbers come from outside guildhall — the quota from Anthropic's OAuth
  * usage endpoint, the spend from `ccusage` — so this module is mostly about not
- * asking too often. The approach is lifted from another tool, which learned the
+ * asking too often. The approach is lifted from a sibling statusline tool, which learned the
  * expensive parts already:
  *
  * **Every failure path must back off.** Its note is blunt about why:
@@ -68,7 +68,7 @@ const QUOTA_BACKOFF = 15 * 60_000
  * Today's spend.
  *
  * Half an hour, because `ccusage` is a Node process that takes about seven
- * seconds — measured — and the number is a running total for a day.
+ * seconds — measured there — and the number is a running total for a day.
  * Nothing about it needs to be fresher than the time it takes to earn it.
  */
 const COST_TTL = 30 * 60_000

@@ -213,7 +213,7 @@ struct Panel: View {
 				}
 			}
 			// Said plainly rather than hidden: a stale quota shown as if it were current
-			// is the one failure this must not have, and the note there is that an
+			// is the one failure this must not have, and that tool's note is that an
 			// error payload must never blank the numbers.
 			if let why = u.error {
 				Text("quota may be stale — \(why)").font(.system(size: 10)).foregroundStyle(.orange)

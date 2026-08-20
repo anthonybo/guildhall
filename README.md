@@ -211,7 +211,7 @@ and the same assertion, no rendering, logging each transition.
 ```
 guildhall --guard
 2026-08-07 07:56:10  guildhall guard started (pid 1234)
-2026-08-07 07:56:10  holding sleep off — willow, quillfeather
+2026-08-07 07:56:10  holding sleep off — orchard, saltmarsh
 2026-08-07 08:14:02  released
 ```
 
