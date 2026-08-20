@@ -56,6 +56,23 @@ function publicWords() {
  * directory matches ordinary words and would make this cry wolf, which is how a
  * check gets turned off.
  */
+/**
+ * Directory names that are the operating system's, not a project's.
+ *
+ * The derivation assumes the checkout sits among other projects, which it does at
+ * ~/projects/guildhall. Clone it to ~/guildhall instead and the "siblings" become
+ * Library, Documents, Downloads, Desktop, Pictures, Public — so the gate starts
+ * treating the words "public", "library" and "documents" as private project names
+ * and objects to ordinary prose. That is the cry-wolf failure that gets a check
+ * deleted, and it depends only on where somebody happened to clone.
+ */
+const SYSTEM_DIRS = new Set([
+	'applications', 'desktop', 'documents', 'downloads', 'library', 'movies', 'music',
+	'pictures', 'public', 'sites', 'templates', 'videos', 'system', 'users', 'volumes',
+	'opt', 'usr', 'var', 'tmp', 'etc', 'private', 'developer', 'projects', 'source',
+	'src', 'code', 'repos', 'work', 'dev', 'sandbox', 'workspace',
+])
+
 function privateNames() {
 	const allowed = publicWords()
 	let siblings = []
@@ -64,7 +81,7 @@ function privateNames() {
 			.filter((e) => e.isDirectory() && !e.name.startsWith('.'))
 			.map((e) => e.name)
 	} catch {}
-	return siblings.filter((n) => n.length >= 5 && !allowed.has(n.toLowerCase()))
+	return siblings.filter((n) => n.length >= 5 && !allowed.has(n.toLowerCase()) && !SYSTEM_DIRS.has(n.toLowerCase()))
 }
 
 /** Generic shapes that are personal wherever they appear. */
@@ -599,11 +616,20 @@ if (!found.length) {
 	// --all mode an empty name list is a refusal rather than a pass, because --all is
 	// the mode that stands between the material and a remote.
 	const scope = ALL ? 'the tree or the range' : 'the diff'
+	// Zero derived names is SAID OUT LOUD, not treated as a failure.
+	//
+	// My first version refused to pass on an empty list in --all mode. That was wrong
+	// twice over: it contradicts this file's own design — silent on a fresh clone,
+	// strict on the machine where the private material is — and the pre-push hook
+	// passes no override, so it made `git push` impossible on any machine whose
+	// checkout has no project neighbours. A gate nobody can get past gets removed
+	// wholesale, which is worse than one that reports honestly.
+	//
+	// The printed counts are what close the "clean vs did not look" gap: `0 names`
+	// is visibly different from `38 names`, and the line below spells it out.
 	if (ALL && !NAMES.length) {
-		console.error(`check-personal derived ZERO private project names (looked beside ${root}).`)
-		console.error('So the name check did nothing, and "clean" would mean "did not look".')
-		console.error('If this machine genuinely has no sibling projects, run with --no-names to say so deliberately.')
-		if (!args.includes('--no-names')) process.exit(1)
+		console.warn(`check-personal: no private project names derived beside ${path.dirname(root)},`)
+		console.warn('so the NAME check did nothing here. The patterns still ran.')
 	}
 	console.log(`personal: nothing of yours in ${scope} (${NAMES.length} names, ${PATTERNS.length} patterns)`)
 	process.exit(0)
