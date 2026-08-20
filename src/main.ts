@@ -156,7 +156,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|upgrade|set-control-password|set-passcode)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|upgrade|set-control-password|set-passcode)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -167,6 +167,34 @@ if (process.argv.includes('--usage')) {
 	const { fetchNow } = await import('./data/usage.ts')
 	console.log(JSON.stringify((await fetchNow()) ?? { limits: [], at: 0 }))
 	process.exit(0)
+}
+/**
+ * Turn the browser-view service on or off, and say what happened.
+ *
+ * The menu bar toggle and `install:mac --serve` both call this, so there is one
+ * implementation of what the service is. It also updates `serve` in the config, so
+ * the terminal and the panel agree afterwards.
+ */
+{
+	const i = process.argv.indexOf('--set-serve')
+	if (i > 0) {
+		const want = process.argv[i + 1]
+		if (want !== 'on' && want !== 'off') {
+			console.error('guildhall --set-serve on|off')
+			process.exit(2)
+		}
+		const { serviceOn, serviceOff } = await import('./service.ts')
+		const r = want === 'on' ? serviceOn() : serviceOff()
+		if (!r.ok) {
+			console.error(r.why)
+			process.exit(1)
+		}
+		const cur = cfgStore.load()
+		cur.serve = want === 'on'
+		cfgStore.save(cur)
+		console.log(r.note)
+		process.exit(0)
+	}
 }
 /**
  * The resolved settings as JSON, then exit.
@@ -205,6 +233,7 @@ watching
   guildhall --once         print one frame and exit
   guildhall --sessions     print the room as JSON and exit
   guildhall --config       print the resolved settings as JSON and exit
+  guildhall --set-serve on|off   serve the browser view at login, or stop
   guildhall --demo         a fictional office; never reads the real registry
 
 serving the browser view — these draw nothing and want no terminal

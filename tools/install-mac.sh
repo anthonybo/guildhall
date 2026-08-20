@@ -172,7 +172,13 @@ fi
 
 if [ "$WANT_SERVE" = yes ]; then
 	say "The browser view, as a service"
-	install_agent dev.guildhall.headless
+	# `--set-serve on` rather than install_agent: the menu bar toggle calls the same
+	# thing, so the plist has one definition instead of one here and another in Swift.
+	if node dist/main.mjs --set-serve on; then
+		ok "dev.guildhall.headless loaded"
+	else
+		warn "could not start it — see the message above"
+	fi
 	sleep 2
 	# Ask guildhall, rather than parsing config.json here with a third opinion about
 	# the default. This read the file directly and applied its own fallback: a file
