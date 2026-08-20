@@ -51,6 +51,16 @@ export type ServiceResult = { ok: true; note: string } | { ok: false; why: strin
  * same port looks exactly like a working service. So the holder is identified by
  * pid, not by whether something replies.
  */
+/** Is this pid another guildhall? Then the port is not a conflict, it is a handover. */
+function isGuildhall(pid: string): boolean {
+	try {
+		const out = execFileSync('/bin/ps', ['-o', 'command=', '-p', pid], { encoding: 'utf8' })
+		return /main\.mjs|guildhall/.test(out)
+	} catch {
+		return false
+	}
+}
+
 export function portHolder(port: number): { pid: string; cmd: string } | null {
 	try {
 		const out = execFileSync('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-F', 'pc'], {
@@ -140,13 +150,21 @@ function writeAgent(): ServiceResult {
 /** Turn the browser-view service on: install the agent if needed, then load it. */
 export function serviceOn(): ServiceResult {
 	if (process.platform !== 'darwin') return { ok: false, why: 'launchd is macOS only' }
-	// Refuse before touching launchd if the port is already taken. Bootstrapping into
-	// that situation produces a job that respawns forever and never serves.
+	// A port held by ANOTHER GUILDHALL is not a conflict and must not be reported as
+	// one. The room already treats this arrangement as normal in the other order —
+	// "a room opened after the service cannot have the port and does not need it" —
+	// and the same is true reversed: the browser view is being served, by the room.
+	//
+	// The first version refused here and told the person to quit their own room. That
+	// is not an answer; it is handing the user a collision between two halves of one
+	// program. The agent is installed either way, and launchd's retry is what makes it
+	// take over the moment the room lets go.
 	const before = portHolder(port())
-	if (before && !serviceLoaded()) {
+	const handover = before !== null && isGuildhall(before.pid)
+	if (before && !handover && !serviceLoaded()) {
 		return {
 			ok: false,
-			why: `port ${port()} is already served by ${before.cmd} (pid ${before.pid}). If that is a guildhall room in a terminal, quit it with q — it serves on the same port — or choose another port first.`,
+			why: `port ${port()} is held by ${before.cmd} (pid ${before.pid}), which is not guildhall. Choose another port.`,
 		}
 	}
 	const written = writeAgent()
@@ -173,6 +191,15 @@ export function serviceOn(): ServiceResult {
 	//
 	// The port holder's pid MATCHING the job's pid is the one unambiguous answer, and
 	// it is the last step of the chain — what a browser would actually reach.
+	if (handover) {
+		// Installed and loaded; it simply cannot bind yet. Waiting for our pid to become
+		// the listener would time out and report a failure over an arrangement that is
+		// working — the browser view IS reachable, served by the room.
+		return {
+			ok: true,
+			note: `installed. A guildhall room (pid ${before.pid}) is serving port ${port()} right now, so the browser view already works; the service takes over when that room stops.`,
+		}
+	}
 	for (let i = 0; i < 40; i++) {
 		const code = lastExit()
 		if (code !== null && code !== 0) {
