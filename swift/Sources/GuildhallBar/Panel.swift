@@ -32,7 +32,14 @@ struct Panel: View {
 			}
 		}
 		.frame(width: 380)
-		.onAppear { model.start(open: true) }
+		.onAppear {
+			model.start(open: true)
+			// The first click in the popover was being spent activating the app rather
+			// than pressing anything: an accessory app (LSUIElement) is not active when
+			// its status item is clicked, so the first mouse-down goes to activation.
+			// Reported as "the first click on settings does nothing".
+			NSApplication.shared.activate(ignoringOtherApps: true)
+		}
 		.onDisappear {
 			model.start(open: false)
 			// Back to the list when the popover closes. SwiftUI keeps this view alive
@@ -210,10 +217,11 @@ struct Panel: View {
 	private var controls: some View {
 		VStack(alignment: .leading, spacing: 2) {
 			MenuItem(title: model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
-				model.act { model.daemon == .stopped ? Daemon.start() : Daemon.stop() }
+				let starting = model.daemon == .stopped
+				model.act { starting ? await Daemon.start() : await Daemon.stop() }
 			}
 			MenuItem(title: "Restart the service", enabled: model.daemon != .notInstalled && model.daemon != .stopped) {
-				model.act { Daemon.restart() }
+				model.act { await Daemon.restart() }
 			}
 			MenuItem(title: "Open the browser view", enabled: model.reachable) { model.openBrowser() }
 			Divider().padding(.vertical, 4)

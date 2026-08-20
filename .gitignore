@@ -2,3 +2,6 @@ node_modules/
 *.log
 .DS_Store
 dist/
+
+# SwiftPM build output, and the assembled .app: artifacts, like dist/
+swift/.build/

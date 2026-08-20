@@ -123,12 +123,18 @@ struct SettingsView: View {
 	}
 
 	private func setControl() {
+		let typed = controlPassword
+		// Cleared before the call, not after: it must not sit in view state across an
+		// await, and there is nothing to retry with it.
+		controlPassword = ""
+		Task {
+			await setControl(typed)
+		}
+	}
+
+	private func setControl(_ typed: String) async {
 		do {
-			try Config.setControlPassword(controlPassword)
-			// Cleared immediately. There is no reason for it to sit in a view's state
-			// after it has been handed over, and a filled password field invites a
-			// second Set that would silently do the same thing again.
-			controlPassword = ""
+			try await Config.setControlPassword(typed)
 			controlSet = true
 			note = "Control password set. Every device must enter it again."
 			failed = false
@@ -151,7 +157,7 @@ struct SettingsView: View {
 			try config.save()
 			note = "Saved — restarting the service so it takes effect."
 			failed = false
-			model.act { Daemon.restart() }
+			model.act { await Daemon.restart() }
 		} catch {
 			note = error.localizedDescription
 			failed = true

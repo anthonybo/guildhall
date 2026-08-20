@@ -118,6 +118,19 @@ function token(): string | null {
 	return null
 }
 
+/**
+ * Every write must carry `costAt` forward.
+ *
+ * It did not, and the effect was silent: `spend()` stamped it, then the next quota
+ * write — five minutes later — built a fresh object without it, so `maybeCost()`
+ * read `undefined`, computed an age of Infinity, and ran ccusage again. A
+ * thirty-minute window collapsed into a five-minute one, and a seven-second node
+ * process ran twelve times an hour instead of twice.
+ *
+ * The same shape as the `stale`-in-the-payload bug in MISTAKES.md: a guard reading
+ * a field that something else keeps clobbering.
+ */
+
 /** Flatten the API's `limits[]` into the few fields worth showing. */
 function limitsOf(payload: unknown): Limit[] {
 	const list = (payload as { limits?: unknown[] })?.limits
@@ -192,7 +205,7 @@ async function maybeQuota() {
 	if (!t) {
 		// No token is a settled fact, not a transient failure: nothing will change
 		// until Claude Code is signed in, so record it and stop asking.
-		write({ ...(previous ?? { limits: [] }), limits: previous?.limits ?? [], at: Date.now(), error: 'not signed in to Claude' })
+		write({ ...(previous ?? { limits: [] }), limits: previous?.limits ?? [], costAt: previous?.costAt, at: Date.now(), error: 'not signed in to Claude' })
 		return
 	}
 	try {
@@ -205,13 +218,13 @@ async function maybeQuota() {
 		if (body.error || !res.ok) {
 			// Keep the numbers, note the failure. A rate_limit_error is the one thing
 			// this must not turn into "your plan has nothing left".
-			write({ limits: current?.limits ?? [], cost: current?.cost, at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
+			write({ limits: current?.limits ?? [], cost: current?.cost, costAt: current?.costAt, at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
 			return
 		}
-		write({ limits: limitsOf(body), cost: current?.cost, at: Date.now() })
+		write({ limits: limitsOf(body), cost: current?.cost, costAt: current?.costAt, at: Date.now() })
 	} catch (e) {
 		const current = read()
-		write({ limits: current?.limits ?? [], cost: current?.cost, at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
+		write({ limits: current?.limits ?? [], cost: current?.cost, costAt: current?.costAt, at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
 	}
 }
 

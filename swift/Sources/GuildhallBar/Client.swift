@@ -5,7 +5,7 @@ import Foundation
 /// Deliberately a subset. The payload carries a dozen more fields — context
 /// counts, transcript excerpts, cmux workspace ids — and decoding only what is
 /// shown means a new field on the server cannot break this app.
-struct Session: Decodable, Identifiable {
+struct Session: Decodable, Identifiable, Equatable {
 	let id: String
 	let name: String
 	let proj: String?
@@ -64,12 +64,23 @@ struct Limit: Decodable, Identifiable {
 		}
 	}
 
+	/// Two shared parsers.
+	///
+	/// Built once, at module scope. `ISO8601DateFormatter()` is expensive to create —
+	/// milliseconds, not microseconds — and these were constructed inside a computed
+	/// property read from a SwiftUI view body, so every render of the quota section
+	/// built two of them per limit.
+	private static let fractional: ISO8601DateFormatter = {
+		let f = ISO8601DateFormatter()
+		f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+		return f
+	}()
+	private static let plain = ISO8601DateFormatter()
+
 	/// How long until this window rolls over, worded the way the room words ages.
 	var resets: String? {
 		guard let iso = resetsAt else { return nil }
-		let f = ISO8601DateFormatter()
-		f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-		guard let date = f.date(from: iso) ?? ISO8601DateFormatter().date(from: iso) else { return nil }
+		guard let date = Limit.fractional.date(from: iso) ?? Limit.plain.date(from: iso) else { return nil }
 		let secs = date.timeIntervalSinceNow
 		if secs <= 0 { return "now" }
 		let h = Int(secs / 3600), m = Int(secs / 60) % 60

@@ -104,7 +104,10 @@ struct Config {
 	/// stay in `setControlPass`, which is the only place they have ever been. This
 	/// app deliberately does not know how the credential is stored; it just types it
 	/// in on the person's behalf, which is what the terminal key handler does too.
-	static func setControlPassword(_ password: String) throws {
+	/// Async, because this blocks for as long as node takes to boot and scrypt takes
+	/// to run — and scrypt is deliberately slow. Called inline from a @MainActor view
+	/// it froze the whole app for something like a second on every "Set".
+	static func setControlPassword(_ password: String) async throws {
 		guard let node = Bundle.main.object(forInfoDictionaryKey: "GHNode") as? String,
 			let entry = Bundle.main.object(forInfoDictionaryKey: "GHEntry") as? String,
 			FileManager.default.isExecutableFile(atPath: node),
@@ -118,15 +121,25 @@ struct Config {
 		task.standardInput = input
 		task.standardOutput = output
 		task.standardError = output
-		try task.run()
-		input.fileHandleForWriting.write(Data(password.utf8))
-		// Closed so the child's read of stdin ends; without this it waits forever.
-		try? input.fileHandleForWriting.close()
-		let said = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-		task.waitUntilExit()
-		guard task.terminationStatus == 0 else {
+		// `waitUntilExit()` would add ~64ms of run-loop sleep on top; the termination
+		// handler gives the same exit status for the child's real cost.
+		let result: (Int32, String) = try await withCheckedThrowingContinuation { continuation in
+			task.terminationHandler = { finished in
+				let said = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+				continuation.resume(returning: (finished.terminationStatus, said))
+			}
+			do {
+				try task.run()
+				input.fileHandleForWriting.write(Data(password.utf8))
+				// Closed so the child's read of stdin ends; without this it waits forever.
+				try? input.fileHandleForWriting.close()
+			} catch {
+				continuation.resume(throwing: error)
+			}
+		}
+		guard result.0 == 0 else {
 			// guildhall's own words, which already explain what was wrong with it.
-			throw Failure.refused(said.trimmingCharacters(in: .whitespacesAndNewlines))
+			throw Failure.refused(result.1.trimmingCharacters(in: .whitespacesAndNewlines))
 		}
 	}
 

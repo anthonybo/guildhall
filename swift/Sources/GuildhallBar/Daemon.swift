@@ -10,6 +10,21 @@ import Foundation
 /// directly. launchd already owns the service — it starts it at login and
 /// restarts it when it dies — and a second copy started behind its back would
 /// fight it for the port and lose, or win and confuse it.
+///
+/// **Every call here is async, and none of it waits on a run loop.** Two measured
+/// reasons:
+///
+/// `waitUntilExit()` costs about **64ms of sleeping**, whatever the child does —
+/// it is Foundation's run-loop polling interval on Darwin, not launchctl. Raw
+/// `launchctl print` from a shell is 8.7ms, which is where an earlier comment's
+/// "9-10ms" came from: that number measured the child and missed 87% of the call.
+/// Using the termination handler instead gets the same exit status for the child's
+/// real cost.
+///
+/// And these ran on the main actor. `act()` invoked its closure inline from a
+/// `@MainActor` type, so pressing Start, Stop or Restart froze the UI for 64ms
+/// plus whatever launchd actually did — which is precisely the "the button did
+/// nothing" report.
 enum Daemon {
 	static let label = "dev.guildhall.headless"
 
@@ -34,33 +49,67 @@ enum Daemon {
 		case notInstalled
 	}
 
+	/// A file check, 0.18ms. Cheap enough for the main thread, unlike everything else.
 	static var installed: Bool { FileManager.default.fileExists(atPath: plist) }
 
-	/// Whether launchd currently holds the job. `print` rather than `list` because
-	/// `list` exits 0 for an unknown label on some releases, which reads as loaded.
-	static func loaded() -> Bool {
-		run("/bin/launchctl", ["print", "\(domain)/\(label)"]).status == 0
+	/// Whether launchd currently holds the job.
+	///
+	/// `print` rather than `list` because `list` exits 0 for an unknown label on
+	/// some releases, which reads as loaded.
+	///
+	/// Only worth asking when the HTTP fetch has FAILED. A successful fetch already
+	/// proves the service is up, and asking anyway spawned a process every poll —
+	/// about 30 a minute with the panel open — whose answer was then overwritten.
+	static func loaded() async -> Bool {
+		await run("/bin/launchctl", ["print", "\(domain)/\(label)"]).status == 0
 	}
 
-	static func start() { _ = run("/bin/launchctl", ["bootstrap", domain, plist]) }
-	static func stop() { _ = run("/bin/launchctl", ["bootout", "\(domain)/\(label)"]) }
+	static func state() async -> State {
+		guard installed else { return .notInstalled }
+		return await loaded() ? .loadedNotServing : .stopped
+	}
+
+	@discardableResult static func start() async -> String? { await act(["bootstrap", domain, plist]) }
+	@discardableResult static func stop() async -> String? { await act(["bootout", "\(domain)/\(label)"]) }
 
 	/// Restart in place. `kickstart -k` kills and relaunches in one step, which is
 	/// what "restart" has to mean here — bootout then bootstrap races, because the
 	/// old process has not released the port by the time the new one binds.
-	static func restart() { _ = run("/bin/launchctl", ["kickstart", "-k", "\(domain)/\(label)"]) }
+	@discardableResult static func restart() async -> String? { await act(["kickstart", "-k", "\(domain)/\(label)"]) }
 
-	@discardableResult
-	private static func run(_ path: String, _ args: [String]) -> (status: Int32, out: String) {
-		let task = Process()
-		task.executableURL = URL(fileURLWithPath: path)
-		task.arguments = args
-		let pipe = Pipe()
-		task.standardOutput = pipe
-		task.standardError = pipe
-		do { try task.run() } catch { return (-1, "\(error)") }
-		let data = pipe.fileHandleForReading.readDataToEndOfFile()
-		task.waitUntilExit()
-		return (task.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+	/// Run a mutating subcommand, and return what launchctl said if it failed.
+	///
+	/// The output was being thrown away — `bootstrap` failing with
+	/// `Bootstrap failed: 5: Input/output error` is the most common launchd outcome
+	/// there is, and the panel showed nothing at all.
+	private static func act(_ args: [String]) async -> String? {
+		let r = await run("/bin/launchctl", args)
+		guard r.status != 0 else { return nil }
+		let said = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+		return said.isEmpty ? "launchctl exited \(r.status)" : said
+	}
+
+	/// Spawn, collect output, and resume when the child actually exits.
+	///
+	/// `terminationHandler` rather than `waitUntilExit()`, which sleeps ~64ms on a
+	/// run loop no matter how fast the child is.
+	private static func run(_ path: String, _ args: [String]) async -> (status: Int32, out: String) {
+		await withCheckedContinuation { continuation in
+			let task = Process()
+			task.executableURL = URL(fileURLWithPath: path)
+			task.arguments = args
+			let pipe = Pipe()
+			task.standardOutput = pipe
+			task.standardError = pipe
+			// Read before the handler resumes, or a child that fills the pipe buffer
+			// deadlocks against a reader that never runs.
+			task.terminationHandler = { finished in
+				let data = pipe.fileHandleForReading.readDataToEndOfFile()
+				continuation.resume(returning: (finished.terminationStatus, String(data: data, encoding: .utf8) ?? ""))
+			}
+			do { try task.run() } catch {
+				continuation.resume(returning: (-1, "\(error)"))
+			}
+		}
 	}
 }
