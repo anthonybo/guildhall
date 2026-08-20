@@ -353,6 +353,56 @@ where the material was.
   notes in documentation, one of them a `//` inside a JSDoc block. Match the labels
   the machine actually answers to instead, so an invented name passes.
 
+**Then an adversarial review found nine more, two of them in the fix above.** Every
+one was reproduced in a throwaway clone, and the pattern is the same sentence every
+time: a real check over the wrong bytes.
+
+- **`--not` is an XOR toggle, not a prefix.** It flips `UNINTERESTING` for all
+  FOLLOWING revisions, so emitting `--not --remotes=origin` once per ref makes the
+  second occurrence toggle negation back OFF — the trailing `--remotes=` becomes a
+  positive tip and the second branch becomes negative, marking the commits being
+  pushed uninteresting. Measured here: the correct form enumerates 290 objects, the
+  accumulated form **0**. Fires on `push --tags`, `--all`, `--mirror`, or any push
+  of two new refs. Emit it once, after every positive tip.
+- **git hands `pre-push` the remote NAME as `$1`; using `origin` instead is the
+  same bug as hardcoding the range.** Pushing the same history to a second remote —
+  a fork, a mirror, or the moment a private repo is first published — excluded what
+  the FIRST remote had: 0 objects scanned while the push sent 2027, reported clean,
+  leak landed in the receiving repo.
+- **`git ls-files` + `readFileSync` is a WORKTREE scan wearing a tree scan's name.**
+  Four fail-open paths, all measured: a sparse checkout read 13 of 144 files; a
+  tracked file deleted without `git rm` went from 3 findings to 0; a non-ASCII
+  filename (which `ls-files` C-quotes without `-z`) gave 0 while byte-identical
+  content under a plain name gave 3; a symlink read its target instead of its blob.
+  Read `git cat-file` against the index.
+- **`writeFileSync(f, data, { mode: 0o600 })` does not chmod an existing file.**
+  `mode` applies at CREATION only. Measured: 644 in, 644 out. So it protected the
+  one case already safe and did nothing in the recovery cases that matter — a
+  restore, a synced dotfiles directory, `echo 1234 > passcode`. Write to a temp file
+  and rename; the rename carries the new file's mode and is atomic as a bonus.
+- **`if cmd | grep …` branches on GREP.** Third occurrence in this repo. Anything
+  that fails without printing the literal "error" reported `swift: builds clean`: a
+  linker failure, a missing SDK, `xcode-select` pointed at Command Line Tools, a
+  compiler crash. Capture the output, test `$?` separately, then grep the text.
+- **Widening a pattern is how a check gets turned off.** Fixing real bypasses
+  (a comma-grouped figure, `pid=NNNNN`, `NN% of the weekly limit`) immediately flagged shell `"$1"`
+  in four scripts and eleven fixture pids. Match the SHAPE of a real figure, not the
+  currency symbol, and treat round values as the placeholders they are. Both
+  directions have to be tested — the bypass list AND the must-not-fire list.
+- **An exemption sized by LINE LENGTH is the wrong measure.** `allow-personal`
+  covering a whole minified line exempts a file; capping the line's length instead
+  cried wolf on an ordinary 300-character line of real code while still permitting a
+  compact abuse. Cap how many findings one comment may cover.
+- **A leading `\b` can never match between two word characters,** so a
+  private-name regex with one misses every glued form — `getProjectnameBoard`,
+  `MyProjectnameClient` — which is exactly how a project name appears in source. 2
+  of 5 forms detected.
+- **A realistic example inside the checker becomes a finding on somebody's
+  machine.** The comment illustrating the glued-name bug named a project, and
+  flagged itself on a clone whose sibling directory had that name.
+- **`git merge` runs neither `pre-commit` nor any content check.** It runs
+  `pre-merge-commit`, which did not exist. `git am` has the same gap.
+
 **Two rules the diff-only design cannot satisfy.** A pattern check at commit time
 only ever sees what is being added, so anything committed before the check existed,
 anything arriving by cherry-pick or revert (neither runs `commit-msg`), and
