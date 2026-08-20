@@ -36,31 +36,50 @@ writes is a "focus this tab" request to cmux, and only when you press enter.
 There is one exception, off unless you turn it on: see *Typing into a session
 from somewhere else* below.
 
+### Try it
+
 ```
+git clone https://github.com/anthonybo/guildhall && cd guildhall
 npm install
 npm start
 ```
 
-On a Mac, one command sets up everything — the command on your PATH, the browser
-view as a service that starts at login, and the menu bar icon:
+That is the whole of it if you only want the room in a terminal. Nothing below is
+required to use it.
+
+### Set it up properly, on a Mac
+
+One command, from the checkout, instead of the eight steps it replaces:
 
 ```
 npm run install:mac
 ```
 
-After that, upgrading is one command from anywhere — it pulls, rebuilds,
-reinstalls and reloads all of it:
+It puts `guildhall` on your PATH, installs the browser view as a service that
+starts at login, and builds and installs the menu bar app. It reports each part
+and whether it actually came up. Then choose a passcode, which it deliberately
+does not invent for you:
+
+```
+guildhall            # press ? for the panel, then p for the passcode
+```
+
+The room is optional from here on. Quit it and the browser view carries on,
+because that is a service now.
+
+### Upgrading, on any machine
 
 ```
 guildhall --upgrade
 ```
 
-It stops rather than guessing if the pull cannot fast-forward, because an upgrade
-has no business merging or rebasing on your behalf. Neither command chooses your
-passcode or control password; those are credentials, not something an installer
-should generate.
+Pulls, rebuilds, reinstalls both services and reloads them, from any directory.
+It stops rather than guessing if the pull cannot fast-forward — an upgrade has no
+business merging or rebasing on your behalf.
 
-Or do the parts by hand. Just the command on your PATH:
+### Or by hand
+
+Just the command on your PATH, without the services:
 
 ```
 npm link                    # from the project, once
@@ -394,6 +413,10 @@ wrangler, so they are fetched only when you ask — the toggle is remembered.
   Set `GUILDHALL_CMUX` if your cmux binary is not in the usual place.
 - A terminal implementing the kitty graphics protocol — Ghostty, kitty, or
   WezTerm — for the sprites. Anything else falls back to half-block rendering.
+- Xcode, only for the menu bar app, because it is built on the machine that runs
+  it rather than shipped as a binary — it is not code-signed, so a build from
+  somewhere else would not run. `npm run install:mac` skips it with a message when
+  there is no Swift toolchain, and everything else still installs.
 
 ## Layout
 
