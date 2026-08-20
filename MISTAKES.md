@@ -124,6 +124,88 @@ started, and it should degrade to "no tab" rather than guess wrong.
 
 ---
 
+## A menu bar app that felt slow
+
+**Status: solved, after four wrong fixes.** None of the four was wrong about
+being a real inefficiency; all four were measured against the wrong process.
+
+The symptom: clicking the status item took about two seconds to open the panel,
+and switching to its settings page three to five.
+
+### The cause
+
+**launchd was running the app at QoS `utility`.** `contrib/dev.guildhall.bar.plist`
+had no `ProcessType`, and `launchd.plist(5)` says an unspecified job gets "light
+resource limits … throttling its CPU usage and I/O bandwidth", while "interactive
+jobs run with the same resource limitations as apps, that is to say, none".
+
+Measured with `proc_pid_rusage(RUSAGE_INFO_V4)`, which breaks CPU time down by QoS
+class, on the same binary:
+
+| started by | user_interactive | utility |
+|---|---|---|
+| the LaunchAgent, no `ProcessType` | 0.0 ms | **4735.8 ms** |
+| LaunchServices (`open -a`) | 1482.4 ms | 8.9 ms |
+| the LaunchAgent, `ProcessType=Interactive` | — | **9.8 ms** |
+| the LaunchAgent, `ProcessType=Standard` | 0.0 ms | 385.5 ms — still clamped |
+
+`Standard` is documented as equivalent to unspecified, so it is a wasted attempt.
+A cold open costs about **250 ms of CPU either way**; clamped that is 528 ms of
+wall clock, unclamped 360 ms. The settings switch costs 115-140 ms of CPU and took
+**1474 ms clamped against 127 ms unclamped** on an idle machine. `sample` during a
+slow open put the main thread in `__CFRunLoopRun` for 4234 of 4374 samples — parked,
+not working — and `pageins` was 0 throughout, so it was scheduling, not I/O.
+
+**launchd caches the job definition.** Editing the plist does nothing until
+`launchctl bootout` and `bootstrap`.
+
+### Why four fixes in a row appeared to do nothing
+
+`swift/build.sh --install` prints `open -a GuildhallBar`, and an app launched that
+way goes through LaunchServices, which does **not** clamp it. So every test after
+every rebuild ran on the fast path, while the slow app was the one launchd starts
+at login. The fixes were being validated against a process that never had the
+problem.
+
+That is the whole lesson, and it is the same one as the entries below: the numbers
+were real and they described a different process than the one the person was
+clicking.
+
+### Tried, all real improvements, none of them the cause
+
+| # | Change | Why it looked right |
+|---|---|---|
+| 1 | `launchctl` off the main actor, then cached for 30s | it genuinely was a synchronous subprocess on the main actor, ~30 spawns a minute |
+| 2 | Removed `NSApplication.shared.activate(ignoringOtherApps:)` | deprecated, advisory under macOS 14+ cooperative activation, and the reports began in the round it was added |
+| 3 | Truncated strings before `Text` | rows really were handing `Text` a 2,577-character transcript excerpt; `lineLimit(1)` limits drawing, not measurement |
+| 4 | `.fixedSize` on the scroll content, fixed panel height | the documented fix for `MenuBarExtra(.window)` + `ScrollView` mis-layout — reverted afterwards, since a fixed height leaves an empty panel |
+
+### Measured, so do not re-measure
+
+- **`MenuBarExtra(.window)` is not slow.** A minimal one — `Text("hi")` and a
+  button, LSUIElement, ad-hoc signed — opens in **89 ms cold, 26 ms warm**. Do not
+  rewrite onto `NSStatusItem` + `NSPanel` for speed. (Serious menu bar apps do use
+  that shape, for control over the button and for a persistent hosting view; that
+  is a different argument from this one.)
+- **The panel's own content costs about 260 ms of CPU on the first open** and 33-58 ms
+  warm: ~117 ms for ten rows, ~108 ms for the ScrollView and group headers, and
+  roughly nothing for the quota block and the controls. One-time per process.
+- `@StateObject` on the `App` struct is **not** recreated per open — stamped once
+  per process.
+- The polling Task does not starve the main actor: 2.2 ms/s idle.
+- **A 250 ms heartbeat cannot tell "blocked" from "descheduled".** `MAIN BLOCKED
+  ~1042ms` was not 1042 ms of main-thread work; it was the app not being scheduled.
+  The clamped process produced those lines, the unclamped one produced none under
+  the same load.
+
+### Still worth doing, not the symptom
+
+After the panel has been opened once, `Panel.body` and the whole session list are
+re-evaluated on **every poll while it is closed** — 24 renders per 120 s, about
+184 ms of CPU per 120 s that nobody sees.
+
+---
+
 ## Measuring the wrong thing
 
 Four times, a number was produced, believed, and reported — and it answered a
@@ -135,6 +217,7 @@ different question than the one being asked. The number was real every time.
 | "the running server has stale code" | The build ARTIFACT's mtime, not the source's — a rebuild of unchanged source makes it look newer | Reading what the running bundle contained |
 | "the GIF is fixed" | The GIF file, not the GIF as the browser scales it — an 800px image displayed at 620 CSS px on a 2× screen | Being told three times it looked identical |
 | "the nameplates are blurry because of the encoder" | Dithering and scaling, when the plate was being drawn with a 4×6 font in a 16px-wide box | Reading `pick()` in nameplate.ts, which had the answer all along |
+| "the menu bar app is slow because of X" — four times | A process started with `open -a`, which LaunchServices does not CPU-clamp, while the slow one was the LaunchAgent's | QoS accounting per process, which showed 4735 ms of `utility` in one and 8.9 ms in the other |
 | "the terminal is not smaller, the type is smaller because the grid is wide" | The FONT SIZE, twice, while the report was about the PANEL being narrow — two different numbers, and only one of them was the complaint | Being told a third time, then measuring panel width: 659px beside a neighbor at 1400px |
 
 **The rule that would have caught all five:** measure the thing the person is

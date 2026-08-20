@@ -37,6 +37,41 @@
 		<string>/Applications/GuildhallBar.app/Contents/MacOS/GuildhallBar</string>
 	</array>
 
+	<!--
+		Interactive, or launchd throttles it.
+		
+		launchd.plist(5): "If left unspecified, the system will apply light resource
+		limits to the job, throttling its CPU usage and I/O bandwidth" — and
+		"Interactive jobs run with the same resource limitations as apps, that is to
+		say, none. Interactive jobs are critical to maintaining a responsive user
+		experience."
+		
+		This is a menu bar app a person clicks. It was being run as a background job
+		with a throttled CPU share, which is the wrong class of job entirely.
+		
+		MEASURED, with proc_pid_rusage QoS accounting on the same binary:
+		
+		  started by this agent, no ProcessType   0.0 ms user_interactive, 4735.8 ms utility
+		  started by LaunchServices (`open -a`)   1482.4 ms user_interactive, 8.9 ms utility
+		  started by this agent, Interactive      9.8 ms utility
+		  started by this agent, Standard         still clamped — Standard means unspecified
+		
+		Every bit of the app's work, main thread included, ran at `utility`. `sample`
+		during a slow open found the main thread parked in __CFRunLoopRun for 4234 of
+		4374 samples: not working, not scheduled. The same cold open costs about
+		250 ms of CPU either way — clamped that took 528 ms of wall clock (48% CPU),
+		unclamped 360 ms (72%) — and the settings switch, 115-140 ms of CPU, took
+		1474 ms clamped against 127 ms unclamped on an idle machine.
+		
+		launchd CACHES the job definition, so editing this file changes nothing on its
+		own. It has to be reloaded:
+		
+		  launchctl bootout   gui/$(id -u)/dev.guildhall.bar
+		  launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.guildhall.bar.plist
+	-->
+	<key>ProcessType</key>
+	<string>Interactive</string>
+
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>

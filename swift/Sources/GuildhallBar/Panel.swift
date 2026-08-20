@@ -31,6 +31,9 @@ struct Panel: View {
 				list
 			}
 		}
+		// Width only. A fixed height was tried while chasing the lag and reverted: it
+		// leaves a tall empty panel when few sessions are running, and the lag was
+		// never layout — see the note in MISTAKES.md.
 		.frame(width: 380)
 		.onAppear {
 			model.start(open: true)
