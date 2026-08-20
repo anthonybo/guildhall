@@ -24,6 +24,7 @@ import { execFileSync, execFile } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { writePrivate } from '../privatefile.ts'
 
 /** One of the plan's limits: a five-hour window, a weekly one, and so on. */
 export type Limit = {
@@ -87,8 +88,7 @@ function read(): Usage | null {
 
 function write(u: Usage) {
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file(), JSON.stringify(u), { mode: 0o600 })
+		writePrivate(file(), JSON.stringify(u))
 	} catch {}
 }
 

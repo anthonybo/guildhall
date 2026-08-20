@@ -13,6 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { writePrivate } from './privatefile.ts'
 
 export type Config = {
 	/** serve the room over HTTP. Off unless deliberately turned on. */
@@ -65,8 +66,7 @@ export function load(): Config {
 
 export function save(cfg: Config) {
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file(), JSON.stringify(cfg, null, '\t') + '\n', { mode: 0o600 })
+		writePrivate(file(), JSON.stringify(cfg, null, '\t') + '\n')
 		return true
 	} catch {
 		return false

@@ -28,6 +28,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { writePrivate } from './privatefile.ts'
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
@@ -93,8 +94,7 @@ export function setControlPass(pass: string, opts: { live?: boolean } = {}): Set
 	const salt = crypto.randomBytes(16)
 	const key = derive(p, salt)
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file(), `scrypt$${N}$${salt.toString('hex')}$${key.toString('hex')}\n`, { mode: 0o600 })
+		writePrivate(file(), `scrypt$${N}$${salt.toString('hex')}$${key.toString('hex')}\n`)
 	} catch {
 		return { ok: false, why: 'could not write the config file' }
 	}
@@ -171,8 +171,7 @@ function attempts(): Map<string, Attempts> {
 
 function saveThrottle() {
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(throttleFile(), JSON.stringify(Object.fromEntries(attempts())), { mode: 0o600 })
+		writePrivate(throttleFile(), JSON.stringify(Object.fromEntries(attempts())))
 	} catch {}
 }
 const FREE_TRIES = 5

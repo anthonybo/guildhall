@@ -16,6 +16,7 @@ import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { writePrivate } from './privatefile.ts'
 
 /**
  * Where settings live — resolved on every call, never captured at import.
@@ -43,8 +44,7 @@ export function passcode(): string {
 	} while (n >= 60000)
 	const code = String(n % 10000).padStart(4, '0')
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file(), code + '\n', { mode: 0o600 })
+		writePrivate(file(), code + '\n')
 	} catch {}
 	return code
 }
@@ -78,8 +78,7 @@ export function setPasscode(code: string): SetResult {
 	if (!/^\d{4}$/.test(code)) return { ok: false, why: 'four digits, nothing else' }
 	if (WEAK.has(code)) return { ok: false, why: 'too common — a guesser tries that one first' }
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(file(), code + '\n', { mode: 0o600 })
+		writePrivate(file(), code + '\n')
 	} catch {
 		return { ok: false, why: 'could not write the file' }
 	}
@@ -117,8 +116,7 @@ function secret(): Buffer {
 	} catch {}
 	const key = crypto.randomBytes(32)
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(keyFile(), key, { mode: 0o600 })
+		writePrivate(keyFile(), key)
 	} catch {}
 	return key
 }
@@ -143,8 +141,7 @@ export function valid(id: string | undefined) {
 /** Sign every device out by making every existing signature unverifiable. */
 function rotateSessions() {
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(keyFile(), crypto.randomBytes(32), { mode: 0o600 })
+		writePrivate(keyFile(), crypto.randomBytes(32))
 	} catch {}
 }
 
@@ -191,8 +188,7 @@ const byAddress = loadThrottle()
 
 function saveThrottle() {
 	try {
-		fs.mkdirSync(dir(), { recursive: true, mode: 0o700 })
-		fs.writeFileSync(throttleFile(), JSON.stringify(Object.fromEntries(byAddress)), { mode: 0o600 })
+		writePrivate(throttleFile(), JSON.stringify(Object.fromEntries(byAddress)))
 	} catch {}
 }
 
