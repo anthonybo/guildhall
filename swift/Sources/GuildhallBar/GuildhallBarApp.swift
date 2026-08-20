@@ -31,6 +31,21 @@ final class Model: ObservableObject {
 	private var daemonCheckedAt = Date.distantPast
 	private let daemonTTL: TimeInterval = 30
 
+	/// What the icon should say.
+	var mood: BarIcon.Mood {
+		if !reachable { return .unknown }
+		if !needsYou.isEmpty { return .needsYou }
+		return working.isEmpty ? .quiet : .active
+	}
+
+	/// The number beside it, or nothing when there is nothing to count. A "0" next
+	/// to a quiet icon is noise; the icon already said it.
+	var badge: Int? {
+		if !reachable { return nil }
+		if !needsYou.isEmpty { return needsYou.count }
+		return working.isEmpty ? nil : working.count
+	}
+
 	var needsYou: [Session] { sessions.filter(\.needsYou) }
 	var working: [Session] { sessions.filter(\.working) }
 
@@ -193,37 +208,27 @@ struct GuildhallBarApp: App {
 		MenuBarExtra {
 			Panel(model: model)
 		} label: {
-			// The label is the whole point of the app: the number of sessions that want
-			// a person, at a glance, without opening anything. A count of what is
-			// WORKING is second, because that answers "is it safe to close the lid".
+			// The label answers one question without being clicked: does anything want
+			// me. Colour carries it, and the count is the detail underneath.
 			//
-			// The resting glyph is a hall with columns, which is the app's own name and
-			// the thing it draws — a room full of workers at desks. It was a plain
-			// circle, which is what every other status item in a menu bar looks like:
-			// nothing about it said which app it belonged to or what it was for.
-			//
-			// The glyph changes with state rather than only the number, because the
-			// count is unreadable at a glance and the shape is not. Filled means
-			// somebody is working; hollow means the room is quiet.
-			//
-			// The one exception to the family is "needs you". That is the state you must
-			// not miss, so it gets the shape everything else on the system uses for
-			// exactly that, rather than a subtler version of the hall.
-			if !model.reachable {
-				// A dash, not a dimmed hall. Dimming was the first attempt and it is
-				// indistinguishable from the quiet state at menu bar size, which makes
-				// the two conditions that most need telling apart — "nothing is
-				// happening" and "I cannot see anything" — look the same.
-				Image(systemName: "building.columns")
-				Text("—")
-			} else if !model.needsYou.isEmpty {
-				Image(systemName: "exclamationmark.triangle.fill")
-				Text("\(model.needsYou.count)")
-			} else if !model.working.isEmpty {
-				Image(systemName: "building.columns.fill")
-				Text("\(model.working.count)")
+			// Colour rather than shape alone because the shape is 14 points wide in a
+			// row of other people's icons — green against grey is legible at a glance in
+			// a way a filled versus hollow building is not. The shape still changes too,
+			// so this does not depend on colour vision.
+			if let icon = BarIcon.image(for: model.mood) {
+				Image(nsImage: icon)
+					.accessibilityLabel(BarIcon.label(for: model.mood))
 			} else {
-				Image(systemName: "building.columns")
+				// If a symbol is ever missing, say something rather than showing nothing:
+				// an absent status item looks exactly like an app that failed to start.
+				Text("gh")
+			}
+			if let count = model.badge {
+				Text("\(count)")
+			} else if model.mood == .unknown {
+				// Quiet and unreachable are the same glyph now that both are templates, so
+				// the dash is what separates "nothing is happening" from "I cannot see".
+				Text("—")
 			}
 		}
 		// .window, not .menu: the content is a list of sessions with two lines each,
