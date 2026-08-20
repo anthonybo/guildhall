@@ -145,7 +145,6 @@ struct Settings {
 /// away with code that can get stuck half-connected.
 actor Client {
 	private var settings = Settings.load()
-	private var cookie: String?
 
 	/// Re-read the config, in case the port moved while this was running.
 	func reload() { settings = Settings.load() }
@@ -161,73 +160,35 @@ actor Client {
 		case notRunning
 		case refused
 		case badResponse
+		/// guildhall itself could not be located, which is a different problem from it
+		/// not answering — and a different sentence for the panel to show.
+		case noCLI
 	}
 
-	func sessions() async throws -> [Session] {
-		do {
-			return try await fetch()
-		} catch Failure.refused {
-			// One silent re-auth rather than surfacing an error nobody can act on.
-			//
-			// NOT because a restart invalidates the cookie — an earlier comment claimed
-			// that and the server says the opposite in as many words: the signing key is
-			// persisted precisely so restarts do not sign devices out. What does
-			// invalidate it is a passcode change, which rotates the key.
-			cookie = nil
-			return try await fetch()
-		}
-	}
-
-	private func fetch() async throws -> [Session] {
-		if cookie == nil { try await authenticate() }
-		var req = URLRequest(url: baseURL.appendingPathComponent("api/sessions"))
-		req.timeoutInterval = 5
-		if let cookie { req.setValue("gh_sid=\(cookie)", forHTTPHeaderField: "Cookie") }
-		let (data, response) = try await send(req)
-		guard let http = response as? HTTPURLResponse else { throw Failure.badResponse }
-		if http.statusCode == 401 || http.statusCode == 403 { throw Failure.refused }
-		guard http.statusCode == 200 else { throw Failure.badResponse }
-		return try JSONDecoder().decode(Payload.self, from: data).sessions
-	}
-
-	private func authenticate() async throws {
-		var req = URLRequest(url: baseURL.appendingPathComponent("auth"))
-		req.httpMethod = "POST"
-		req.timeoutInterval = 5
-		req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-		req.httpBody = "code=\(settings.passcode)".data(using: .utf8)
-		let (_, response) = try await send(req)
-		guard let http = response as? HTTPURLResponse,
-			let header = http.value(forHTTPHeaderField: "Set-Cookie"),
-			let value = header.split(separator: ";").first?.split(separator: "=", maxSplits: 1).last
-		else { throw Failure.refused }
-		cookie = String(value)
-	}
-
-	/// URLSession, with redirects left alone.
+	/// The room, read by running `guildhall --sessions`.
 	///
-	/// `/auth` answers 303 to `/`, and following it would fetch the whole HTML page
-	/// to learn something the Set-Cookie header already said.
-	private func send(_ req: URLRequest) async throws -> (Data, URLResponse) {
+	/// This was an HTTP GET to `127.0.0.1:<port>/api/sessions`, behind the view
+	/// passcode, which meant the icon only worked while an HTTP server was listening.
+	/// So installing the menu bar app installed a server, and the machine began
+	/// answering on every interface for data it only ever showed to itself. Serving
+	/// the browser view is now a setting that is off until somebody turns it on, and
+	/// this reads the same snapshot the HTTP route would have served — `snapshot()` in
+	/// serve.ts, one definition, two callers.
+	///
+	/// It also removes the passcode from this path entirely. UsageStore already read
+	/// its half this way, for a related reason written down there: depending on the
+	/// port meant depending on which guildhall happened to be holding it.
+	func sessions() async throws -> [Session] {
+		guard let (node, entry) = Config.tools() else { throw Failure.noCLI }
+		let (status, out) = await Daemon.run(node, [entry, "--sessions"])
+		guard status == 0 else { throw Failure.notRunning }
+		guard let data = out.data(using: .utf8), !data.isEmpty else { throw Failure.badResponse }
 		do {
-			return try await URLSession.noRedirects.data(for: req)
-		} catch let error as URLError where error.code == .cannotConnectToHost || error.code == .networkConnectionLost {
-			throw Failure.notRunning
+			return try JSONDecoder().decode(Payload.self, from: data).sessions
+		} catch {
+			// stdout is not JSON. Almost always a node that printed a warning first, and
+			// worth distinguishing from "nothing is running" so the panel can say which.
+			throw Failure.badResponse
 		}
 	}
-}
-
-extension URLSession {
-	fileprivate static let noRedirects: URLSession = {
-		final class Stop: NSObject, URLSessionTaskDelegate {
-			func urlSession(
-				_ session: URLSession, task: URLSessionTask,
-				willPerformHTTPRedirection response: HTTPURLResponse, newRequest: URLRequest,
-				completionHandler: @escaping (URLRequest?) -> Void
-			) { completionHandler(nil) }
-		}
-		let config = URLSessionConfiguration.ephemeral
-		config.requestCachePolicy = .reloadIgnoringLocalCacheData
-		return URLSession(configuration: config, delegate: Stop(), delegateQueue: nil)
-	}()
 }

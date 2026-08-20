@@ -156,7 +156,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|upgrade|set-control-password|set-passcode)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|upgrade|set-control-password|set-passcode)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -168,12 +168,43 @@ if (process.argv.includes('--usage')) {
 	console.log(JSON.stringify((await fetchNow()) ?? { limits: [], at: 0 }))
 	process.exit(0)
 }
+/**
+ * The resolved settings as JSON, then exit.
+ *
+ * So that nothing else has to re-implement the defaults or the validation. The
+ * installer read config.json itself and applied its own fallback, which is how a
+ * third opinion about the default port got into the tree — and a file without a
+ * `port` key made it report "nothing answering on port undefined" for a service
+ * that was running fine. It asks now.
+ */
+if (process.argv.includes('--config')) {
+	console.log(JSON.stringify(cfgStore.load()))
+	process.exit(0)
+}
+/**
+ * One snapshot of the room as JSON, then exit.
+ *
+ * This is how the menu bar app reads sessions, and the reason the browser server
+ * can be off by default. It used to poll `http://127.0.0.1:4318/api/sessions`,
+ * which meant the icon only worked if an HTTP server was listening — so installing
+ * the app installed a server, and a machine started answering on every interface
+ * for something that only ever needed to talk to itself.
+ *
+ * Same `snapshot()` the HTTP route serves, so the two cannot drift.
+ */
+if (process.argv.includes('--sessions')) {
+	const { snapshot } = await import('./serve.ts')
+	console.log(snapshot(process.argv.includes('--demo')))
+	process.exit(0)
+}
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
 	console.log(`guildhall ${BUILD} — every live Claude Code session as a pixel office
 
 watching
   guildhall                watch the room
   guildhall --once         print one frame and exit
+  guildhall --sessions     print the room as JSON and exit
+  guildhall --config       print the resolved settings as JSON and exit
   guildhall --demo         a fictional office; never reads the real registry
 
 serving the browser view — these draw nothing and want no terminal

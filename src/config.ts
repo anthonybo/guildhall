@@ -42,7 +42,32 @@ export type Config = {
 
 // Vertical needs the graphics protocol, since the plate is a rotated image; on a
 // terminal without it the room falls back to horizontal on its own.
-const DEFAULTS: Config = { serve: false, port: 4318, host: '0.0.0.0', labels: 'vertical', awakeDisplay: true, control: false }
+/**
+ * The defaults, and the ONLY place they are declared.
+ *
+ * `host` was `0.0.0.0` — every interface. Combined with the headless service being
+ * installed at login, that meant setting up the menu bar app quietly turned the
+ * machine into a server answering on the LAN and on the tailnet, for data the user
+ * had not chosen to share. `serve: false` said the opposite and was right; the host
+ * default undid it the moment anything switched serving on.
+ *
+ * Loopback is the honest default: a browser on this machine can reach it, nothing
+ * else can, and sharing is a deliberate change to `the network` in the menu bar
+ * settings or this file.
+ */
+const DEFAULTS: Config = { serve: false, port: 4318, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false }
+
+/**
+ * A port this program will accept, in one place.
+ *
+ * There were three rules: this file took 1-65535, the menu bar refused anything
+ * below 1024, and the installer had its own fallback — so a port set in one surface
+ * could be rejected by the next. Below 1024 needs root on macOS, so the menu bar
+ * was the correct one and it is now the only one.
+ */
+export const PORT_MIN = 1024
+export const PORT_MAX = 65535
+export const okPort = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= PORT_MIN && (n as number) <= PORT_MAX
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
@@ -53,7 +78,7 @@ export function load(): Config {
 		const raw = JSON.parse(fs.readFileSync(file(), 'utf8')) as Partial<Config>
 		return {
 			serve: typeof raw.serve === 'boolean' ? raw.serve : DEFAULTS.serve,
-			port: Number.isInteger(raw.port) && raw.port! > 0 && raw.port! < 65536 ? raw.port! : DEFAULTS.port,
+			port: okPort(raw.port) ? raw.port : DEFAULTS.port,
 			host: typeof raw.host === 'string' && raw.host ? raw.host : DEFAULTS.host,
 			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
 			awakeDisplay: typeof raw.awakeDisplay === 'boolean' ? raw.awakeDisplay : DEFAULTS.awakeDisplay,

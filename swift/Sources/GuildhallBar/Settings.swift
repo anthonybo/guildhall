@@ -25,6 +25,12 @@ struct SettingsView: View {
 	@State private var failed = false
 	@State private var controlPassword = ""
 	@State private var controlSet = Config.controlPasswordIsSet()
+	/// Whether the browser view is being served, read from launchd rather than from
+	/// the config file. `--headless` forces `serve` true for its own run, so the file
+	/// cannot answer this question — the only truthful answer is whether the service
+	/// is loaded.
+	@State private var serving = false
+	@State private var serveInstalled = Daemon.installed
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
@@ -39,6 +45,56 @@ struct SettingsView: View {
 				Spacer()
 				Text("Settings").font(.headline)
 			}
+
+			// The browser view, off unless asked for.
+			//
+			// This is the setting that was missing, and its absence was the bug: there was
+			// no way to say no, so `install:mac` said yes for you and the machine started
+			// answering on every interface. The menu bar app needs none of it — it reads
+			// the room by running `guildhall --sessions`.
+			//
+			// Bound to launchd, not to the config file. `--headless` sets `serve` true for
+			// its own process whatever the file says, so "is it serving" is only ever
+			// answerable by asking whether the service is loaded.
+			if serveInstalled {
+				// A Binding that intercepts the set, rather than `.onChange`: the
+				// two-parameter form needs macOS 14 and this app targets 13, and the
+				// one-parameter form is deprecated, which -warnings-as-errors treats as a
+				// build failure.
+				Toggle("Serve the browser view", isOn: Binding(
+					get: { serving },
+					set: { want in
+						serving = want
+						Task {
+							let failure = want ? await Daemon.start() : await Daemon.stop()
+							if let failure {
+								note = failure
+								failed = true
+								// Show what launchd actually did, not what was asked for.
+								serving = await Daemon.loaded()
+							} else {
+								// Keep the file honest too, so the terminal and this agree.
+								config.serve = want
+								// Best-effort: launchd already did the load or unload, which is what
+								// "serving" actually means. A config write that fails must not undo it.
+								try? config.save()
+								note = want ? "Serving. Press ? in the room for the address." : "Stopped serving."
+								failed = false
+							}
+						}
+					}
+				))
+				Text(serving
+					? "A browser can reach this machine. The three settings below apply to it."
+					: "Nothing is served. The menu bar icon works either way.")
+					.font(.caption).foregroundStyle(.secondary)
+			} else {
+				Text("Serve the browser view")
+				Text("Not installed. Run `sh tools/install-mac.sh --serve` in the checkout once, then it can be switched on here.")
+					.font(.caption).foregroundStyle(.secondary)
+			}
+
+			Divider()
 
 			Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
 				GridRow {
@@ -120,6 +176,12 @@ struct SettingsView: View {
 		// Same width as the list, so switching between them does not resize the popover
 		// under the pointer.
 		.frame(width: 380)
+		// Ask launchd what is actually true, once, when the page opens. The toggle's
+		// initial value cannot come from the config file — see the note on `serving`.
+		.task {
+			serveInstalled = Daemon.installed
+			serving = serveInstalled ? await Daemon.loaded() : false
+		}
 	}
 
 	private func setControl() {

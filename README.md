@@ -55,9 +55,15 @@ One command, from the checkout, instead of the eight steps it replaces:
 npm run install:mac
 ```
 
-It puts `guildhall` on your PATH, installs the browser view as a service that
-starts at login, builds and installs the menu bar app, and turns on this
-repository's commit gates. It reports each part and whether it actually came up.
+It puts `guildhall` on your PATH, builds and installs the menu bar app, and turns
+on this repository's commit gates.
+
+It does **not** start serving the browser view. Installing a menu bar app should
+not quietly turn the machine into a server, and it does not need to: the app reads
+the room by running `guildhall --sessions`, with no server, no port and no passcode
+involved. Add `--serve` if you want the browser view as a login service, or switch
+it on later from the menu bar settings — the same setting either way. Even then it
+binds loopback only until you choose "the network". It reports each part and whether it actually came up.
 
 The gates are worth a sentence, because git will not do it for you:
 `core.hooksPath` is repository-local and is not carried across a clone, so a fresh
@@ -256,7 +262,10 @@ Underneath it, the same list the terminal shows, grouped by who needs you first.
 *Both are `--demo`: every project name and sentence above is invented, so the
 images never carry anyone's real work.*
 
-It answers on your local network and on any VPN interface. Binding to `0.0.0.0`
+Serving binds `127.0.0.1` unless you change it, so by default only a browser on
+this machine can reach it. Choosing "the network" in the menu bar settings — or
+setting `host` to `0.0.0.0` — is what makes it answer on your local network and on
+any VPN interface. Binding to `0.0.0.0`
 already covers a Tailscale address, so LAN today and a tailnet later is the same
 server with nothing to change. It is never on the public internet.
 
@@ -300,7 +309,7 @@ it serves, holds sleep off while sessions work, and draws nothing at all.
 
 ```
 guildhall --headless
-2026-08-19 15:39:06  guildhall headless on 0.0.0.0:4318 (pid 1234) — 0.6.0
+2026-08-19 15:39:06  guildhall headless on 127.0.0.1:4318 (pid 1234) — 0.6.0
 ```
 
 Run it at login so it survives a reboot, which is the point — a phone checking on

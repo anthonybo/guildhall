@@ -136,13 +136,31 @@ const MIME: Record<string, string> = {
 	'.json': 'application/json; charset=utf-8',
 }
 
+/**
+ * One snapshot of everything a client is told, as JSON.
+ *
+ * Exported because there are now two callers and there must not be two shapes: the
+ * HTTP route below, and `guildhall --sessions`, which is how the menu bar app reads
+ * the room when the browser server is switched off. A second copy of this object
+ * would drift the moment a field is added — which is exactly how four different
+ * ideas of the settings defaults got into this codebase.
+ *
+ * `build()`, not the frozen `BUILD`: this process outlives releases, and a browser
+ * that reads its version from here must not be told a stale one.
+ */
+export function snapshot(demo = false): string {
+	return JSON.stringify({
+		sessions: demo ? demoSessions() : collect(),
+		at: Date.now(),
+		version: build(),
+		update: available(),
+		client: clientStamp(),
+	})
+}
+
 export function createServer(opts: ServeOptions) {
 	const sessions = () => (opts.demo ? demoSessions() : collect())
-	/** The browser shows the same version and update mark the terminal does, so a
-	 *  stale phone tab is as visible as a stale terminal. */
-	// `build()`, not the frozen `BUILD`: this process outlives releases, and a
-	// browser that reads its version from here must not be told a stale one.
-	const payload = () => JSON.stringify({ sessions: sessions(), at: Date.now(), version: build(), update: available(), client: clientStamp() })
+	const payload = () => snapshot(opts.demo)
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 	/** When a message last went out, so the heartbeat below can be honest about ages. */

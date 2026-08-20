@@ -17,9 +17,16 @@ import Foundation
 /// Changing the port or the passcode needs the service restarted to take effect,
 /// which the caller does — the app already owns that button.
 struct Config {
-	var serve = true
+	// These mirror src/config.ts, which owns them. They disagreed: node defaulted
+	// `serve` to false and this to TRUE, so with no config file the two halves of the
+	// same program held opposite beliefs about whether the machine was serving. And
+	// `host` defaulted to every interface here too.
+	//
+	// They are only reached when config.json is missing or unreadable; the file is the
+	// source of truth whenever it exists.
+	var serve = false
 	var port = 4318
-	var host = "0.0.0.0"
+	var host = "127.0.0.1"
 	var labels = "vertical"
 	var awakeDisplay = true
 	var control = false

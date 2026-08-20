@@ -93,7 +93,11 @@ enum Daemon {
 	///
 	/// `terminationHandler` rather than `waitUntilExit()`, which sleeps ~64ms on a
 	/// run loop no matter how fast the child is.
-	private static func run(_ path: String, _ args: [String]) async -> (status: Int32, out: String) {
+	///
+	/// Not private any more: Client reads the room through `guildhall --sessions` and
+	/// needs exactly this, including the concurrent drain below. A second copy would
+	/// be a second chance to reintroduce the deadlock described there.
+	static func run(_ path: String, _ args: [String]) async -> (status: Int32, out: String) {
 		let task = Process()
 		task.executableURL = URL(fileURLWithPath: path)
 		task.arguments = args
