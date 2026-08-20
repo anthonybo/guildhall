@@ -29,6 +29,14 @@ private struct SwitchRow: View {
 	/// for node to launch and bind, which is about seven — without a spinner and a
 	/// disabled switch, that reads as a dead control.
 	var busy = false
+	/// The switch's own color when on.
+	///
+	/// Colour that MEANS something rather than decoration: green matches the menu bar
+	/// icon's own language for "working", and the control switch is orange because it
+	/// hands somebody the ability to type into every session — the one setting here
+	/// with a consequence worth hesitating over. Everything else keeps the system
+	/// accent, so the two that are tinted stand out.
+	var tint: Color = .accentColor
 	@Binding var isOn: Bool
 
 	var body: some View {
@@ -46,7 +54,7 @@ private struct SwitchRow: View {
 			if busy {
 				ProgressView().controlSize(.small)
 			}
-			Toggle("", isOn: $isOn).toggleStyle(.switch).labelsHidden().disabled(busy)
+			Toggle("", isOn: $isOn).toggleStyle(.switch).labelsHidden().disabled(busy).tint(tint)
 		}
 	}
 }
@@ -74,6 +82,17 @@ struct SettingsView: View {
 	@State private var serveNote = ""
 	@State private var serveFailed = false
 	@State private var serveBusy = false
+	/// What is on disk, so the page can tell a typed change from no change at all.
+	/// Apply used to be enabled always, which offers to save when there is nothing to
+	/// save — and gives no signal at the moment there is.
+	@State private var savedPort = Config.load().port
+	@State private var savedPasscode = Config.passcode()
+
+	/// Only the typed fields need applying. Switches and the picker take effect as
+	/// they are used, so they are never "unsaved".
+	private var portChanged: Bool { config.port != savedPort }
+	private var passcodeChanged: Bool { passcode != savedPasscode }
+	private var dirty: Bool { portChanged || passcodeChanged }
 
 	var body: some View {
 		VStack(alignment: .leading, spacing: 14) {
@@ -121,6 +140,7 @@ struct SettingsView: View {
 							: "Off. Nothing is served — the menu bar icon works either way.",
 				captionIsError: serveFailed,
 				busy: serveBusy,
+				tint: .green,
 				isOn: Binding(
 					get: { serving },
 					set: { want in
@@ -132,28 +152,54 @@ struct SettingsView: View {
 
 			Divider()
 
-			Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 10) {
+			// Two columns, not three.
+			//
+			// A third column of hints beside 80pt fields inside a 380pt popover left every
+			// one of them wrapping onto two lines, and clipped the "Reachable on" label
+			// outright. The hints say more, in one line underneath, where there is room for
+			// them — and the unsaved warning NAMES the field rather than pointing at it.
+			Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
 				GridRow {
 					Text("Port")
 					TextField("4318", value: $config.port, format: .number.grouping(.never))
-						.frame(width: 80)
-					Text("restarts the service").font(.caption).foregroundStyle(.secondary)
+						.frame(width: 90)
 				}
 				GridRow {
 					Text("Passcode")
 					TextField("8317", text: $passcode)
-						.frame(width: 80)
-					Text("four digits · signs every device out").font(.caption).foregroundStyle(.secondary)
+						.frame(width: 90)
 				}
 				GridRow {
 					Text("Reachable on")
-					Picker("", selection: $config.host) {
+					// Immediate, like the switches: a discrete choice has no half-typed state
+					// to commit, so making it wait for Apply only created a way to forget.
+					Picker("", selection: Binding(
+						get: { config.host },
+						set: { config.host = $0; saveNow() }
+					)) {
 						Text("this machine only").tag("127.0.0.1")
 						Text("the network").tag("0.0.0.0")
 					}
-					.labelsHidden().frame(width: 170)
-					Color.clear.frame(height: 1)
+					.labelsHidden().frame(width: 180)
 				}
+			}
+
+			if dirty {
+				Label(
+					portChanged && passcodeChanged
+						? "Port and passcode not saved yet."
+						: portChanged ? "Port not saved yet." : "Passcode not saved yet.",
+					systemImage: "exclamationmark.circle.fill"
+				)
+				.font(.caption).foregroundStyle(.orange)
+			} else if config.host == "0.0.0.0" {
+				Label("Anything on your network or tailnet can reach it, with the passcode.", systemImage: "wifi")
+					.font(.caption).foregroundStyle(.orange)
+					.fixedSize(horizontal: false, vertical: true)
+			} else {
+				Text("Loopback only. A new port restarts the service; a new passcode signs every device out.")
+					.font(.caption).foregroundStyle(.secondary)
+					.fixedSize(horizontal: false, vertical: true)
 			}
 
 			Divider()
@@ -162,7 +208,7 @@ struct SettingsView: View {
 			// the top switch did not, which is a panel where identical-looking controls
 			// behave differently — and Apply is easy to miss, so a flipped switch could
 			// look like it had done something when it had not.
-			SwitchRow(title: "Let the browser type into sessions", caption: nil, isOn: Binding(
+			SwitchRow(title: "Let the browser type into sessions", caption: nil, tint: .orange, isOn: Binding(
 				get: { config.control },
 				set: { config.control = $0; saveNow() }
 			))
@@ -214,12 +260,21 @@ struct SettingsView: View {
 			}
 
 			HStack(spacing: 8) {
-				Text("The switches apply as you flip them.")
-					.font(.caption).foregroundStyle(.secondary)
+				Text(dirty
+					? "Unsaved changes above."
+					: "Everything else applies as you change it.")
+					.font(.caption)
+					.foregroundStyle(dirty ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
 				Spacer()
-				// Named for what it does. "Apply" alone read as "apply the whole page",
-				// which is why flipping a switch and then pressing it felt necessary.
-				Button("Apply port & passcode") { apply() }.keyboardShortcut(.defaultAction)
+				// Grey until there is something to apply, and prominent when there is.
+				// A button that is always enabled offers to save when nothing has changed
+				// and gives no signal at the moment something has — so it reads as a step
+				// you must always perform, which is why a flipped switch felt unsaved.
+				Button("Apply port & passcode") { apply() }
+					.keyboardShortcut(.defaultAction)
+					.disabled(!dirty)
+					.buttonStyle(.borderedProminent)
+					.tint(dirty ? .accentColor : .gray)
 			}
 		}
 		.padding(14)
@@ -312,9 +367,13 @@ struct SettingsView: View {
 				return
 			}
 			try config.save()
+			// The page is only clean once the write succeeded, so a refused port leaves the
+			// hint and the button exactly as they were.
+			savedPort = config.port
+			savedPasscode = passcode
 			note = "Saved — restarting the service so it takes effect."
 			failed = false
-			model.act { await Daemon.restart() }
+			if serving { model.act { await Daemon.restart() } }
 		} catch {
 			note = error.localizedDescription
 			failed = true
