@@ -40,7 +40,28 @@ final class Model: ObservableObject {
 	/// dropdown is OPENED — so until somebody clicked the icon, nothing was ever
 	/// fetched and the label sat on its empty-state glyph. An icon whose entire job
 	/// is to be correct without being clicked cannot wait to be clicked.
-	init() { start() }
+	init() {
+		start()
+		heartbeat()
+	}
+
+	/// A tick on the main actor, purely to detect when it is blocked.
+	///
+	/// Temporary instrumentation. A gap much larger than the interval means something
+	/// ran long on the main thread, which is exactly what "it takes seconds to open"
+	/// looks like from the inside and what no amount of reading the code has settled.
+	private func heartbeat() {
+		Task { [weak self] in
+			var last = Date()
+			while !Task.isCancelled {
+				try? await Task.sleep(nanoseconds: 250_000_000)
+				let now = Date()
+				let gap = now.timeIntervalSince(last) * 1000
+				if gap > 900 { self?.note("MAIN BLOCKED ~\(Int(gap - 250))ms") }
+				last = now
+			}
+		}
+	}
 
 	/// The polling loop, as a Task rather than a Timer.
 	///

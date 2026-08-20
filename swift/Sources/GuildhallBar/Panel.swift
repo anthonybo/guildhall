@@ -34,11 +34,17 @@ struct Panel: View {
 		.frame(width: 380)
 		.onAppear {
 			model.start(open: true)
-			// The first click in the popover was being spent activating the app rather
-			// than pressing anything: an accessory app (LSUIElement) is not active when
-			// its status item is clicked, so the first mouse-down goes to activation.
-			// Reported as "the first click on settings does nothing".
-			NSApplication.shared.activate(ignoringOtherApps: true)
+			// NOTHING ELSE HERE, deliberately.
+			//
+			// This called `NSApplication.shared.activate(ignoringOtherApps: true)` to fix
+			// the first click being spent activating an accessory app. It is deprecated,
+			// and on macOS 14+ cooperative activation makes `ignoringOtherApps` advisory
+			// — the system decides — so it asks the window server to deactivate whatever
+			// is frontmost at the exact moment the popover is trying to appear. The
+			// report immediately after adding it was that opening the menu took seconds.
+			//
+			// A popover that opens instantly and costs one extra click is a better trade
+			// than one that swallows the click by taking three seconds to arrive.
 		}
 		.onDisappear {
 			model.start(open: false)
@@ -192,13 +198,12 @@ struct Panel: View {
 								Text("· \(resets)").font(.system(size: 10)).foregroundStyle(.secondary)
 							}
 						}
-						GeometryReader { geo in
-							ZStack(alignment: .leading) {
-								Capsule().fill(Color.secondary.opacity(0.22))
-								Capsule()
-									.fill(percent > 85 ? Color.red : percent > 60 ? Color.orange : Color.green)
-									.frame(width: geo.size.width * min(1, percent / 100))
-							}
+						// Same again: a known width, measured anyway.
+						ZStack(alignment: .leading) {
+							Capsule().fill(Color.secondary.opacity(0.22)).frame(width: 330)
+							Capsule()
+								.fill(percent > 85 ? Color.red : percent > 60 ? Color.orange : Color.green)
+								.frame(width: 330 * min(1, percent / 100))
 						}
 						.frame(height: 4)
 					}
@@ -288,7 +293,16 @@ private struct Row: View {
 						Spacer(minLength: 0)
 						Text(ago).font(.system(size: 10)).foregroundStyle(.secondary)
 					}
-					Text(session.doing?.isEmpty == false ? session.doing! : (session.title ?? state))
+					// TRUNCATED BEFORE Text, not by it.
+					//
+					// `lineLimit(1)` limits what is DRAWN; SwiftUI still lays out the whole
+					// string to work out where to cut. These are transcript excerpts — the
+					// live payload has one at 2,577 characters and another at 970 — so ten
+					// rows of that is a lot of text measurement on every render, on the main
+					// thread, and the heartbeat caught it as a 1,042ms stall.
+					//
+					// A 380pt row shows about 60 characters. 90 is generous and bounded.
+					Text(oneLine)
 						.font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
 					HStack(spacing: 6) {
 						Text(state).font(.system(size: 10)).foregroundStyle(color)
@@ -315,14 +329,15 @@ private struct Row: View {
 	/// The context bar: how full the window is, and red once compaction is close.
 	private func context(_ fraction: Double) -> some View {
 		HStack(spacing: 4) {
-			GeometryReader { geo in
-				ZStack(alignment: .leading) {
-					Capsule().fill(Color.secondary.opacity(0.25))
-					Capsule().fill(fraction > 0.85 ? Color.red : fraction > 0.6 ? Color.orange : Color.green)
-						.frame(width: geo.size.width * fraction)
-				}
+			// A fixed width needs no GeometryReader. It was measuring a 44pt bar it
+			// already knew the size of, once per row, and a GeometryReader inside a
+			// ScrollView forces extra layout passes for the whole scroll content.
+			ZStack(alignment: .leading) {
+				Capsule().fill(Color.secondary.opacity(0.25)).frame(width: 44)
+				Capsule().fill(fraction > 0.85 ? Color.red : fraction > 0.6 ? Color.orange : Color.green)
+					.frame(width: 44 * fraction)
 			}
-			.frame(width: 44, height: 4)
+			.frame(height: 4)
 			Text("\(Int(fraction * 100))%").font(.system(size: 10)).foregroundStyle(.secondary)
 		}
 	}
@@ -349,6 +364,13 @@ private struct Row: View {
 		case "parked": return "idle"
 		default: return session.state
 		}
+	}
+
+	/// The row's second line, cut to something a row can actually show.
+	private var oneLine: String {
+		let raw = session.doing?.isEmpty == false ? session.doing! : (session.title ?? state)
+		guard raw.count > 90 else { return raw }
+		return raw.prefix(90) + "…"
 	}
 
 	/// The room's own colours, so the two views agree about what a state looks like.
