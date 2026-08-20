@@ -4,9 +4,13 @@
   nothing, so your phone and your other machines can reach it whether or not the
   room is open in a terminal.
 
-  Edit the two paths below to match this machine, then:
-    cp contrib/dev.guildhall.headless.plist ~/Library/LaunchAgents/
-    launchctl load ~/Library/LaunchAgents/dev.guildhall.headless.plist
+  Do not install this by hand. Run:
+    npm run install:mac
+
+  There are FOUR paths below to substitute, not two, and the header used to say
+  two — so anyone following it got a job whose StandardOutPath pointed at a home
+  directory that does not exist. The installer does all four from one place that
+  knows this machine.
 
   To stop it, or to stop it starting at login:
     launchctl unload ~/Library/LaunchAgents/dev.guildhall.headless.plist
@@ -49,7 +53,7 @@
 
 	<key>ProgramArguments</key>
 	<array>
-		<string>/Users/CHANGEME/.nvm/versions/node/v22.0.0/bin/node</string>
+		<string>/CHANGEME-NODE</string>
 		<string>/Users/CHANGEME/projects/guildhall/dist/main.mjs</string>
 		<string>--headless</string>
 	</array>

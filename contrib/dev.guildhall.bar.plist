@@ -3,7 +3,7 @@
   Shows the GuildhallBar menu bar icon at login.
 
     sh swift/build.sh --install
-    cp contrib/dev.guildhall.bar.plist ~/Library/LaunchAgents/
+    npm run install:mac    # substitutes the two paths below and loads it
     launchctl load ~/Library/LaunchAgents/dev.guildhall.bar.plist
 
   To stop it coming back:

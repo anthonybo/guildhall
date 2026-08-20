@@ -3,12 +3,16 @@
   Runs `guildhall --guard` at login: holds sleep off while a Claude Code session
   is working, draws nothing.
 
-  Edit BOTH paths below to match this machine, then:
-    cp contrib/dev.guildhall.guard.plist ~/Library/LaunchAgents/
-    launchctl load ~/Library/LaunchAgents/dev.guildhall.guard.plist
+  Install it with the same code path that installs the other two, so the paths
+  below are substituted rather than hand-edited:
+    sh tools/install-mac.sh --guard
 
   To stop it:
-    launchctl unload ~/Library/LaunchAgents/dev.guildhall.guard.plist
+    launchctl bootout gui/$(id -u)/dev.guildhall.guard
+
+  You do not want this AND --headless: both hold sleep off, and the headless
+  service also serves the browser view. This one is for a machine that should
+  stay awake for its sessions without serving anything.
 
   KeepAlive restarts it if it ever dies, which matters — a guard that quit
   silently would look exactly like a guard that is working.
@@ -20,7 +24,7 @@
 
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/bin/node</string>
+		<string>/CHANGEME-NODE</string>
 		<string>/Users/CHANGEME/projects/guildhall/dist/main.mjs</string>
 		<string>--guard</string>
 	</array>
@@ -30,9 +34,17 @@
 	<key>KeepAlive</key>
 	<true/>
 
+	<!--
+	  ~/Library/Logs, not /tmp, and for this job it matters more than for the others:
+	  `--guard` logs "holding sleep off — <project>, <project>" on every transition,
+	  so a world-readable log here is a timestamped list of what you work on,
+	  readable by any local user. Measured: ~/Library and ~/Library/Logs are 0700
+	  while /tmp is world-writable with files at 0644. A symlink planted at the /tmp
+	  path would also have launchd — running as you — truncate a file of its choosing.
+	-->
 	<key>StandardOutPath</key>
-	<string>/tmp/guildhall-guard.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-guard.log</string>
 	<key>StandardErrorPath</key>
-	<string>/tmp/guildhall-guard.log</string>
+	<string>/Users/CHANGEME/Library/Logs/guildhall-guard.log</string>
 </dict>
 </plist>
