@@ -6,8 +6,10 @@
  * and never launches or modifies one. The only thing it writes is a cmux
  * "focus this tab" request, and only when you press enter.
  */
-import { execFileSync, spawn } from 'node:child_process'
+import { execFileSync, spawn, spawnSync } from 'node:child_process'
 import fs from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import {
 	clearAll,
 	WATCH_OFF,
@@ -89,6 +91,44 @@ if (process.argv.includes('--set-control-password')) {
  * hours purely because a long-running room predated it.
  */
 /**
+ * Pull the latest and set everything up again, from anywhere.
+ *
+ * The installer already existed as `npm run install:mac`, which is useless from
+ * another directory — and "go and find the checkout first" is the step that does
+ * not happen on the second machine. This is the same script, reachable from the
+ * command that is already on the PATH.
+ *
+ * The project root comes from where this bundle lives (`<root>/dist/main.mjs`), so
+ * it works wherever it is invoked and whatever the checkout is called.
+ *
+ * `--ff-only`: an upgrade must never merge or rebase on somebody's behalf. If the
+ * pull cannot fast-forward, that is a working tree with its own commits or changes
+ * in it, and the right move is to say so and stop.
+ */
+if (process.argv.includes('--upgrade')) {
+	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+	const run = (cmd: string, args: string[]) => {
+		console.log(`\n\u001b[1m${cmd} ${args.join(' ')}\u001b[0m`)
+		const r = spawnSync(cmd, args, { cwd: root, stdio: 'inherit' })
+		if (r.status !== 0) {
+			console.error(`\nguildhall --upgrade stopped: ${cmd} exited ${r.status ?? 'abnormally'}`)
+			process.exit(r.status ?? 1)
+		}
+	}
+	console.log(`upgrading guildhall in ${root}`)
+	if (!fs.existsSync(path.join(root, '.git'))) {
+		console.error(`${root} is not a git checkout — nothing to pull`)
+		process.exit(1)
+	}
+	run('git', ['pull', '--ff-only'])
+	// `npm install` rather than `npm ci`: this is somebody's working checkout, not a
+	// clean-room build, and `prepare` rebuilds the bundle either way.
+	run('npm', ['install'])
+	run('sh', ['tools/install-mac.sh'])
+	process.exit(0)
+}
+
+/**
  * Set the view passcode from another program, reading it from STDIN.
  *
  * The menu bar was writing the passcode FILE directly, which looked equivalent and
@@ -116,7 +156,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|set-control-password|set-passcode)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|upgrade|set-control-password|set-passcode)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -146,6 +186,7 @@ alongside the room
   guildhall --no-serve     force sharing off for this run
   guildhall --no-awake     start with the sleep hold disarmed
 
+  guildhall --upgrade      pull the latest and set it all up again
   guildhall --version      print the version and exit
 
 keys   ? help · in it: click a value to change it · h explanations · y copy address · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit

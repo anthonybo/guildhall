@@ -48,9 +48,17 @@ view as a service that starts at login, and the menu bar icon:
 npm run install:mac
 ```
 
-Run it again after a `git pull` and it rebuilds, reinstalls and reloads. It does
-not choose your passcode or control password; those are credentials, not something
-an installer should generate.
+After that, upgrading is one command from anywhere — it pulls, rebuilds,
+reinstalls and reloads all of it:
+
+```
+guildhall --upgrade
+```
+
+It stops rather than guessing if the pull cannot fast-forward, because an upgrade
+has no business merging or rebasing on your behalf. Neither command chooses your
+passcode or control password; those are credentials, not something an installer
+should generate.
 
 Or do the parts by hand. Just the command on your PATH:
 
