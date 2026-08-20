@@ -9,10 +9,17 @@
   To stop it coming back:
     launchctl unload ~/Library/LaunchAgents/dev.guildhall.bar.plist
 
-  **KeepAlive is deliberately false, unlike the headless service.** The app has a
-  Quit item, and Quit has to mean it: with KeepAlive on, launchd would relaunch
-  it a second later and the menu item would look broken. The service is the
-  opposite case — nobody quits a daemon on purpose, so it should come back.
+  **KeepAlive restarts it only after an UNSUCCESSFUL exit.** Quit has to mean it —
+  with plain `KeepAlive` on, launchd would relaunch a second later and the menu
+  item would look broken — but plain `false` had the opposite failure, measured:
+  reinstalling the bundle while the app was running got the process SIGKILLed for an
+  invalid code signature, and with nothing to restart it the icon simply vanished
+  and stayed gone until the next login. No crash report, no log line, nothing to
+  notice.
+
+  `SuccessfulExit: false` distinguishes the two. `NSApplication.terminate` exits 0,
+  so Quit still means Quit; a signal or a nonzero exit brings it back.
+  ThrottleInterval is there so a genuine startup crash cannot spin.
 
   **A LaunchAgent rather than SMAppService.** The modern API registers a login
   item from inside the app, which is nicer, and it wants a signed bundle. This app
@@ -75,7 +82,12 @@
 	<key>RunAtLoad</key>
 	<true/>
 	<key>KeepAlive</key>
-	<false/>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
 
 	<key>StandardOutPath</key>
 	<string>/Users/CHANGEME/Library/Logs/guildhall-bar.log</string>
