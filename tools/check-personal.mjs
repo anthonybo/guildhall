@@ -197,8 +197,11 @@ const NAMES = privateNames().map((n) => ({
 	// The comment here used to claim the leading boundary was dropped for longer
 	// names. It was not — only the trailing one was — and `\b` can never match
 	// between two word characters, so every glued-on-the-left form passed:
-	// `getNimbusledgerBoard()`, `class MyNimbusledgerClient`, `theNimbusledgerRoot`
-	// were all missed while the bare word was caught. 2 of 5 forms detected.
+	// `getProjectnameBoard()`, `class MyProjectnameClient`, `theProjectnameRoot`
+	// were all missed while the bare word was caught. 2 of 5 forms detected. The
+	// example name is deliberately generic: a realistic one written into this file
+	// becomes a finding on any machine where a project happens to be called that,
+	// which is how this comment flagged itself during testing.
 	// Glued-on-the-left is exactly how a project name appears in source, which is
 	// where "eight private project names across sixty places in the source" came
 	// from. Short names keep both boundaries, or `awake` matches `awakened`.
