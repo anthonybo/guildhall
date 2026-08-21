@@ -132,16 +132,36 @@ under the file-size cache `digest.ts` already established.
 
 ### Measured costs
 
-| path | cost | budget |
-|---|---|---|
-| rollout, steady state (nothing changed) | **0.20 cpu-ms** | 12 for all of `collect()` |
-| rollout, 4 files actively changing, 64KB tail | 3.41 cpu-ms | |
-| rollout, naive full parse of all 44 | **849 cpu-ms** | — the version not to write |
-| snapshot read in `collect()` | ~0 | |
-| daemon present? one `stat` on the socket | microseconds | |
+These are the ESTIMATES this plan was written on, and two of them turned out wrong.
+The measured figures are below them; the estimates are kept because being able to see
+which way a guess missed is worth more than a tidy table.
 
-The naive number is in this table on purpose: it is what a straightforward
-implementation costs, and it is seventy times the entire poll budget.
+| path | estimated | measured |
+|---|---|---|
+| rollout, steady state (nothing changed) | 0.20 cpu-ms | **2.27–3.91** |
+| rollout, naive full parse of all 44 | 849 cpu-ms | 849 — the version not to write |
+| snapshot read in `collect()` | ~0 | n/a, no snapshot was built |
+
+The steady-state estimate was about ten times optimistic. It counted the `stat` calls
+and forgot the `readdir`s, and the walk is not cached — only the parsing is.
+
+Worse, the cost is **O(total history, not live threads)**, because the walk visits every
+rollout ever written before liveness is consulted. Measured with exactly ONE live
+thread throughout:
+
+| rollouts on disk | cpu-ms |
+|---|---|
+| 45 (the real directory) | 3.91 |
+| 500 | **10.46** |
+| 2000 | **22.36** |
+
+The whole `collect()` budget is 12. So this crosses it somewhere around a few hundred
+rollout files — months of ordinary use — while returning one session.
+
+And `tools/check-perf.mjs` calls `collect()` with no argument, which means Codex is OFF
+and the gate never enters the path that costs anything. That is the same mistake this
+project already recorded about `--bench` forcing images off: **a benchmark that measures
+the wrong path is worse than none, because it is trusted.**
 
 ## What could break the browser view, and what stops it
 
@@ -159,6 +179,25 @@ parsing, they are in the room.
 The last row is the one worth stating out loud: **every field this adds is optional.**
 A browser tab running yesterday's bundle against today's server must keep working,
 because that is the normal state of a phone left open.
+
+### Two claims that were too strong, corrected
+
+**"Not a single existing row moves" is false with the flag ON.** `disambiguate()` is
+global over the combined list, so a Codex session whose project name collides with a
+Claude one gives that existing Claude row a `distinct` badge it did not have — confirmed
+in a browser, where the row gained `⌘2` in its `.away` slot. The behavior is right;
+you do want two things called the same name told apart. The claim was wrong, and the
+accurate one is: with the flag off, nothing changes at all — verified byte-for-byte
+against `main`, including key order; with it on, an existing row can gain a
+disambiguator, and nothing else.
+
+**"The browser can type into a Codex session" overstates what shipped.** The send path
+works and is reachable over HTTP, but both browser entry points to the terminal panel
+gate on `s.workspace`, which a Codex session does not have — so there is no button, and
+the list's own tooltip says there is no terminal tab to open. `/api/screen` and
+`/api/key` still refuse a Codex target, correctly, since there is no pane to read or
+send keys to. What exists is an API-reachable send with no affordance in the UI. Either
+a send-only box for rows carrying `agent`, or say so plainly.
 
 ## Phases
 

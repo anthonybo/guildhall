@@ -126,6 +126,64 @@ checks.push({
 })
 
 /**
+ * The SECOND harness on the same poll, against a history the size of a year's use.
+ *
+ * The gate above calls `collect()` with no argument, which means Codex is off — so the
+ * check that exists to "catch a directory walk added to the hot path" could not see the
+ * directory walk that was added to the hot path. That is the same mistake this project
+ * already recorded about `--bench` forcing images off: a benchmark that measures the
+ * wrong path is worse than none, because it is trusted.
+ *
+ * Measured against a FIXTURE rather than `~/.codex`, so the number does not depend on
+ * how much Codex the person running this happens to have used. A thousand rollouts is
+ * about a year at the rate this machine accumulates them.
+ *
+ * The first implementation walked and statted every rollout ever written on every poll:
+ * 3.91 cpu-ms at 45 files, 10.46 at 500, 22.36 at 2000, with ONE live thread throughout
+ * — and Codex never deletes rollouts. Remembering each thread's path made it flat.
+ */
+checks.push({
+	name: 'codex poll @ 1000 rollouts',
+	unit: 'cpu-ms',
+	budget: 3,
+	was: 22.4,
+	note: 'must not scale with history; one live thread among a year of files',
+	measure: () =>
+		run(`
+			import fs from 'node:fs'
+			import os from 'node:os'
+			import path from 'node:path'
+			import { codexSessions, resetCodexCache } from './src/data/codex.ts'
+			const root = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-perf-codex-'))
+			const dir = path.join(root, 'sessions'), locks = path.join(root, 'locks')
+			fs.mkdirSync(locks, { recursive: true })
+			const NL = String.fromCharCode(10)
+			const rec = (t, p) => JSON.stringify({ type: t, payload: p ?? { type: t } })
+			let first = ''
+			for (let i = 0; i < 1000; i++) {
+				const id = i.toString(16).padStart(8, '0') + '-1111-2222-3333-444444444444'
+				if (!first) first = id
+				const at = path.join(dir, '2026', String((i % 12) + 1).padStart(2, '0'), String((i % 28) + 1).padStart(2, '0'))
+				fs.mkdirSync(at, { recursive: true })
+				const body = [rec('session_meta', { id, cwd: '/x/projects/p' + (i % 7) })]
+				for (let k = 0; k < 8; k++) body.push(rec('event_msg', { type: 'token_count', info: { last_token_usage: { total_tokens: 1000 }, model_context_window: 200000 } }))
+				body.push(rec('event_msg', { type: 'task_started' }), rec('event_msg', { type: 'task_complete' }))
+				fs.writeFileSync(path.join(at, 'rollout-2026-08-20T10-00-00-' + id + '.jsonl'), body.join(NL) + NL)
+			}
+			// One live thread, deliberately the OLDEST file: a session open for months is
+			// the case that defeats any date-based shortcut.
+			fs.writeFileSync(path.join(locks, first + '.lock'), '')
+			resetCodexCache()
+			codexSessions(Date.now(), dir, locks)
+			const c = process.cpuUsage(); const N = 15
+			for (let i = 0; i < N; i++) codexSessions(Date.now(), dir, locks)
+			const u = process.cpuUsage(c)
+			fs.rmSync(root, { recursive: true, force: true })
+			console.log((u.user + u.system) / 1000 / N)
+		`),
+})
+
+/**
  * The room at the browser's scale, which is where the pixel loop hurt.
  *
  * The terminal renders a far smaller grid, so the terminal frame check above does

@@ -217,7 +217,33 @@ export function createServer(opts: ServeOptions) {
 	const timer = setInterval(tick, 2000)
 	timer.unref?.()
 
-	const server = http.createServer(async (req, res) => {
+	/**
+	 * Every request, wrapped so a handler cannot take the process with it.
+	 *
+	 * This listener was an unguarded `async` function, which means any rejection inside
+	 * it is an unhandled rejection, and Node exits on those. It was not theoretical: a
+	 * single POST whose message contained a NUL byte reached `execFile`, which throws
+	 * synchronously on that, and the server died with no reply and no announcement.
+	 *
+	 * The specific hole is closed where it belongs, in the validation. This is here
+	 * because "one bad request ends the service somebody is relying on remotely" is too
+	 * sharp an edge to leave depending on every future handler being careful.
+	 */
+	const server = http.createServer((req, res) => {
+		void handle(req, res).catch((e) => {
+			// Its own words on the machine's screen; nothing but 500 to the caller, since
+			// an internal error message is not the caller's business.
+			console.error(`request failed: ${e instanceof Error ? e.message : String(e)}`)
+			try {
+				if (!res.headersSent) send(res, 500, MIME['.json'], '{"error":"failed"}')
+				else res.end()
+			} catch {
+				// the socket went away, which is the normal way this ends
+			}
+		})
+	})
+
+	async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
 		const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 		const addr = addressOf(req)
 
@@ -501,7 +527,7 @@ export function createServer(opts: ServeOptions) {
 		}
 
 		serveStatic(res, url.pathname)
-	})
+	}
 
 	server.on('close', () => clearInterval(timer))
 	return server

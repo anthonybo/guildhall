@@ -52,3 +52,43 @@ test('each half has its own clock, so one cannot silence the other', () => {
 })
 
 test.after(() => fs.rmSync(process.env.GUILDHALL_CONFIG_DIR!, { recursive: true, force: true }))
+
+test('a Codex figure does not shorten the Claude backoff', () => {
+	// The bug adding a derived field created: `cost` is computed from the parts, so
+	// once `codexCost` exists `cost` is defined even when the Claude fetch has never
+	// succeeded — and the backoff test read that as "we have a number". A failing
+	// fetch then retried on the 30-minute TTL instead of the 60-minute backoff.
+	//
+	// Asserted on the parts rather than by observing a spawn: what went wrong was a
+	// condition reading the wrong field, and that is what this pins.
+	put({ limits: [], codexCost: 1.5, codexCostAt: Date.now(), costAt: Date.now() - 40 * 60_000, at: Date.now() })
+	const u = usage()!
+	assert.equal(u.claudeCost, undefined, 'a Codex-only cache invented a Claude figure')
+	assert.equal(u.cost, 1.5, 'the total should still report the one part it has')
+})
+
+test('the spend total does not ratchet up across quota refreshes', () => {
+	// The bug a reviewer measured: the quota writes named their fields and carried
+	// `cost` but not the parts, so the derived total was promoted into `claudeCost` and
+	// the next Codex fetch added its figure on top. 12 became 14, then 16, every five
+	// minutes — a money figure climbing on its own.
+	put({ limits: [], claudeCost: 10, codexCost: 2, costAt: Date.now(), codexCostAt: Date.now(), at: Date.now() })
+	assert.equal(usage()!.cost, 12)
+
+	// A quota refresh, as `maybeQuota` performs it: spread the previous state, replace
+	// the limits. The parts must survive it.
+	const before = usage()!
+	put({ ...before, limits: [{ title: 'five hours', percent: 10 }], at: Date.now() })
+	const after = usage()!
+	assert.equal(after.claudeCost, 10, 'the Claude part was overwritten by the total')
+	assert.equal(after.codexCost, 2, 'the Codex part was dropped')
+	assert.equal(after.cost, 12, `the total grew to ${after.cost} without a single new fetch`)
+})
+
+test('a combined total is never promoted to the Claude part', () => {
+	// Belt and braces for the same bug: even if a write does drop the parts, a cache
+	// that has ever fetched Codex carries `codexCostAt`, and that is enough to know
+	// `cost` is a combined figure rather than a Claude one.
+	put({ limits: [], cost: 12, codexCostAt: Date.now(), costAt: Date.now(), at: Date.now() })
+	assert.equal(usage()!.claudeCost, undefined, 'a combined total was promoted and will be added to again')
+})

@@ -60,3 +60,29 @@ test('a well-formed but unknown thread fails with codex own words', async () => 
 	assert.equal(r.ok, false, 'a nonexistent thread reported success')
 	assert.match(!r.ok ? r.error : '', /thread|rollout|session/i, `unhelpful error: ${!r.ok ? r.error : ''}`)
 })
+
+test('a message that starts with a dash is still sendable', async () => {
+	// `--message <text>` as two arguments made clap read a dash-leading body as a flag
+	// and refuse the call, so a legitimate message could never be sent and the browser
+	// got a parser error. Attached with `=`, the value is unambiguous.
+	//
+	// The zeroed thread matches nothing, so the only thing this can reach is the
+	// argument parser — which is exactly what is being tested.
+	const r = await askCodex('00000000-0000-0000-0000-000000000000', '--help')
+	assert.equal(r.ok, false)
+	const said = !r.ok ? r.error : ''
+	assert.doesNotMatch(said, /value is required|unexpected argument|Usage:/i, `refused by the parser: ${said}`)
+	assert.match(said, /thread|rollout|session/i, `not the thread error we expect: ${said}`)
+})
+
+test('a control character is refused before anything is spawned', async () => {
+	// One POST with a NUL took the whole server down: execFile rejects a NUL in argv by
+	// throwing SYNCHRONOUSLY inside the promise executor, the request handler had nothing
+	// to catch it, and Node exits on an unhandled rejection. The announcement fires after
+	// the await, so it was the one remote action that left no trace at all.
+	for (const ch of [0, 7, 8, 27, 127]) {
+		const r = await askCodex('00000000-0000-0000-0000-000000000000', `hi${String.fromCharCode(ch)}there`)
+		assert.equal(r.ok, false, `accepted control character ${ch}`)
+		assert.match(!r.ok ? r.error : '', /control characters/, `refused for the wrong reason at ${ch}`)
+	}
+})

@@ -156,7 +156,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|upgrade|set-control-password|set-passcode)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -231,6 +231,7 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 watching
   guildhall                watch the room
   guildhall --once         print one frame and exit
+  guildhall --codex        show Codex sessions too (--no-codex for one run without)
   guildhall --sessions     print the room as JSON and exit
   guildhall --config       print the resolved settings as JSON and exit
   guildhall --set-serve on|off   serve the browser view at login, or stop
@@ -294,6 +295,14 @@ const collect = () => (DEMO ? demoSessions() : collectReal(cfg.codex))
 const cfg = cfgStore.load()
 if (process.argv.includes('--serve')) cfg.serve = true
 if (process.argv.includes('--no-serve')) cfg.serve = false
+// `--codex` / `--no-codex`, for one run, like `--serve`.
+//
+// The containment story for the second harness was "turn it off" — and the only way to
+// do that was to hand-edit config.json, which is not a recovery a person carries out
+// while something looks broken. Every other switch has a flag or a key; this one had
+// neither, and was not in --help either.
+if (process.argv.includes('--codex')) cfg.codex = true
+if (process.argv.includes('--no-codex')) cfg.codex = false
 const portArg = process.argv.indexOf('--port')
 if (portArg > 0) cfg.port = Number(process.argv[portArg + 1]) || cfg.port
 

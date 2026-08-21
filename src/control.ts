@@ -362,10 +362,35 @@ export async function askCodex(thread: string, text: string): Promise<Result> {
 	// its own turn, which is never what somebody typing into a box meant.
 	if (/[\r\n]/.test(body)) return { ok: false, error: 'send one line at a time' }
 	if (body.length > 4000) return { ok: false, error: 'too long' }
+	// No control characters, and a NUL is why this line exists.
+	//
+	// `execFile` REJECTS an argv element containing a NUL, and it does so by throwing
+	// synchronously inside the promise executor — so the promise rejects, and the
+	// request handler in serve.ts has nothing to catch it. Node exits. One POST with a
+	// NUL in the message took the whole server down, and because the announcement fires
+	// after the await, it was the one send a remote caller could make with no trace of
+	// it at all.
+	//
+	// The cmux path is immune by accident rather than design: `ask` puts the text inside
+	// `JSON.stringify`, so a NUL becomes six harmless characters. This path hands the
+	// string straight to argv, so it has to say no itself.
+	//
+	// Everything below 0x20 except nothing, plus 0x7f: a message is one line of text.
+	// eslint-disable-next-line no-control-regex
+	if (/[\u0000-\u001f\u007f]/.test(body)) return { ok: false, error: 'no control characters' }
 	return new Promise((resolve) => {
 		execFile(
 			CODEX,
-			['queue', '--thread', thread, '--message', body],
+			// `--message=<text>`, not `--message <text>`.
+			//
+			// As two arguments, clap reads a body beginning with a dash as a flag and
+			// refuses the whole call: "a value is required for '--message <TEXT>'". So a
+			// legitimate message starting with a hyphen could never be sent, and the browser
+			// got a parser error rather than a send. Attached with `=`, the value is
+			// unambiguous whatever it starts with. This is not an injection fix — execFile
+			// takes an args array and there is no shell — it is about a message nobody
+			// could send.
+			['queue', '--thread', thread, `--message=${body}`],
 			{ timeout: TIMEOUT, maxBuffer: 4 << 20, windowsHide: true },
 			(err, stdout, stderr) => {
 				// Its own words on failure. "no rollout found for thread id …" tells somebody

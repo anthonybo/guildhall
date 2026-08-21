@@ -125,7 +125,12 @@ function write(u: Usage) {
  * thrown away.
  */
 function withTotal(u: Usage): Usage {
-	const claude = u.claudeCost ?? (u.codexCost === undefined ? u.cost : undefined)
+	// The promotion is for ONE case: a cache written before Codex existed, where `cost`
+	// is the Claude figure. `codexCostAt` present means Codex has been fetched at least
+	// once, so `cost` is a combined total and promoting it would double-count — which is
+	// exactly what happened when a quota write dropped the parts.
+	const legacy = u.codexCost === undefined && u.codexCostAt === undefined
+	const claude = u.claudeCost ?? (legacy ? u.cost : undefined)
 	const parts = [claude, u.codexCost].filter((n): n is number => typeof n === 'number')
 	return { ...u, claudeCost: claude, cost: parts.length ? parts.reduce((a, b) => a + b, 0) : undefined }
 }
@@ -256,13 +261,18 @@ async function maybeQuota() {
 		if (body.error || !res.ok) {
 			// Keep the numbers, note the failure. A rate_limit_error is the one thing
 			// this must not turn into "your plan has nothing left".
-			write({ limits: current?.limits ?? [], cost: current?.cost, costAt: current?.costAt, at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
+			// `...current`, never a list of fields. Naming them is how the `costAt` bug
+			// happened, and then how the cost PARTS were dropped here too: this write kept
+			// `cost` and lost `claudeCost`/`codexCost`, so the derived total was promoted
+			// into the Claude part and the next Codex fetch added its figure on top. The
+			// spend on screen climbed by the Codex figure every quota refresh.
+			write({ ...current, limits: current?.limits ?? [], at: Date.now(), error: String((body.error as { message?: string })?.message ?? res.status) })
 			return
 		}
-		write({ limits: limitsOf(body), cost: current?.cost, costAt: current?.costAt, at: Date.now() })
+		write({ ...current, limits: limitsOf(body), at: Date.now(), error: undefined })
 	} catch (e) {
 		const current = read()
-		write({ limits: current?.limits ?? [], cost: current?.cost, costAt: current?.costAt, at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
+		write({ ...current, limits: current?.limits ?? [], at: Date.now(), error: e instanceof Error ? e.message : 'failed' })
 	}
 }
 
@@ -333,7 +343,15 @@ async function maybeCost() {
 	// Its own clock: `costAt`, not the quota's `at`, or a quota refresh every five
 	// minutes would keep declaring the cost fresh and it would never be fetched.
 	const age = previous?.costAt ? Date.now() - previous.costAt : Infinity
-	if (age <= (previous?.cost === undefined ? COST_BACKOFF : COST_TTL)) return
+	// `claudeCost`, not `cost`.
+	//
+	// `cost` is DERIVED from the parts now, so once a Codex figure exists it is defined
+	// whether or not the Claude fetch ever succeeded — and this test then read "we have
+	// a number, use the short window" for a fetch that has never once worked, retrying
+	// a seven-second Node spawn on the TTL instead of the backoff that exists to stop
+	// exactly that. Adding a derived field silently changed the meaning of a condition
+	// two hundred lines away.
+	if (age <= (previous?.claudeCost === undefined ? COST_BACKOFF : COST_TTL)) return
 	await spend()
 }
 
