@@ -21,6 +21,13 @@ struct Session: Decodable, Identifiable, Equatable {
 	let unread: Bool?
 	/// "59 dispatched", already worded by the server.
 	let agents: String?
+	/// Which harness this session belongs to, absent for Claude Code.
+	///
+	/// Optional, like every field here, so an older server that does not send it still
+	/// decodes — the comment at the top of this struct is the whole reason it decodes a
+	/// subset. Two Claude sessions and a Codex session in one project were three
+	/// identical rows before this.
+	let agent: String?
 	let toolKind: String?
 	let ctxUsed: Double?
 	let ctxLimit: Double?

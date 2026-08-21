@@ -24,7 +24,7 @@ const NIGHT: RGB = [26, 28, 40]
 /** What the compositor needs from an Office, so tests can pass a plain object. */
 export type Scene = {
 	plates: { x: number; y: number; proj: string; colour: RGB }[]
-	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any }[]
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any; agent?: string }[]
 	badges: { x: number; y: number; level: number; asking: boolean }[]
 	props: { kind: keyof typeof PROP_SIZE; x: number; y: number }[]
 }
@@ -183,7 +183,7 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 		stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py)
 	}
 	for (const m of scene.monitors) {
-		stamp(monitor(m.lit, frame, m.seed, m.kind), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy)
+		stamp(monitor(m.lit, frame, m.seed, m.kind, m.agent), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy)
 	}
 	// Nameplates. Authored at the box size like everything else here, so `choose`
 	// sees the real pixels and picks a font and scale that suit them — a caller

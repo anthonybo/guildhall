@@ -27,7 +27,7 @@ export class RoomBase {
 	hiddenCount = 0
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
-	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind'] }[] = []
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind']; agent?: Session['agent'] }[] = []
 	/** project nameplates, drawn rotated as images beside each pod */
 	plates: { x: number; y: number; proj: string; colour: RGB }[] = []
 	/** level badges, in the gap column beside each occupied desk */

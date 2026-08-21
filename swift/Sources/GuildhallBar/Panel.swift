@@ -292,6 +292,9 @@ private struct Row: View {
 						Text(session.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
 						if session.unread == true { Circle().fill(.blue).frame(width: 5, height: 5) }
 						if let level = session.level { Badge(text: "lv\(level)", tint: .purple) }
+						// Teal, the same colour as the mug on that desk in the room, so the two
+						// halves of the app say it the same way.
+						if let agent = session.agent { Badge(text: agent, tint: .teal) }
 						if let kind = session.toolKind, session.working { Badge(text: kind, tint: .green) }
 						Spacer(minLength: 0)
 						Text(ago).font(.system(size: 10)).foregroundStyle(.secondary)

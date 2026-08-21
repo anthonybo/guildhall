@@ -1332,8 +1332,12 @@ var TINT = {
   agent: [160, 235, 150],
   think: [150, 160, 190]
 };
-function monitor(lit, frame2, seed = 0, kind = "think") {
-  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}`;
+var MUG = {
+  claude: [226, 118, 96],
+  codex: [110, 186, 196]
+};
+function monitor(lit, frame2, seed = 0, kind = "think", agent) {
+  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}:${agent ?? ""}`;
   const hit = cache2.get(key);
   if (hit) return hit;
   const grid = Array.from({ length: H }, () => new Array(W).fill(null));
@@ -1352,8 +1356,9 @@ function monitor(lit, frame2, seed = 0, kind = "think") {
   box(5, 15, 6, 1, CASE);
   box(3, 18, 9, 3, [58, 62, 78]);
   box(4, 19, 7, 1, [92, 98, 118]);
-  box(13, 18, 3, 3, [226, 118, 96]);
-  put(12, 19, [226, 118, 96]);
+  const mug = MUG[agent ?? "claude"] ?? MUG.claude;
+  box(13, 18, 3, 3, mug);
+  put(12, 19, mug);
   box(0, 19, 3, 2, [236, 234, 226]);
   box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
   box(2, 2, 12, 9, DARK);
@@ -2386,6 +2391,7 @@ var Office = class extends SimBase {
     this.badges = [];
     this.plates = [];
     const lit = /* @__PURE__ */ new Map();
+    const harness = /* @__PURE__ */ new Map();
     const levels = /* @__PURE__ */ new Map();
     const asking = /* @__PURE__ */ new Set();
     for (const sp of this.spots.values()) {
@@ -2394,6 +2400,7 @@ var Office = class extends SimBase {
       if (s) levels.set(`${sp.col},${sp.row}`, s.level);
       if (s && s.state === "needs") asking.add(`${sp.col},${sp.row}`);
       if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind);
+      if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent);
     }
     for (const pod of this.pods)
       for (let c = pod.c0; c <= pod.c1; c += 2) {
@@ -2402,7 +2409,8 @@ var Office = class extends SimBase {
           y: pod.monitorRow * TILE,
           lit: lit.has(`${c},${pod.seatRow}`),
           seed: c + pod.monitorRow,
-          kind: lit.get(`${c},${pod.seatRow}`) ?? "think"
+          kind: lit.get(`${c},${pod.seatRow}`) ?? "think",
+          agent: harness.get(`${c},${pod.seatRow}`)
         });
         block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS);
         if (lit.has(`${c},${pod.seatRow}`)) {
@@ -3026,7 +3034,7 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
     stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py);
   }
   for (const m of scene.monitors) {
-    stamp(monitor(m.lit, frame2, m.seed, m.kind), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
+    stamp(monitor(m.lit, frame2, m.seed, m.kind, m.agent), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
   }
   for (const p of scene.plates) {
     const pick2 = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);

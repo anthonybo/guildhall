@@ -81,6 +81,7 @@ export class Office extends SimBase {
 		this.badges = []
 		this.plates = []
 		const lit = new Map<string, Session['toolKind']>()
+		const harness = new Map<string, Session['agent']>()
 		const levels = new Map<string, number>()
 		const asking = new Set<string>()
 		for (const sp of this.spots.values()) {
@@ -92,6 +93,9 @@ export class Office extends SimBase {
 			// blinked off in every pause between turns. Hold the light briefly after,
 			// which is what a machine someone is working at actually looks like.
 			if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
+			// Which harness owns this desk, whether or not its screen is lit: the mug is
+			// there when nobody is working, and that is the point of putting it on the mug.
+			if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
@@ -103,6 +107,7 @@ export class Office extends SimBase {
 					lit: lit.has(`${c},${pod.seatRow}`),
 					seed: c + pod.monitorRow,
 					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
+					agent: harness.get(`${c},${pod.seatRow}`),
 				})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 				// A light sliding along the floor under a desk somebody is working at, so

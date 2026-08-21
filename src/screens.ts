@@ -61,8 +61,26 @@ export const TINT: Record<Kind, RGB> = {
 	think: [150, 160, 190],
 }
 
-export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think'): Grid {
-	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}`
+/**
+ * The mug, which is the one thing on a desk that carried no meaning.
+ *
+ * Two Claude sessions and a Codex session in the same project sit as three identical
+ * workers in the same pod, and until now nothing in the room told them apart at rest —
+ * the label prefix only appears on a session that is urgent or selected. Both of the
+ * obvious channels were already taken: the sprite badge IS the level tier, and the
+ * screen tint IS the tool class, so putting a third meaning on either would break the
+ * property that makes the room readable at a glance.
+ *
+ * A mug is decorative, always present, and per-desk. A different mug reads as somebody
+ * else's desk, which is exactly the fact being conveyed.
+ */
+const MUG: Record<string, RGB> = {
+	claude: [226, 118, 96],
+	codex: [110, 186, 196],
+}
+
+export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', agent?: string): Grid {
+	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${agent ?? ''}`
 	const hit = cache.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: H }, () => new Array<RGB | null>(W).fill(null))
@@ -85,9 +103,10 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	// keyboard
 	box(3, 18, 9, 3, [58, 62, 78])
 	box(4, 19, 7, 1, [92, 98, 118])
-	// mug
-	box(13, 18, 3, 3, [226, 118, 96])
-	put(12, 19, [226, 118, 96])
+	// mug — its colour is which harness this desk belongs to
+	const mug = MUG[agent ?? 'claude'] ?? MUG.claude!
+	box(13, 18, 3, 3, mug)
+	put(12, 19, mug)
 	// a small stack of paper where the badge used to sit
 	box(0, 19, 3, 2, [236, 234, 226])
 	// bezel
