@@ -296,7 +296,7 @@ watching
 serving the browser view — these draw nothing and want no terminal
   guildhall --headless     serve it and nothing else (what the LaunchAgent runs)
   guildhall --guard        hold sleep off while sessions work, but do NOT serve
-  guildhall --port 4400    listen elsewhere; default 4250, remembered in the config
+  guildhall --port 4400    listen elsewhere; default 4319, remembered in the config
 
 alongside the room
   guildhall --serve        share while the room is on screen

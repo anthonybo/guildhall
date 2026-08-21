@@ -11,35 +11,34 @@ import net from 'node:net'
 /**
  * The default, and why this number.
  *
- * It was **4318**, which is the OpenTelemetry OTLP/HTTP port by convention. Any
- * machine running a collector — jaeger, the otel collector, tempo — already has it,
- * and a developer's machine is the only kind this program runs on. Reported as
- * "something else is using this port": a jaeger instance holding 127.0.0.1:4318.
+ * **4319, chosen by the person who runs this rather than by the elimination below.**
+ * That is the honest account: the port was already in use on their phone and in their
+ * dev loop, and a default that matches what somebody already types is worth more than a
+ * default that scores better on paper.
  *
- * 4250 was chosen by measurement rather than taste. Four digits, because a port people
- * type into a phone should be short. Then, over the whole 1024-9999 range, everything
- * was excluded that is:
+ * It was 4318 before, which is the OpenTelemetry OTLP/HTTP port by convention — any
+ * machine running a collector (jaeger, the otel collector, tempo) already holds it, and
+ * a developer's machine is the only kind this program runs on. That was a real failure,
+ * not a theoretical one.
  *
- *  - assigned in `/etc/services`;
- *  - listening on that machine at the time, which included the OTLP family at
- *    4317-4319 — the collision that started this;
- *  - declared as a port anywhere in the checkouts on the machine this was chosen on
- *    (the specific numbers are somebody's private setup and are deliberately not
- *    listed here — the method is what matters, and it should be re-run rather than
- *    trusted if this ever needs choosing again);
- *  - a well-known dev-tool default (3000, 4200, 5432, 6379, 8080, 9090, 11434, …);
- *  - within four ports of any of the above, so a neighbouring service appearing later
- *    does not land on top of this one.
+ * **The tradeoff being accepted, stated plainly:** 4319 is one above OTLP/HTTP and two
+ * above OTLP/gRPC. It is not assigned in `/etc/services` and nothing standard claims it,
+ * but it sits in that family, so a collector configured with a non-default HTTP port
+ * could land on it. If that ever happens, the Random button exists for exactly this.
  *
- * The largest clear run left was 4205-4295, and this is its midpoint: about 45 ports
- * of space in each direction. Nothing was listening on it, and it is unassigned.
+ * The measured alternative, kept because the method is worth more than the number: over
+ * 1024-9999, exclude everything assigned in `/etc/services`, everything listening,
+ * everything declared in any local checkout, every well-known dev-tool default, and
+ * everything within four ports of any of those. The largest clear run was 4205-4295,
+ * whose midpoint 4250 has about 45 ports of space each way. That is what the randomize
+ * band still draws from.
  *
- * **A high, obscure port would be wrong, and that was the first answer.** On macOS
+ * **A high, obscure port would be wrong, and was the first answer.** On macOS
  * `net.inet.ip.portrange.first` is 32768, so anything above it can be taken by an
  * outgoing connection's ephemeral allocation — a listener up there works until the day
  * it does not. The 40000-49150 range was measured and discarded for this.
  */
-export const DEFAULT_PORT = 4250
+export const DEFAULT_PORT = 4319
 
 export const PORT_MIN = 1024
 export const PORT_MAX = 65535

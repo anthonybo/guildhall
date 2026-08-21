@@ -168,8 +168,24 @@ struct SettingsView: View {
 			// "I have no indication of that and how would I know" is why this row exists.
 			if !alsoServing.isEmpty {
 				VStack(alignment: .leading, spacing: 6) {
+					/**
+					 * Two different situations, and calling them both "another guildhall is
+					 * also serving" was wrong for the second one.
+					 *
+					 * If the stray is on a DIFFERENT port, there really are two servers and
+					 * both work — twice the cost, two doors.
+					 *
+					 * If it is on the CONFIGURED port, there is exactly one server and it is
+					 * not the service: the service starts, cannot bind, exits 1, and launchd
+					 * retries it forever. Observed with three failed binds logged and the job
+					 * sitting in `spawn scheduled`, while the panel said the service was
+					 * serving and something else was serving too. Both halves were false.
+					 */
+					let clashes = alsoServing.contains { $0.port == config.port }
 					Label(
-						"Another guildhall is serving as well as the service above. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
+						clashes
+							? "Another guildhall is holding port \(String(config.port)), so the service above cannot start — it is retrying and failing. Kill the other one, or give the service a different port."
+							: "Another guildhall is serving as well as the service above. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
 						systemImage: "exclamationmark.triangle.fill"
 					)
 					.font(.caption).foregroundStyle(.orange)
@@ -223,7 +239,7 @@ struct SettingsView: View {
 				GridRow {
 					Text("Port")
 					HStack(spacing: 6) {
-						TextField("4250", value: $config.port, format: .number.grouping(.never))
+						TextField("4319", value: $config.port, format: .number.grouping(.never))
 							.frame(width: 90)
 						// Because the default collided: 4318 is the OTLP/HTTP port, so any
 						// machine running a trace collector already had it, and the panel's

@@ -309,7 +309,7 @@ it serves, holds sleep off while sessions work, and draws nothing at all.
 
 ```
 guildhall --headless
-2026-08-19 15:39:06  guildhall headless on 127.0.0.1:4250 (pid 1234) — 0.6.0
+2026-08-19 15:39:06  guildhall headless on 127.0.0.1:4319 (pid 1234) — 0.6.0
 ```
 
 Run it at login so it survives a reboot, which is the point — a phone checking on
@@ -325,7 +325,7 @@ It is up when this answers `401`, which is the passcode gate rather than a
 failure:
 
 ```
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4250/
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4319/
 ```
 
 Two things to get right. **Use the absolute path to `node`** in the plist:
@@ -387,7 +387,7 @@ brew install --cask tailscale     # then sign in on the Mac and on the phone
 tailscale ip -4                   # the 100.x.y.z address to use
 ```
 
-Open `http://100.x.y.z:4250` on the phone and enter the passcode. The traffic is
+Open `http://100.x.y.z:4319` on the phone and enter the passcode. The traffic is
 encrypted by Tailscale and the machine is never exposed to the public internet —
 which is also why **control is refused on a plain LAN**: a shared secret on a
 network you hand to guests is not a boundary.

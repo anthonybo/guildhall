@@ -24,15 +24,27 @@ test('the default port is below the ephemeral floor, and is not a port anything 
 	assert.ok(DEFAULT_PORT >= 1024 && DEFAULT_PORT <= 9999, `${DEFAULT_PORT} is not a four-digit port`)
 
 	// The collision this moved away from, plus the crowd any default must stay out of.
-	// Only well-known public defaults are listed: the ports that were actually in use on
-	// the machine where 4250 was chosen are somebody's private setup, and a public test is
-	// not the place for them. src/port.ts records the method instead.
-	// 4318/4317 are OpenTelemetry, which is what actually happened here — jaeger held
-	// 127.0.0.1:4318 and the panel could only say "choose another port".
+	// Only well-known public defaults are listed: the ports actually in use on the machine
+	// this was chosen on are somebody's private setup, and a public test is not the place
+	// for them. src/port.ts records the method instead.
+	//
+	// 4317 and 4318 are OpenTelemetry (gRPC and HTTP), and 4318 is what actually happened
+	// here — a jaeger instance held it and the panel could only say "choose another port".
+	//
+	// **4319 is deliberately NOT in this list, and that is a decision rather than an
+	// oversight.** It is one above OTLP/HTTP, so it is in that family — but it is
+	// unassigned, nothing standard claims it, and it is the port already in use by the
+	// person who runs this. A default somebody already types beats one that scores better
+	// on paper. The tradeoff is written down in src/port.ts; if a collector ever lands on
+	// it, the randomize button is the answer.
 	const taken = new Set([
-		4317, 4318, 4319, 3000, 3001, 4000, 4200, 5000, 5173, 5432, 6379, 7000, 8000, 8080, 8081, 8443, 8888, 9000, 9090, 9200, 11434, 27017,
+		4317, 4318, 3000, 3001, 4000, 4200, 5000, 5173, 5432, 6379, 7000, 8000, 8080, 8081, 8443, 8888, 9000, 9090, 9200, 11434, 27017,
 	])
 	assert.ok(!taken.has(DEFAULT_PORT), `${DEFAULT_PORT} is a well-known default for something else`)
+	// No literal comparison against 4317/4318 here: `DEFAULT_PORT` is a const, so tsc
+	// narrows it to its literal type and rejects the comparison as one that can never
+	// fail — which is the compiler correctly pointing out a test that tests nothing. The
+	// Set check above covers the same ground through an API tsc does not narrow away.
 })
 
 test('a picked port is one we can actually listen on', async () => {

@@ -27,7 +27,7 @@ struct Config {
 	var serve = false
 	// 4250, matching src/port.ts, which explains the choice. Was 4318 — the OTLP
 	// port, so any machine running a trace collector already had it.
-	var port = 4250
+	var port = 4319
 	var host = "127.0.0.1"
 	var labels = "vertical"
 	var awakeDisplay = true
