@@ -22,6 +22,7 @@
  *    Only the UUID from the session map is accepted.
  */
 import { execFile } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { CMUX } from './data/cmux-bin.ts'
 import { spawnAllowed } from './data/projects.ts'
 
@@ -317,3 +318,61 @@ export async function press(workspace: string, key: string): Promise<Result> {
 
 /** Exposed for the tests: whether a key would be refused as an approval. */
 export const refuses = (key: string) => REFUSED.has(key)
+
+/**
+ * Where the codex CLI is, for the same reason CMUX is resolved rather than assumed:
+ * launchd starts this program with almost no environment, so PATH is not usable.
+ */
+const CODEX = (() => {
+	const set = process.env.GUILDHALL_CODEX
+	if (set) return set
+	const home = process.env.HOME ?? ''
+	for (const c of [`${home}/.local/bin/codex`, '/usr/local/bin/codex', '/opt/homebrew/bin/codex']) {
+		if (existsSync(c)) return c
+	}
+	return 'codex' // fall back to PATH; the caller reports the failure either way
+})()
+
+/**
+ * Queue a message into a Codex thread.
+ *
+ * `codex queue --thread <uuid> --message <text>`, which is a documented subcommand
+ * rather than the app-server protocol — that turned out to be unreachable, and this
+ * needs no daemon, no handshake and no long-lived connection. See docs/codex.md.
+ *
+ * The UUID is validated before the process is spawned, which is this project's rule
+ * about driving an agent CLI and it was written in blood: `cmux send` with an empty
+ * or unmatched target does not refuse, it falls back to whatever surface is FOCUSED,
+ * and that typed test strings into a live session twice.
+ *
+ * `codex queue` is better behaved — measured, an empty `--thread` answers "No active
+ * session found matching ''" and exits 1, rather than picking something — but the
+ * check stays, because the guarantee that matters is the one this side enforces.
+ *
+ * The EXIT STATUS is trustworthy here, which is worth stating because the last time
+ * an agent CLI's status was trusted in this project it was read after a pipe and
+ * reported `head`'s. Measured directly: 1 for a thread that does not exist, 2 for a
+ * missing argument, 0 on success.
+ */
+export async function askCodex(thread: string, text: string): Promise<Result> {
+	if (!UUID.test(thread)) return { ok: false, error: 'not a thread id' }
+	const body = text.trim()
+	if (!body) return { ok: false, error: 'nothing to send' }
+	// One line, as with `ask`: a newline would submit early and run the remainder as
+	// its own turn, which is never what somebody typing into a box meant.
+	if (/[\r\n]/.test(body)) return { ok: false, error: 'send one line at a time' }
+	if (body.length > 4000) return { ok: false, error: 'too long' }
+	return new Promise((resolve) => {
+		execFile(
+			CODEX,
+			['queue', '--thread', thread, '--message', body],
+			{ timeout: TIMEOUT, maxBuffer: 4 << 20, windowsHide: true },
+			(err, stdout, stderr) => {
+				// Its own words on failure. "no rollout found for thread id …" tells somebody
+				// what went wrong; "failed" does not.
+				if (err) return resolve({ ok: false, error: (stderr || stdout || err.message || 'failed').trim().slice(0, 200) })
+				resolve({ ok: true, text: stdout })
+			},
+		)
+	})
+}

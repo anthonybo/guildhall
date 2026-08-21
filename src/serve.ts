@@ -29,7 +29,7 @@ import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
-import { ask, press as pressKey, readGrid, spawn } from './control.ts'
+import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { spawnable } from './data/projects.ts'
@@ -285,8 +285,23 @@ export function createServer(opts: ServeOptions) {
 			// by someone at the machine, which was the point of the whole design.
 			// Checked before the workspace lookup: this is a refusal about what the
 			// session is being asked, not about whether the plumbing to reach it exists.
-			if (!target.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			const out = await ask(target.workspace, String(body.text ?? ''))
+			// A Codex session is not a cmux pane, so it is reached by its own route rather
+			// than being refused for lacking a tab. Every guard above still applied: this
+			// is only about which CLI carries the message the last few inches.
+			//
+			// Both branches converge below, so the announcement on this machine's screen
+			// and the throttle and the password are one implementation for both harnesses.
+			// The 404 stays a 404. Folding it into the shared reply below turned "there is
+			// no tab to reach this through" into a 400, which is a different statement —
+			// one says the request named something unreachable, the other says the send was
+			// attempted and failed. A test caught it.
+			if (target.agent !== 'codex' && !target.workspace) {
+				return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			}
+			const out =
+				target.agent === 'codex'
+					? await askCodex(target.id, String(body.text ?? ''))
+					: await ask(target.workspace!, String(body.text ?? ''))
 			// Every send is announced on the machine's own screen. A remote caller
 			// must not be able to act here invisibly.
 			opts.onSend?.(target.proj, String(body.text ?? '').slice(0, 200), out.ok)
