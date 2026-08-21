@@ -791,10 +791,8 @@ function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   const mug = harnessColor(agent);
   box(13, 18, 3, 3, mug);
   put(12, 19, mug);
-  if (agent) box(12, 22, 4, 1, mug);
   box(0, 19, 3, 2, [236, 234, 226]);
-  const bezel = agent ? mix2(lit ? CASE_LIT : CASE, harnessColor(agent), 0.4) : lit ? CASE_LIT : CASE;
-  box(1, 1, 14, 11, bezel);
+  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
   box(2, 2, 12, 9, DARK);
   if (lit) {
     const lens = [9, 6, 11, 7];
@@ -814,8 +812,10 @@ function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   return g;
 }
 var badges = /* @__PURE__ */ new Map();
-function badge(level, tier, face = "") {
-  const key = level + ":" + tier.join("") + ":" + face;
+var lookOf = (b, look) => b.asking ? look.needs : look.tierOf(b.level);
+var badgeFor = (b, look) => badge(b.level, lookOf(b, look), b.asking ? "?" : "", b.agent);
+function badge(level, tier, face = "", agent) {
+  const key = level + ":" + tier.join("") + ":" + face + ":" + (agent ?? "");
   const hit = badges.get(key);
   if (hit) return hit;
   const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
@@ -826,11 +826,12 @@ function badge(level, tier, face = "") {
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
   };
   const CARD = [238, 236, 228];
-  const EDGE = [90, 92, 102];
+  const EDGE = agent ? mix2([90, 92, 102], harnessColor(agent), 0.75) : [90, 92, 102];
   box(7, 0, 2, 2, EDGE);
   box(2, 2, 12, 13, EDGE);
   box(3, 3, 10, 3, tier);
   box(3, 6, 10, 8, CARD);
+  if (agent) box(3, 13, 10, 1, harnessColor(agent));
   const INK2 = [40, 42, 54];
   if (face) {
     const glyph = DIGITS[face] ?? DIGITS["0"];
@@ -2439,11 +2440,11 @@ var Office = class extends SimBase {
         }
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
         if (lvl) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false });
+          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false, agent: harness.get(`${c},${pod.seatRow}`) });
           block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2);
         }
         if (asking.has(`${c},${pod.seatRow}`)) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true });
+          this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true, agent: harness.get(`${c},${pod.seatRow}`) });
           block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2);
         }
       }
@@ -3056,8 +3057,7 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
     if (pick2) stamp(plate(pick2.font, pick2.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick2.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy);
   }
   for (const b of scene.badges) {
-    const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color;
-    stamp(badge(b.level, tint, b.asking ? "?" : ""), b.x * sx, b.y * py, TILE * sx, TILE * py);
+    stamp(badgeFor(b, { needs: LOOK.needs.color, tierOf: (n) => tierOf(n).color }), b.x * sx, b.y * py, TILE * sx, TILE * py);
   }
   for (const p of placed) {
     const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color);

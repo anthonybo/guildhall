@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { HARNESS, badge, harnessMark, monitor, monitorFor, monitorKey, type Desk } from './screens.ts'
+import { HARNESS, badge, badgeFor, harnessMark, monitor, monitorFor, monitorKey, type Desk, type LevelLook } from './screens.ts'
 import { width } from './theme.ts'
-import type { Grid } from './characters.ts'
 
 const ink = (g: { grid: (number[] | null)[][] }) =>
 	g.grid.map((r) => r.map((c) => (c && c[0] === 40 ? '#' : '.')).join('')).join('\n')
@@ -26,33 +25,50 @@ test('every level from 1 to 30 renders a distinct badge', () => {
 	assert.equal(seen.size, 30, 'two levels render identically')
 })
 
-test('the harness marks the desk, and never the screen', () => {
-	// Two Claude sessions and a Codex session in one project sit as three identical
-	// workers in the same pod, and at rest nothing told them apart — the label prefix
-	// only appears when a session is urgent or selected.
+test('the harness marks the BADGE, which is the only part of a desk never covered', () => {
+	// This is the whole finding, and it took two wrong attempts to get to. Anything drawn
+	// on the WORKTOP is hidden while somebody is working there: the occupant is one tile
+	// wide, sits at the desk and is drawn over it. office.ts already records the same
+	// thing about the working-light, where roughly 24 pixels across five lit desks
+	// survived to the screen. So a mug and a cable went invisible exactly when the
+	// session was active — reported as "when an agent is working that is not visible".
 	//
-	// The mug alone was tried first and was NOT findable: ten pixels at the edge of the
-	// worktop, with a bright level badge beside it. The report was "there is no logo at
-	// the desks anywhere", from somebody looking for one. So the mark is now three things
-	// on different axes — mug, cable, and the bezel, which is the largest thing on a desk
-	// and the only one that reads across a room.
+	// The badge sits in the aisle beside the desk and is never occluded by anyone.
+	const look: LevelLook = { needs: [255, 120, 120], tierOf: () => [200, 160, 240] }
+	const claude = badgeFor({ level: 12, asking: false, agent: 'claude' }, look)
+	const codex = badgeFor({ level: 12, asking: false, agent: 'codex' }, look)
+	const plain = badgeFor({ level: 12, asking: false }, look)
+
+	// The frame carries it, so it reads whichever side the eye arrives from.
+	assert.notDeepEqual(claude.grid[2]![2], codex.grid[2]![2], 'the badge frame does not distinguish the harnesses')
+	assert.deepEqual(plain.grid[2]![2], [90, 92, 102], 'an unmarked badge has a tinted frame')
+	// Plus a full-strength bar on the white card under the number, because one sprite
+	// pixel of frame is only about three screen pixels at a real terminal cell.
+	assert.deepEqual(claude.grid[13]![5], HARNESS.claude, 'no harness bar on the card')
+	assert.deepEqual(codex.grid[13]![5], HARNESS.codex)
+	assert.deepEqual(plain.grid[13]![5], [238, 236, 228], 'an unmarked badge grew a bar')
+	// The number is untouched — it is the level, and the level is not the harness.
+	// the card interior only: the frame is at x=2 and x=13 and is meant to differ
+	for (let y = 8; y <= 12; y++) assert.deepEqual(claude.grid[y]!.slice(3, 13), codex.grid[y]!.slice(3, 13), `the number changed with the harness on row ${y}`)
+	// And so is the tier strip: a session waiting on you must still look like one.
+	for (let y = 3; y <= 5; y++) assert.deepEqual(claude.grid[y]!.slice(3, 13), codex.grid[y]!.slice(3, 13), 'the tier strip changed with the harness')
+})
+
+test('the desk sprite changes by exactly the mug, and never the screen or the bezel', () => {
+	// The mug stays as a close-range detail but is no longer the mechanism, and nothing
+	// else on the sprite may move. A bezel tint was tried and reverted: every pod carpet
+	// shows through around this sprite, so the monitor already wears a ring in its
+	// project colour and a tint inside that ring reads as noise rather than as a fact.
 	const claude = monitor(true, 0, 0, 'edit', 'claude')
 	const codex = monitor(true, 0, 0, 'edit', 'codex')
-
-	const diff = (a: Grid, b: Grid) => {
-		let n = 0
-		for (let y = 0; y < a.grid.length; y++)
-			for (let x = 0; x < a.grid[y]!.length; x++) if (JSON.stringify(a.grid[y]![x]) !== JSON.stringify(b.grid[y]![x])) n++
-		return n
-	}
-	// mug 3x3 + one handle pixel = 10, cable 4x1 = 4, and the bezel ring is
-	// box(1,1,14,11) minus the dark screen box(2,2,12,9) drawn over it = 154 - 108 = 46.
-	assert.equal(diff(claude, codex), 10 + 4 + 46, 'the harness changed a different number of pixels than mug + cable + bezel')
-
-	// The screen is untouched, which is what keeps the tool tint meaning the tool and
-	// nothing else. Checked across every screen row, not one sample: the first version
-	// of this test checked row 4 alone and would have missed a leak anywhere else.
-	for (let y = 2; y <= 10; y++) assert.deepEqual(claude.grid[y]!.slice(2, 14), codex.grid[y]!.slice(2, 14), `screen row ${y} changed with the harness`)
+	let differing = 0
+	for (let y = 0; y < claude.grid.length; y++)
+		for (let x = 0; x < claude.grid[y]!.length; x++)
+			if (JSON.stringify(claude.grid[y]![x]) !== JSON.stringify(codex.grid[y]![x])) differing++
+	// 3x3 mug plus one handle pixel. More than that means it leaked back onto the worktop
+	// or into the bezel, both of which have been measured and shown not to work.
+	assert.equal(differing, 10, `${differing} pixels changed; the mug is 10`)
+	for (let y = 1; y <= 11; y++) assert.deepEqual(claude.grid[y], codex.grid[y], `screen or bezel row ${y} changed with the harness`)
 })
 
 test('a room with one harness is drawn exactly as it was before there were two', () => {
@@ -61,11 +77,8 @@ test('a room with one harness is drawn exactly as it was before there were two',
 	// pixel-identical to the old drawing, or every doc image and every existing room
 	// changes for a distinction that has nothing to distinguish.
 	const plain = monitor(true, 0, 0, 'edit')
-	// no cable — row 22 is still bare desk wood — and the bezel is the unmodified case
-	assert.deepEqual(plain.grid[22]![13], [138, 96, 62], 'an unmarked desk grew a cable')
-	// and the marked one does have it, or the assertion above proves nothing
-	assert.deepEqual(monitor(true, 0, 0, 'edit', 'codex').grid[22]![13], HARNESS.codex, 'a marked desk has no cable')
 	assert.deepEqual(plain.grid[1]![1], [72, 76, 96], 'an unmarked desk has a tinted bezel')
+	assert.deepEqual(plain.grid[22]![13], [138, 96, 62], 'something was drawn on an unmarked worktop')
 	// the mug is still there and still the ordinary one
 	assert.deepEqual(plain.grid[19]![14], HARNESS.claude)
 })

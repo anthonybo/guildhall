@@ -513,3 +513,38 @@ still carrying lit-ness so neither fact is lost.
 guards was removed. None of them would have caught the original bug, because
 nothing covers `main.ts`'s draw path — that gap is still open. What closed it was
 routing all three callers through one descriptor, not a test.
+
+### Then the mark was drawn and still could not be seen — twice
+
+**The worktop is the wrong surface, and this file already said so.** After the mark
+finally reached the terminal it was reported invisible again: "when an agent is
+working that is not visible". Correct. The occupant is one tile wide, sits directly
+at the desk and is drawn OVER it, so the mug and the cable beside it are covered
+exactly while the session is active — which is when you most want to know whose desk
+it is. `office.ts` already records this about the working-light: the desk's front
+edge "looked right in the sprite" and only about **24 pixels across five lit desks**
+survived to the screen. The same trap, one sprite later.
+
+**The bezel tint was the other failed attempt.** It looked convincing in an isolated
+crop of two desks — and those two desks shared one carpet. In a real room every pod
+has its own carpet color showing through around the monitor sprite, so each frame
+already reads as its project's color and a tint inside that ring is low contrast
+against a dark screen. Reverted; it was noise, not signal.
+
+**What works: the level badge.** It sits in the aisle beside the desk, is never
+occluded by anybody, and is a light card on a dark floor. Its frame was a fixed gray
+carrying no meaning, and the tier color it might be confused with is a strip across
+the top rather than the edge. Frame tinted 0.75 toward the harness color, plus a
+full-strength 10x1 bar on the blank card row under the number — one sprite pixel of
+frame is only about three screen pixels at a real terminal cell, which is too thin to
+carry a distinction on its own.
+
+**Measured at the right scale this time.** The mug had been judged at 8x, where it is
+obvious. Rendered at a real terminal's 12x24 cell it is ten pixels at the edge of the
+worktop with a bright badge immediately beside it. Judge room changes at the cell size
+somebody actually runs.
+
+**And do not trust a downscaled crop.** Reading the badge frame off a scaled
+screenshot, I called the teal one "dark navy" and nearly went looking for a bug that
+was not there. The pixel values were right — `[105,163,173]` — and printing them took
+one command. Look at the numbers, not at the picture, when the question is a color.

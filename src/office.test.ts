@@ -414,3 +414,22 @@ test('the room marks both harnesses when there are two, and neither when there i
 		'a single-harness room marked its desks, which changes every existing room and every doc image',
 	)
 })
+
+test('a working session keeps its harness mark, because the mark is not on the worktop', () => {
+	// The reported bug: "when an agent is working that is not visible". Everything drawn
+	// on the desk surface is covered by whoever is sitting at it, so the first two
+	// attempts — a coloured mug, then a cable beside it — both disappeared precisely
+	// while the session was active. The badge is in the aisle and is never occluded.
+	const list = [
+		{ ...session('a', 'alpha', 'working'), agent: 'codex' as const },
+		session('b', 'alpha', 'working'),
+	]
+	const { cv, office } = room(list)
+	office.draw(cv, list)
+
+	// Both desks are lit — this is the working case, not the idle one.
+	assert.equal(office.monitors.filter((m) => m.lit).length, 2, 'the fixture is not exercising working sessions')
+	// And both badges carry a harness, the Codex one included.
+	const marks = office.badges.filter((b) => !b.asking).map((b) => b.agent).sort()
+	assert.deepEqual(marks, ['claude', 'codex'], `working desks carry ${JSON.stringify(marks)}`)
+})

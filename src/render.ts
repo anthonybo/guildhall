@@ -12,7 +12,7 @@
 import type { Canvas } from './canvas.ts'
 import type { Grid } from './characters.ts'
 import { frameOf } from './characters.ts'
-import { badge, monitorFor } from './screens.ts'
+import { badgeFor, monitorFor } from './screens.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import { LOOK, tierOf, type RGB } from './theme.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, TILE, type Placed } from './office/model.ts'
@@ -25,7 +25,9 @@ const NIGHT: RGB = [26, 28, 40]
 export type Scene = {
 	plates: { x: number; y: number; proj: string; colour: RGB }[]
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any; agent?: string }[]
-	badges: { x: number; y: number; level: number; asking: boolean }[]
+	// `agent` declared, not merely tolerated: office.badges carries it at runtime, and
+	// leaving it off this type meant the compositor drew it only by structural accident
+	badges: { x: number; y: number; level: number; asking: boolean; agent?: string }[]
 	props: { kind: keyof typeof PROP_SIZE; x: number; y: number }[]
 }
 
@@ -193,8 +195,7 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 		if (pick) stamp(plate(pick.font, pick.text, PLATE_COLS * sx, PLATE_ROWS * sy, p.colour, INK, NIGHT, pick.scale), p.x * sx, p.y * py, PLATE_COLS * sx, PLATE_ROWS * sy)
 	}
 	for (const b of scene.badges) {
-		const tint = b.asking ? LOOK.needs.color : tierOf(b.level).color
-		stamp(badge(b.level, tint, b.asking ? '?' : ''), b.x * sx, b.y * py, TILE * sx, TILE * py)
+		stamp(badgeFor(b, { needs: LOOK.needs.color, tierOf: (n) => tierOf(n).color }), b.x * sx, b.y * py, TILE * sx, TILE * py)
 	}
 	for (const p of placed) {
 		const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)

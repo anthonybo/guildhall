@@ -164,13 +164,13 @@ export class Office extends SimBase {
 				// beside the desk, in the gap column, where nobody sits
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
 				if (lvl) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false })
+					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false, agent: harness.get(`${c},${pod.seatRow}`) })
 					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
 				}
 				// a session waiting on an answer gets a placard beside its desk, since
 				// the registry never reports a plain question as "waiting"
 				if (asking.has(`${c},${pod.seatRow}`)) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true })
+					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true, agent: harness.get(`${c},${pod.seatRow}`) })
 					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 				}
 			}

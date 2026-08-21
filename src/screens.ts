@@ -183,27 +183,23 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	const mug = harnessColor(agent)
 	box(13, 18, 3, 3, mug)
 	put(12, 19, mug)
-	// A cable in the same colour, running off the back of the desk.
-	//
-	// The mug alone was not findable. It is ten pixels at the edge of the worktop with
-	// a bright level badge immediately beside it, and the report was simply "there is
-	// no logo at the desks anywhere" — from somebody who knew to look for one. This
-	// adds a second, longer run of the same colour on a different axis, which is what
-	// makes it catch the eye from across the room rather than only under inspection.
-	if (agent) box(12, 22, 4, 1, mug)
+	// A cable was added here and REMOVED again. It was meant to make the harness
+	// findable, and it cannot: the occupant is drawn over this surface while they are
+	// working, so the mark disappeared exactly when the session was active. Leaving it
+	// in would be a second layer on a diagnosis that had already been shown wrong. The
+	// mug stays because it predates all this and reads at close range; the badge frame
+	// is what actually carries the fact.
 	// a small stack of paper where the badge used to sit
 	box(0, 19, 3, 2, [236, 234, 226])
-	// bezel — tinted toward the harness colour when there is a harness to tell apart
+	// bezel
 	//
-	// This is the channel that actually reads at a glance, because it is the largest
-	// thing on a desk. Hue carries the harness and BRIGHTNESS still carries lit-ness,
-	// so the two facts stack instead of competing: a dark coral frame is an idle Claude
-	// desk, a bright teal one is a Codex desk mid-turn.
-	//
-	// `agent` is only set when the room holds more than one harness (see office.ts), so
-	// a room of nothing but Claude Code draws exactly the frame it always has.
-	const bezel = agent ? mix(lit ? CASE_LIT : CASE, harnessColor(agent), 0.4) : lit ? CASE_LIT : CASE
-	box(1, 1, 14, 11, bezel)
+	// NOT tinted by harness, though that was tried and shipped. Each pod's carpet shows
+	// through around this sprite, so the monitor already wears a ring in its project's
+	// colour; a tint inside that ring is low contrast against the dark screen and reads
+	// as noise rather than as a fact. It looked convincing in an isolated crop only
+	// because both desks in it shared one carpet. The harness lives on the level badge
+	// instead — see the note there.
+	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
 	box(2, 2, 12, 9, DARK)
 
 	if (lit) {
@@ -234,8 +230,35 @@ const badges = new Map<string, Grid>()
  * than on it: a seated occupant covers the desk surface, and a badge you cannot
  * see while someone is working is the wrong way round.
  */
-export function badge(level: number, tier: RGB, face = ''): Grid {
-	const key = level + ':' + tier.join('') + ':' + face
+/**
+ * One level badge's inputs, for the same reason `Desk` exists.
+ *
+ * `badge()` had three callers too, and all three re-derived `tier` and `face` from
+ * `asking` and `level` with their own copy of the same two ternaries. That is the
+ * arrangement that lost the harness on the desks: not one mistake, but a shape where
+ * adding an input means finding every place that spells the arguments out.
+ */
+export type Level = { level: number; asking: boolean; agent?: string }
+
+/**
+ * Which colour a badge's tier strip takes. Needs-attention outranks the rank, because
+ * a session waiting on you is the thing you are scanning for.
+ *
+ * Passed in rather than imported so screens.ts stays free of theme.ts — the docs
+ * compositor and the terminal already disagree about nothing here and should keep it
+ * that way.
+ */
+export type LevelLook = { needs: RGB; tierOf: (level: number) => RGB }
+const lookOf = (b: Level, look: LevelLook): RGB => (b.asking ? look.needs : look.tierOf(b.level))
+
+/** Draw a level badge from its descriptor. Every caller should use this. */
+export const badgeFor = (b: Level, look: LevelLook): Grid => badge(b.level, lookOf(b, look), b.asking ? '?' : '', b.agent)
+
+/** The cache key for that exact badge, derived from the same descriptor. */
+export const badgeKey = (b: Level): string => (b.asking ? 'badge:ask' : `badge:${b.level}:${b.agent ?? ''}`)
+
+export function badge(level: number, tier: RGB, face = '', agent?: string): Grid {
+	const key = level + ':' + tier.join('') + ':' + face + ':' + (agent ?? '')
 	const hit = badges.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: 16 }, () => new Array<RGB | null>(16).fill(null))
@@ -246,11 +269,38 @@ export function badge(level: number, tier: RGB, face = ''): Grid {
 		for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c)
 	}
 	const CARD: RGB = [238, 236, 228]
-	const EDGE: RGB = [90, 92, 102]
+	/**
+	 * The badge's frame carries the harness, and it is the only place on a desk that
+	 * reliably can.
+	 *
+	 * Everything drawn on the WORKTOP is hidden the moment somebody is working there.
+	 * The occupant is one tile wide, sits directly at the desk and is drawn over it —
+	 * office.ts already records this about the working-light, where only about 24 pixels
+	 * across five lit desks survived to the screen. A mug and a cable on that surface
+	 * have the same problem, so the mark vanished exactly when the session was active,
+	 * which is when you most want to know whose it is.
+	 *
+	 * The bezel was tried and is drowned out: each pod's carpet shows through around the
+	 * monitor sprite, so every frame already reads as its project colour and a tint
+	 * inside that ring is low contrast against a dark screen.
+	 *
+	 * The badge sits in the aisle BESIDE the desk, is never occluded by anybody, and is
+	 * a light card on a dark floor. Its frame was a fixed grey carrying no meaning, and
+	 * the tier colour it would be confused with is a strip across the top, not the edge.
+	 */
+	const EDGE: RGB = agent ? mix([90, 92, 102], harnessColor(agent), 0.75) : [90, 92, 102]
 	box(7, 0, 2, 2, EDGE)
 	box(2, 2, 12, 13, EDGE)
 	box(3, 3, 10, 3, tier)
 	box(3, 6, 10, 8, CARD)
+	// A solid bar under the number, in the harness's own colour rather than the muted
+	// frame blend, because here it sits on the white card and can afford full strength.
+	//
+	// The frame alone is one sprite pixel on each side — about three screen pixels at a
+	// real terminal's cell — which is a thin outline to hang a distinction on. This row
+	// is ten pixels wide and was already blank: the card runs to row 13 and the digits
+	// stop at row 12. So it costs no layout and reads at a glance, which the mug did not.
+	if (agent) box(3, 13, 10, 1, harnessColor(agent))
 	const INK: RGB = [40, 42, 54]
 	if (face) {
 		const glyph = DIGITS[face] ?? DIGITS['0']
