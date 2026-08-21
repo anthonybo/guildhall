@@ -179,6 +179,49 @@ Each phase is separately revertable, and none of them is required by the next.
    password like every other write path, and it is the one phase that can do damage,
    so it does not ride along with a read-only feature.
 
+## Phase 3, attempted: what the protocol actually does
+
+Verified by driving it, not by reading about it.
+
+**The framing is newline-delimited JSON**, and `codex app-server` runs on stdio as an
+ordinary child process — no daemon needed for that part. `initialize` takes
+`{clientInfo: {name, version}}` and answers with `{userAgent, codexHome,
+platformFamily, platformOs}`.
+
+`thread/list` works against such a child and returns `{data, nextCursor,
+backwardsCursor}`. Two details the schema did not make obvious and a guess would have
+got wrong:
+
+- `sortKey` is snake_case — `created_at`, `updated_at`, `recency_at`,
+  `section_position`. `recency` is rejected outright.
+- `turns` is an ARRAY, not the count the field name suggests.
+
+**But `status` is per-instance, not global.** A freshly spawned app-server reports
+`{"type":"notLoaded"}` for every thread, because the status describes what THAT
+process has in memory. So spawning our own child cannot answer "is this session
+running" — it can only enrich metadata (`name`, `preview`, `turns`, `gitInfo`,
+`recencyAt`), and it costs a process to do it.
+
+**Real status needs the shared daemon, and that transport is not solved.** The daemon
+starts and stops cleanly — `codex app-server daemon start` / `stop`, 66MB RSS, and
+`daemon version` returns JSON including `status: running`, which is a cheap health
+check. Its socket appears at `~/.codex/app-server-control/app-server-control.sock`.
+But it does not answer plain newline-delimited JSON-RPC: connecting directly returned
+nothing, and `codex app-server proxy` — whose whole description is proxying stdio to
+that socket — also returned nothing, with an empty stderr and no exit, both with and
+without `--sock`. Three attempts, no response.
+
+So **phase 3 as planned is blocked**, and the honest position is that the file path
+from phase 1 remains the only working source of liveness. What would unblock it:
+reading `codex-rs/app-server`'s own client to see what the control socket expects
+before the first request, or watching a live Codex session to learn whether `status`
+ever becomes `active` for a thread another process owns.
+
+One thing worth knowing either way: a live Codex session was never observed during
+any of this. Every thread on this machine was finished, so `notLoaded` is consistent
+both with "the instance has not loaded it" and with "it genuinely is not running", and
+nothing here distinguishes those two.
+
 ## Still open
 
 - **The initialize handshake.** `codex app-server proxy` gives a stdio JSON-RPC pipe,
