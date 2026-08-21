@@ -441,3 +441,37 @@ finding nothing in their browser.
 ten seconds, which without a spinner and a disabled switch is indistinguishable from
 a dead control. The first version reported instantly and lied; the second was
 truthful and looked broken.
+
+## Grepping a Swift binary for string literals cannot tell you what it contains
+
+**Not a way to verify the menu bar app.** After installing a rebuilt
+`GuildhallBar.app` I checked whether the new UI had shipped by searching the binary
+for its literals. `"Show Codex sessions too"` was found, so the install was fresh —
+that part is sound, and a single hit is still a useful freshness check.
+
+But `diamond.fill` came back **0**, which read as "the harness mark is missing".
+It is not missing. The control test settles it: `checkmark.circle.fill` (21 bytes,
+demonstrably used by the app) is **also 0**, and so is `needs you`. Meanwhile
+`Claude Code` (11 bytes) is 1. There is no length rule and no pattern — Swift
+literals land in the binary or not depending on inlining and constant merging, so
+**absence is not evidence of anything**. Two of those four numbers were real and
+answered a different question, which is this file's oldest lesson.
+
+Use it only in the positive direction: one hit on a string that is new in this build
+proves the bundle on disk is that build. To check that a control *renders*, render it.
+
+**What does not work for driving the app, so nobody re-derives it:**
+
+- `osascript … click menu bar item 1 of menu bar 2` fails with
+  `osascript is not allowed assistive access (-1719)` unless the terminal has been
+  granted Accessibility. Not worth requesting for a test.
+- `screencapture` succeeds regardless, so it happily produces a screenshot of the
+  desktop with the panel closed and nothing says the click failed. It also captures
+  whatever else is on screen — delete it.
+- The offscreen SwiftUI render is still the answer, with the caveat already recorded:
+  `cacheDisplay` draws the control color and drops the text, `displayIgnoringOpacity`
+  draws the text and drops the accent color, so both are needed.
+
+**Still not solved:** there is no cheap scripted way to assert that a SwiftUI row
+appears in the shipped menu bar panel. The Settings switch added alongside this note
+was verified only as "compiles, and the bundle on disk is this build".

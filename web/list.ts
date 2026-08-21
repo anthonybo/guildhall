@@ -12,12 +12,7 @@ import { needsAttention, order } from '../src/data/select.ts'
 import { mix, readable } from '../src/contrast.ts'
 import type { Session } from '../src/data/types.ts'
 import { hasControl, sendTo, setControl } from './terminal.ts'
-import { HARNESS } from '../src/screens.ts'
-
-/** The room's own harness colours, as CSS. One definition, two surfaces. */
-const HARNESS_HEX: Record<string, string> = Object.fromEntries(
-	Object.entries(HARNESS).map(([k, [r, g, b]]) => [k, `rgb(${r} ${g} ${b})`]),
-)
+import { harnessMark } from '../src/screens.ts'
 import { ago, rgb } from './dom.ts'
 
 /**
@@ -381,14 +376,14 @@ export function paintList(list: Session[]) {
 		// nothing to say. Two Claude sessions and a Codex session in one project was the
 		// case that made it obvious.
 		//
-		// Glyphs rather than the vendors' logos: those are somebody else's trademark and
-		// this is a public repository. Aria-hidden with the name on the row's title, so a
-		// screen reader gets the word rather than a decorative character.
+		// Glyph, colour and name all come from `harnessMark`, which the terminal table
+		// draws from too — it was three copies of one decision. Aria-hidden with the name
+		// on `title`, so a screen reader gets the word rather than a decorative character.
 		const harness = li.querySelector('.harness') as HTMLElement
-		const kind = s.agent ?? 'claude'
-		harness.textContent = kind === 'codex' ? '◆' : '✳'
-		harness.style.color = HARNESS_HEX[kind] ?? HARNESS_HEX.claude!
-		harness.title = kind === 'codex' ? 'Codex — queued messages, no terminal tab' : 'Claude Code'
+		const mark = harnessMark(s.agent)
+		harness.textContent = mark.glyph
+		harness.style.color = rgb(mark.color)
+		harness.title = mark.name
 		const away = li.querySelector('.away') as HTMLElement
 		if (s.away) {
 			away.textContent = `→ ${s.away}`

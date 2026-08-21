@@ -11,7 +11,7 @@ import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tie
 import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
-import { harnessColor } from './screens.ts'
+import { harnessMark } from './screens.ts'
 
 export type Row = { s: Session; line: string; extra?: string[] }
 
@@ -56,14 +56,10 @@ const W_LVL = 2
  * and left Claude Code identified by absence, which is not a distinction anybody can
  * read — you cannot tell "this is Claude" from "this column means nothing on this row".
  *
- * Glyphs rather than the vendors' actual logos: those are somebody else's trademark and
- * this repository is public, which is a line worth not crossing for a one-cell marker.
- * The mark only has to be consistent and distinct, and a legend you learn once is what
- * the level badge already relies on.
+ * The glyph and its colour come from `harnessMark`, which is also what the browser row
+ * draws; see the note there for why they are glyphs and not the vendors' logos.
  */
 const W_AGENT = 1
-const AGENT_GLYPH: Record<string, string> = { claude: '✳', codex: '◆' }
-const agentGlyph = (s: Session) => AGENT_GLYPH[s.agent ?? 'claude'] ?? '·'
 
 /**
  * Is there more than one harness in this list?
@@ -136,7 +132,7 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : '·'}`, W_TAB)}${R}`,
 			// which harness, in the colour the room uses for that desk's mug — only when
 			// the list actually holds more than one
-			mixed ? `${fg(harnessColor(s.agent))}${padL(agentGlyph(s), W_AGENT)}${R}` : '',
+			mixed ? `${fg(harnessMark(s.agent).color)}${padL(harnessMark(s.agent).glyph, W_AGENT)}${R}` : '',
 			// level is identity, so it sits beside the tab rather than with the status
 			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
 			// the project's own colour from the room, and bold — this is the column you

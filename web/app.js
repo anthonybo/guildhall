@@ -756,6 +756,11 @@ var HARNESS = {
   codex: [110, 186, 196]
 };
 var harnessColor = (agent) => HARNESS[agent ?? "claude"] ?? HARNESS.claude;
+var MARK = {
+  claude: { glyph: "\u2733", color: HARNESS.claude, name: "Claude Code" },
+  codex: { glyph: "\u25C6", color: HARNESS.codex, name: "Codex \u2014 queued messages, no terminal tab" }
+};
+var harnessMark = (agent) => MARK[agent ?? "claude"] ?? { glyph: "\xB7", color: HARNESS.claude, name: agent ?? "unknown" };
 function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}:${agent ?? ""}`;
   const hit = cache.get(key);
@@ -835,9 +840,6 @@ function badge(level, tier, face = "") {
 }
 
 // web/list.ts
-var HARNESS_HEX = Object.fromEntries(
-  Object.entries(HARNESS).map(([k, [r, g, b]]) => [k, `rgb(${r} ${g} ${b})`])
-);
 var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
 	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
 	<rect x="1" y="1" width="14" height="9" fill="#0d0c12"/>
@@ -1053,10 +1055,10 @@ function paintList(list) {
 			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
     const harness = li.querySelector(".harness");
-    const kind = s.agent ?? "claude";
-    harness.textContent = kind === "codex" ? "\u25C6" : "\u2733";
-    harness.style.color = HARNESS_HEX[kind] ?? HARNESS_HEX.claude;
-    harness.title = kind === "codex" ? "Codex \u2014 queued messages, no terminal tab" : "Claude Code";
+    const mark = harnessMark(s.agent);
+    harness.textContent = mark.glyph;
+    harness.style.color = rgb(mark.color);
+    harness.title = mark.name;
     const away = li.querySelector(".away");
     if (s.away) {
       away.textContent = `\u2192 ${s.away}`;
@@ -3332,7 +3334,7 @@ function ciLook(ci) {
       return { glyph: "\xB7", tone: "text-faint", say: `${ci.workflow} ${ci.conclusion ?? ci.status}` };
   }
 }
-var MARK = {
+var MARK2 = {
   commit: { glyph: "\u25CF", tone: "text-ok" },
   push: { glyph: "\u21E7", tone: "text-gold" },
   run: { glyph: "\u2699", tone: "text-muted" },
@@ -3404,7 +3406,7 @@ function repoRow(r) {
 function feedRow(i) {
   const li = document.createElement("li");
   li.className = "flex items-baseline gap-2 px-2 py-[0.15rem] whitespace-nowrap hover:bg-line/40";
-  const mark = MARK[i.kind];
+  const mark = MARK2[i.kind];
   const tint = hue(i.repo);
   const glyph = document.createElement("span");
   glyph.className = `w-3 shrink-0 text-center ${mark.tone}`;

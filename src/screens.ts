@@ -87,6 +87,33 @@ export const HARNESS: Record<string, RGB> = {
 }
 export const harnessColor = (agent?: string): RGB => HARNESS[agent ?? 'claude'] ?? HARNESS.claude!
 
+/**
+ * The one description of a harness mark: its glyph, its colour, and what to call it.
+ *
+ * Here rather than at each surface because the glyph had three definitions — a map in
+ * table.ts, an inline ternary in web/list.ts, and the mug in this file — for one
+ * decision. That is the shape of the nameplate bug, where the terminal tripled the
+ * plates and the shipped browser bundle still drew the old ones: nothing was wrong
+ * with either copy, they just stopped agreeing.
+ *
+ * Glyphs and not the vendors' logos. Those are someone else's trademark and this is a
+ * public repository, so shipping them is a licensing decision rather than a drawing
+ * one — and the room draws these at desk scale, where a faithful logo would have to be
+ * redrawn into a handful of pixels, which is the modification brand guidelines
+ * consistently forbid.
+ *
+ * `name` is the accessible name, so a screen reader gets a word rather than a
+ * decorative character.
+ */
+export type Harness = { glyph: string; color: RGB; name: string }
+const MARK: Record<string, Harness> = {
+	claude: { glyph: '✳', color: HARNESS.claude!, name: 'Claude Code' },
+	codex: { glyph: '◆', color: HARNESS.codex!, name: 'Codex — queued messages, no terminal tab' },
+}
+/** An unknown harness gets a neutral dot rather than being drawn as Claude Code:
+ *  guessing wrong here is worse than admitting the mark is not known. */
+export const harnessMark = (agent?: string): Harness => MARK[agent ?? 'claude'] ?? { glyph: '·', color: HARNESS.claude!, name: agent ?? 'unknown' }
+
 export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', agent?: string): Grid {
 	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${agent ?? ''}`
 	const hit = cache.get(key)
