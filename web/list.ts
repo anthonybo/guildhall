@@ -12,6 +12,12 @@ import { needsAttention, order } from '../src/data/select.ts'
 import { mix, readable } from '../src/contrast.ts'
 import type { Session } from '../src/data/types.ts'
 import { hasControl, sendTo, setControl } from './terminal.ts'
+import { HARNESS } from '../src/screens.ts'
+
+/** The room's own harness colours, as CSS. One definition, two surfaces. */
+const HARNESS_HEX: Record<string, string> = Object.fromEntries(
+	Object.entries(HARNESS).map(([k, [r, g, b]]) => [k, `rgb(${r} ${g} ${b})`]),
+)
 import { ago, rgb } from './dom.ts'
 
 /**
@@ -355,7 +361,7 @@ export function paintList(list: Session[]) {
 			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['›'] group-[.open]:after:rotate-90">
 				<span class="proj truncate font-bold text-(--proj)"></span>
 				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
-				<span class="harness hidden shrink-0 rounded px-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted ring-1 ring-inset ring-white/15"></span>
+				<span class="harness shrink-0 text-[0.85rem] leading-none" aria-hidden="true"></span>
 			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
@@ -368,15 +374,21 @@ export function paintList(list: Session[]) {
 		li.querySelector('.proj')!.textContent = s.proj
 		// Where the work has gone, when it has gone somewhere. Shown rather than
 		// letting the name quietly change to it — see settle.ts.
-		// Hidden unless the session says which harness it came from. Every session that
-		// exists today says nothing, so every row today is byte-identical — which is the
-		// point of shipping the look on its own branch and its own phase.
+		// BOTH harnesses get a glyph, in the colour the room paints that desk's mug.
+		//
+		// It was a tag on Codex rows only, which meant Claude Code was identified by
+		// absence — and absence is not a mark you can read next to a row that simply has
+		// nothing to say. Two Claude sessions and a Codex session in one project was the
+		// case that made it obvious.
+		//
+		// Glyphs rather than the vendors' logos: those are somebody else's trademark and
+		// this is a public repository. Aria-hidden with the name on the row's title, so a
+		// screen reader gets the word rather than a decorative character.
 		const harness = li.querySelector('.harness') as HTMLElement
-		if (s.agent) {
-			harness.textContent = s.agent
-			harness.title = `Run by ${s.agent}, not Claude Code — there is no terminal tab to open`
-			harness.classList.remove('hidden')
-		}
+		const kind = s.agent ?? 'claude'
+		harness.textContent = kind === 'codex' ? '◆' : '✳'
+		harness.style.color = HARNESS_HEX[kind] ?? HARNESS_HEX.claude!
+		harness.title = kind === 'codex' ? 'Codex — queued messages, no terminal tab' : 'Claude Code'
 		const away = li.querySelector('.away') as HTMLElement
 		if (s.away) {
 			away.textContent = `→ ${s.away}`

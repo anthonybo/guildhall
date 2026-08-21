@@ -74,10 +74,18 @@ export const TINT: Record<Kind, RGB> = {
  * A mug is decorative, always present, and per-desk. A different mug reads as somebody
  * else's desk, which is exactly the fact being conveyed.
  */
-const MUG: Record<string, RGB> = {
+/**
+ * A colour per harness, defined once.
+ *
+ * The room paints the desk mug with it and the table paints its harness glyph with it,
+ * so the two surfaces say the same thing the same way rather than drifting into two
+ * different ideas of what colour Codex is.
+ */
+export const HARNESS: Record<string, RGB> = {
 	claude: [226, 118, 96],
 	codex: [110, 186, 196],
 }
+export const harnessColor = (agent?: string): RGB => HARNESS[agent ?? 'claude'] ?? HARNESS.claude!
 
 export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', agent?: string): Grid {
 	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${agent ?? ''}`
@@ -104,7 +112,7 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	box(3, 18, 9, 3, [58, 62, 78])
 	box(4, 19, 7, 1, [92, 98, 118])
 	// mug — its colour is which harness this desk belongs to
-	const mug = MUG[agent ?? 'claude'] ?? MUG.claude!
+	const mug = harnessColor(agent)
 	box(13, 18, 3, 3, mug)
 	put(12, 19, mug)
 	// a small stack of paper where the badge used to sit

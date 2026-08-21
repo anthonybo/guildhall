@@ -69,28 +69,60 @@ test('every row is exactly the requested width', () => {
 	}
 })
 
-test('a Codex session is named in the tab column, and nothing else moves', () => {
-	// The column says how to reach a session: `⌘3` for a cmux pane, `·` for one with
-	// no pane. A Codex session has no pane to jump to, so the same slot names the
-	// harness. Only rows carrying `agent` change, which today is none of them.
-	const claudeWithTab = { ...session('orchard'), tab: 3 } as Session
-	const claudeNoTab = session('willow')
-	const codex = { ...session('kestrel'), agent: 'codex' } as Session
-
-	const line = (s: Session) => strip(rows([s], 120)[0]!.line)
-	assert.match(line(claudeWithTab), /⌘3/, 'a cmux tab stopped being offered')
-	assert.match(line(claudeNoTab), /·/, 'a session with no tab changed appearance')
-	assert.match(line(codex), /\bcx\b/, 'a Codex session is indistinguishable from any other')
-	assert.doesNotMatch(line(codex), /⌘/, 'offered a terminal tab for something with no pane')
+test('both harnesses get a mark, so neither is identified by absence', () => {
+	// The first version marked only Codex and left Claude Code blank, which is not a
+	// distinction anybody can read: you cannot tell "this is Claude" from "this column
+	// means nothing on this row". Two Claude sessions and a Codex session in one project
+	// was the case that showed it.
+	// Rendered TOGETHER, which is the case that matters: two Claude sessions and a Codex
+	// session in one project. The column only appears when the list holds more than one
+	// harness, because a glyph identical on every row is a column of decoration.
+	const list: Session[] = [
+		{ ...session('orchard'), id: 'a' } as Session,
+		{ ...session('orchard'), id: 'b' } as Session,
+		{ ...session('orchard'), id: 'c', agent: 'codex' } as Session,
+	]
+	const lines = rows(list, 120).map((r) => strip(r.line))
+	const codexLines = lines.filter((l) => l.includes('◆'))
+	const claudeLines = lines.filter((l) => l.includes('✳'))
+	assert.equal(claudeLines.length, 2, 'the Claude Code rows are not marked')
+	assert.equal(codexLines.length, 1, 'the Codex row is not marked')
 })
 
-test('the tab column stays inside its width for every case', () => {
-	// A marker that overflows would shift every column after it, on every row.
+test('the harness column is absent when every session is the same harness', () => {
+	// Which is everybody who does not run Codex. A column of identical glyphs conveys
+	// nothing and costs a character of the project name.
+	const only = [session('orchard'), session('willow')]
+	for (const l of rows(only, 120).map((r) => strip(r.line))) {
+		assert.doesNotMatch(l, /[✳◆]/, 'a single-harness list still spends a column on it')
+	}
+	assert.doesNotMatch(strip(header(120)), /[✳◆]/)
+})
+
+test('the tab column is about tabs again', () => {
+	// It briefly did double duty, showing `cx` where a tab number would go. That
+	// conflated "how do I reach this" with "what is it", and the harness has its own
+	// column now.
+	const withTab = { ...session('orchard'), tab: 3 } as Session
+	const noTab = session('willow')
+	const codex = { ...session('kestrel'), agent: 'codex' } as Session
+	const line = (x: Session) => strip(rows([x], 120)[0]!.line)
+	assert.match(line(withTab), /⌘3/)
+	assert.match(line(noTab), /·/)
+	assert.doesNotMatch(line(codex), /⌘/, 'offered a terminal tab for something with no pane')
+	assert.doesNotMatch(line(codex), /\bcx\b/, 'the old marker is still in the tab column')
+})
+
+test('every row is the requested width, whichever harness it is', () => {
+	// A glyph that measures wider than one cell would shift every column after it on
+	// that row only, which is the worst kind of layout bug: it looks like a data error.
 	const cases: Session[] = [
 		{ ...session('a'), tab: 9 } as Session,
 		session('b'),
 		{ ...session('c'), agent: 'codex' } as Session,
 	]
-	const widths = new Set(cases.map((s) => strip(rows([s], 120)[0]!.line).length))
+	// One render of the whole list: widths are only comparable within a single table,
+	// since the harness column appears per-list rather than per-row.
+	const widths = new Set(rows(cases, 120).map((r) => strip(r.line).length))
 	assert.equal(widths.size, 1, `rows came out different lengths: ${[...widths].join(', ')}`)
 })

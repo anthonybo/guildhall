@@ -68,7 +68,7 @@ const { rgba: raster, w: W, h: H } = renderRoom(cv, office, placed, SX, SY)
 const png = encodePNG(raster, W, H)
 const roomW = cv.w * CW
 const roomH = cv.rows * LH
-const lines = [T.header(COLS), ...T.rows(sessions, COLS, sessions[0].id, (p) => office.colourOf(p)).map((r) => r.line)]
+const lines = [T.header(COLS, T.mixedHarness(sessions)), ...T.rows(sessions, COLS, sessions[0].id, (p) => office.colourOf(p)).map((r) => r.line)]
 const detail = T.detail(order(sessions)[0], COLS)
 const footer = T.footer(COLS, office.hiddenCount, false, 'split', { armed: true, holding: true })
 // no version stamp: it would make this file differ on every commit

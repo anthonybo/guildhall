@@ -291,10 +291,24 @@ private struct Row: View {
 					HStack(spacing: 5) {
 						Text(session.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
 						if session.unread == true { Circle().fill(.blue).frame(width: 5, height: 5) }
+						// Which harness, for EVERY row.
+						//
+						// This was a badge on Codex rows only, so Claude Code was identified by
+						// absence — which is not a mark anybody can read beside a row that simply
+						// has nothing to say. Two Claude sessions and a Codex session in one
+						// project was the case that showed it.
+						//
+						// A symbol rather than either vendor's logo: those are somebody else's
+						// trademark, and a shipped app embedding them is a different decision from
+						// a one-glyph marker. Coral and teal are the colours the room paints that
+						// desk's mug, so the two halves of the app say it the same way.
+						Image(systemName: session.agent == "codex" ? "diamond.fill" : "asterisk")
+							.font(.system(size: 9, weight: .bold))
+							.foregroundStyle(session.agent == "codex"
+								? Color(red: 110 / 255, green: 186 / 255, blue: 196 / 255)
+								: Color(red: 226 / 255, green: 118 / 255, blue: 96 / 255))
+							.help(session.agent == "codex" ? "Codex" : "Claude Code")
 						if let level = session.level { Badge(text: "lv\(level)", tint: .purple) }
-						// Teal, the same colour as the mug on that desk in the room, so the two
-						// halves of the app say it the same way.
-						if let agent = session.agent { Badge(text: agent, tint: .teal) }
 						if let kind = session.toolKind, session.working { Badge(text: kind, tint: .green) }
 						Spacer(minLength: 0)
 						Text(ago).font(.system(size: 10)).foregroundStyle(.secondary)

@@ -11,6 +11,7 @@ import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tie
 import { BUILD } from './version.ts'
 import { available } from './update.ts'
 import { cut, needsAttention, order, type Session } from './data.ts'
+import { harnessColor } from './screens.ts'
 
 export type Row = { s: Session; line: string; extra?: string[] }
 
@@ -48,6 +49,32 @@ const W_STATE = 2 + Math.max(...Object.values(LOOK).map((l) => l.label.length))
 const W_CTX = 12
 const W_IDLE = 4
 const W_LVL = 2
+/**
+ * One cell for which harness a session belongs to.
+ *
+ * Its own column, and BOTH harnesses get a mark. The first version marked only Codex
+ * and left Claude Code identified by absence, which is not a distinction anybody can
+ * read — you cannot tell "this is Claude" from "this column means nothing on this row".
+ *
+ * Glyphs rather than the vendors' actual logos: those are somebody else's trademark and
+ * this repository is public, which is a line worth not crossing for a one-cell marker.
+ * The mark only has to be consistent and distinct, and a legend you learn once is what
+ * the level badge already relies on.
+ */
+const W_AGENT = 1
+const AGENT_GLYPH: Record<string, string> = { claude: '✳', codex: '◆' }
+const agentGlyph = (s: Session) => AGENT_GLYPH[s.agent ?? 'claude'] ?? '·'
+
+/**
+ * Is there more than one harness in this list?
+ *
+ * The column only appears when it says something. A cell that is identical on every row
+ * is the inverse of the gutter rule three columns to the left — that one is blank on
+ * nine rows in ten so it is loud when it fills; this one would be the same glyph on
+ * every row forever for anybody running Claude Code alone, which is a column of pure
+ * decoration and a character of width taken from the project name.
+ */
+export const mixedHarness = (list: Session[]) => new Set(list.map((s) => s.agent ?? 'claude')).size > 1
 
 /**
  * Identity is never dropped.
@@ -58,19 +85,21 @@ const W_LVL = 2
  * context gauge is what goes when there is genuinely no room: a bar you cannot
  * read is worth less than knowing whose row you are looking at.
  */
-export function tableWidths(total: number) {
+export function tableWidths(total: number, mixed = false) {
 	const proj = total >= 84 ? W_PROJ : total >= 62 ? 9 : 7
 	const showCtx = total >= 70
-	const fixed = GUTTER + W_TAB + W_LVL + proj + W_STATE + (showCtx ? W_CTX : 0) + W_IDLE
+	const fixed = GUTTER + W_TAB + (mixed ? W_AGENT + 1 : 0) + W_LVL + proj + W_STATE + (showCtx ? W_CTX : 0) + W_IDLE
 	const gaps = showCtx ? 7 : 6
 	return { proj, showCtx, flex: Math.max(10, total - fixed - gaps) }
 }
 
-export function header(total: number) {
-	const { proj, showCtx, flex } = tableWidths(total)
+export function header(total: number, mixed = false) {
+	const { proj, showCtx, flex } = tableWidths(total, mixed)
 	const cells = [
 		' '.repeat(GUTTER),
 		padL('TAB', W_TAB),
+		// no heading: a one-cell column of glyphs has nothing to abbreviate
+		mixed ? padL('', W_AGENT) : '',
 		padL('LV', W_LVL),
 		padR('PROJECT', proj),
 		padR('STATUS', W_STATE),
@@ -89,7 +118,8 @@ export function header(total: number) {
  * reading ten near-identical grey words.
  */
 export function rows(list: Session[], total: number, selected?: string, colourOf?: (proj: string) => RGB, open?: Set<string>): Row[] {
-	const { proj: wProj, showCtx, flex } = tableWidths(total)
+	const mixed = mixedHarness(list)
+	const { proj: wProj, showCtx, flex } = tableWidths(total, mixed)
 	return order(list).map((s) => {
 		const look = LOOK[s.state]
 		const attention = needsAttention(s)
@@ -103,7 +133,10 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 			: `${fg(C.faint)}${padR('', W_CTX)}${R}`
 		const cells = [
 			gutter,
-			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : s.agent === 'codex' ? 'cx' : '·'}`, W_TAB)}${R}`,
+			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : '·'}`, W_TAB)}${R}`,
+			// which harness, in the colour the room uses for that desk's mug — only when
+			// the list actually holds more than one
+			mixed ? `${fg(harnessColor(s.agent))}${padL(agentGlyph(s), W_AGENT)}${R}` : '',
 			// level is identity, so it sits beside the tab rather than with the status
 			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
 			// the project's own colour from the room, and bold — this is the column you

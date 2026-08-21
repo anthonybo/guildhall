@@ -714,7 +714,130 @@ var busy = () => {
   return !!document.getElementById("ask")?.value.trim();
 };
 
+// src/screens.ts
+var W = 16;
+var H = 24;
+var CASE = [46, 48, 62];
+var CASE_LIT = [72, 76, 96];
+var BASE = [38, 40, 52];
+var DARK = [22, 24, 32];
+var CODE = [
+  [126, 220, 190],
+  [150, 190, 255],
+  [240, 200, 120],
+  [230, 140, 170],
+  [170, 210, 140]
+];
+var DIGITS = {
+  "0": ["111", "101", "101", "101", "111"],
+  "1": ["010", "110", "010", "010", "111"],
+  "2": ["111", "001", "111", "100", "111"],
+  "3": ["111", "001", "111", "001", "111"],
+  "4": ["101", "101", "111", "001", "001"],
+  "5": ["111", "100", "111", "001", "111"],
+  "6": ["111", "100", "111", "101", "111"],
+  "7": ["111", "001", "010", "010", "010"],
+  "8": ["111", "101", "111", "101", "111"],
+  "9": ["111", "101", "111", "001", "111"],
+  "?": ["111", "001", "011", "000", "010"],
+  "\u2605": ["101", "111", "010", "111", "101"]
+};
+var cache = /* @__PURE__ */ new Map();
+var TINT = {
+  edit: [120, 170, 255],
+  read: [110, 220, 235],
+  run: [250, 180, 90],
+  search: [200, 160, 250],
+  agent: [160, 235, 150],
+  think: [150, 160, 190]
+};
+var HARNESS = {
+  claude: [226, 118, 96],
+  codex: [110, 186, 196]
+};
+var harnessColor = (agent) => HARNESS[agent ?? "claude"] ?? HARNESS.claude;
+function monitor(lit, frame2, seed = 0, kind = "think", agent) {
+  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}:${agent ?? ""}`;
+  const hit = cache.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: H }, () => new Array(W).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < W && y < H) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  const WOOD = [138, 96, 62];
+  const WOOD_DK = [104, 70, 44];
+  box(0, 16, W, 8, WOOD);
+  box(0, 16, W, 1, [168, 122, 82]);
+  box(0, 23, W, 1, WOOD_DK);
+  box(7, 12, 2, 3, BASE);
+  box(5, 15, 6, 1, CASE);
+  box(3, 18, 9, 3, [58, 62, 78]);
+  box(4, 19, 7, 1, [92, 98, 118]);
+  const mug = harnessColor(agent);
+  box(13, 18, 3, 3, mug);
+  put(12, 19, mug);
+  box(0, 19, 3, 2, [236, 234, 226]);
+  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
+  box(2, 2, 12, 9, DARK);
+  if (lit) {
+    const lens = [9, 6, 11, 7];
+    for (let i = 0; i < 4; i++) {
+      const y = 3 + i * 2;
+      const wob = (frame2 + i * 3 + seed) % 5 - 2;
+      const len = Math.max(2, Math.min(11, lens[i] + wob));
+      const indent = i === 1 || i === 3 ? 3 : 2;
+      for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length]);
+    }
+    if (frame2 % 2 === 0) put(3, 9, [250, 250, 250]);
+  } else {
+    for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58]);
+  }
+  const g = { w: W, h: H, grid };
+  cache.set(key, g);
+  return g;
+}
+var badges = /* @__PURE__ */ new Map();
+function badge(level, tier, face = "") {
+  const key = level + ":" + tier.join("") + ":" + face;
+  const hit = badges.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < 16 && y < 16) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  const CARD = [238, 236, 228];
+  const EDGE = [90, 92, 102];
+  box(7, 0, 2, 2, EDGE);
+  box(2, 2, 12, 13, EDGE);
+  box(3, 3, 10, 3, tier);
+  box(3, 6, 10, 8, CARD);
+  const INK2 = [40, 42, 54];
+  if (face) {
+    const glyph = DIGITS[face] ?? DIGITS["0"];
+    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK2)));
+  } else {
+    const text = String(Math.max(1, Math.min(99, level)));
+    const startX = text.length > 1 ? 4 : 6;
+    [...text].forEach((ch, i) => {
+      const glyph = DIGITS[ch] ?? DIGITS["0"];
+      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK2)));
+    });
+  }
+  const g = { w: 16, h: 16, grid };
+  badges.set(key, g);
+  return g;
+}
+
 // web/list.ts
+var HARNESS_HEX = Object.fromEntries(
+  Object.entries(HARNESS).map(([k, [r, g, b]]) => [k, `rgb(${r} ${g} ${b})`])
+);
 var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
 	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
 	<rect x="1" y="1" width="14" height="9" fill="#0d0c12"/>
@@ -920,7 +1043,7 @@ function paintList(list) {
 			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90">
 				<span class="proj truncate font-bold text-(--proj)"></span>
 				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
-				<span class="harness hidden shrink-0 rounded px-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted ring-1 ring-inset ring-white/15"></span>
+				<span class="harness shrink-0 text-[0.85rem] leading-none" aria-hidden="true"></span>
 			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
@@ -930,11 +1053,10 @@ function paintList(list) {
 			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
     const harness = li.querySelector(".harness");
-    if (s.agent) {
-      harness.textContent = s.agent;
-      harness.title = `Run by ${s.agent}, not Claude Code \u2014 there is no terminal tab to open`;
-      harness.classList.remove("hidden");
-    }
+    const kind = s.agent ?? "claude";
+    harness.textContent = kind === "codex" ? "\u25C6" : "\u2733";
+    harness.style.color = HARNESS_HEX[kind] ?? HARNESS_HEX.claude;
+    harness.title = kind === "codex" ? "Codex \u2014 queued messages, no terminal tab" : "Claude Code";
     const away = li.querySelector(".away");
     if (s.away) {
       away.textContent = `\u2192 ${s.away}`;
@@ -1286,131 +1408,12 @@ var PROP_SIZE = {
   whiteboard: { w: 2, h: 1 },
   shelf: { w: 1, h: 1 }
 };
-var cache = /* @__PURE__ */ new Map();
+var cache2 = /* @__PURE__ */ new Map();
 function prop(kind) {
-  const hit = cache.get(kind);
+  const hit = cache2.get(kind);
   if (hit) return hit;
   const g = MAKERS[kind]();
-  cache.set(kind, g);
-  return g;
-}
-
-// src/screens.ts
-var W = 16;
-var H = 24;
-var CASE = [46, 48, 62];
-var CASE_LIT = [72, 76, 96];
-var BASE = [38, 40, 52];
-var DARK = [22, 24, 32];
-var CODE = [
-  [126, 220, 190],
-  [150, 190, 255],
-  [240, 200, 120],
-  [230, 140, 170],
-  [170, 210, 140]
-];
-var DIGITS = {
-  "0": ["111", "101", "101", "101", "111"],
-  "1": ["010", "110", "010", "010", "111"],
-  "2": ["111", "001", "111", "100", "111"],
-  "3": ["111", "001", "111", "001", "111"],
-  "4": ["101", "101", "111", "001", "001"],
-  "5": ["111", "100", "111", "001", "111"],
-  "6": ["111", "100", "111", "101", "111"],
-  "7": ["111", "001", "010", "010", "010"],
-  "8": ["111", "101", "111", "101", "111"],
-  "9": ["111", "101", "111", "001", "111"],
-  "?": ["111", "001", "011", "000", "010"],
-  "\u2605": ["101", "111", "010", "111", "101"]
-};
-var cache2 = /* @__PURE__ */ new Map();
-var TINT = {
-  edit: [120, 170, 255],
-  read: [110, 220, 235],
-  run: [250, 180, 90],
-  search: [200, 160, 250],
-  agent: [160, 235, 150],
-  think: [150, 160, 190]
-};
-var MUG = {
-  claude: [226, 118, 96],
-  codex: [110, 186, 196]
-};
-function monitor(lit, frame2, seed = 0, kind = "think", agent) {
-  const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}:${agent ?? ""}`;
-  const hit = cache2.get(key);
-  if (hit) return hit;
-  const grid = Array.from({ length: H }, () => new Array(W).fill(null));
-  const put = (x, y, c) => {
-    if (x >= 0 && y >= 0 && x < W && y < H) grid[y][x] = c;
-  };
-  const box = (x, y, w, h, c) => {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
-  };
-  const WOOD = [138, 96, 62];
-  const WOOD_DK = [104, 70, 44];
-  box(0, 16, W, 8, WOOD);
-  box(0, 16, W, 1, [168, 122, 82]);
-  box(0, 23, W, 1, WOOD_DK);
-  box(7, 12, 2, 3, BASE);
-  box(5, 15, 6, 1, CASE);
-  box(3, 18, 9, 3, [58, 62, 78]);
-  box(4, 19, 7, 1, [92, 98, 118]);
-  const mug = MUG[agent ?? "claude"] ?? MUG.claude;
-  box(13, 18, 3, 3, mug);
-  put(12, 19, mug);
-  box(0, 19, 3, 2, [236, 234, 226]);
-  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
-  box(2, 2, 12, 9, DARK);
-  if (lit) {
-    const lens = [9, 6, 11, 7];
-    for (let i = 0; i < 4; i++) {
-      const y = 3 + i * 2;
-      const wob = (frame2 + i * 3 + seed) % 5 - 2;
-      const len = Math.max(2, Math.min(11, lens[i] + wob));
-      const indent = i === 1 || i === 3 ? 3 : 2;
-      for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length]);
-    }
-    if (frame2 % 2 === 0) put(3, 9, [250, 250, 250]);
-  } else {
-    for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58]);
-  }
-  const g = { w: W, h: H, grid };
-  cache2.set(key, g);
-  return g;
-}
-var badges = /* @__PURE__ */ new Map();
-function badge(level, tier, face = "") {
-  const key = level + ":" + tier.join("") + ":" + face;
-  const hit = badges.get(key);
-  if (hit) return hit;
-  const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
-  const put = (x, y, c) => {
-    if (x >= 0 && y >= 0 && x < 16 && y < 16) grid[y][x] = c;
-  };
-  const box = (x, y, w, h, c) => {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
-  };
-  const CARD = [238, 236, 228];
-  const EDGE = [90, 92, 102];
-  box(7, 0, 2, 2, EDGE);
-  box(2, 2, 12, 13, EDGE);
-  box(3, 3, 10, 3, tier);
-  box(3, 6, 10, 8, CARD);
-  const INK2 = [40, 42, 54];
-  if (face) {
-    const glyph = DIGITS[face] ?? DIGITS["0"];
-    glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(6 + x, 8 + y, INK2)));
-  } else {
-    const text = String(Math.max(1, Math.min(99, level)));
-    const startX = text.length > 1 ? 4 : 6;
-    [...text].forEach((ch, i) => {
-      const glyph = DIGITS[ch] ?? DIGITS["0"];
-      glyph.forEach((r, y) => [...r].forEach((c, x) => c === "1" && put(startX + i * 4 + x, 8 + y, INK2)));
-    });
-  }
-  const g = { w: 16, h: 16, grid };
-  badges.set(key, g);
+  cache2.set(kind, g);
   return g;
 }
 

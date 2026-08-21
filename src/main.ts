@@ -756,7 +756,7 @@ function draw() {
 		const rowsOut = T.rows(list, cols, selectedId ?? undefined, (p) => office.colourOf(p), expanded)
 		const sel = rowsOut.find((r) => r.s.id === selectedId)?.s
 		const det = T.detail(sel, cols)
-		body.push(T.header(cols))
+		body.push(T.header(cols, T.mixedHarness(sessions)))
 		// An expanded row brings its detail with it, and the whole thing still has to
 		// fit the space the table was given. Count the lines WE add — `body` already
 		// holds the whole room, so budgeting against its length skipped every row.
