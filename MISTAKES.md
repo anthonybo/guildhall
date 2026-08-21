@@ -514,7 +514,7 @@ guards was removed. None of them would have caught the original bug, because
 nothing covers `main.ts`'s draw path — that gap is still open. What closed it was
 routing all three callers through one descriptor, not a test.
 
-### Then the mark was drawn and still could not be seen — twice
+### Then the mark was drawn and still could not be seen — three times
 
 **The worktop is the wrong surface, and this file already said so.** After the mark
 finally reached the terminal it was reported invisible again: "when an agent is
@@ -548,3 +548,31 @@ somebody actually runs.
 screenshot, I called the teal one "dark navy" and nearly went looking for a bug that
 was not there. The pixel values were right — `[105,163,173]` — and printing them took
 one command. Look at the numbers, not at the picture, when the question is a color.
+
+**Third attempt: the badge frame, also invisible.** Reported as "looks the exact
+same". The reasoning was that the badge is isolated and high contrast, which is
+true, and it did not matter.
+
+**The actual lesson, which took three tries to reach: COLOR IS A SATURATED CHANNEL
+IN THIS ROOM.** There is a carpet hue per project, a tier-colored strip on every
+badge, and a tool tint on every lit screen. Eleven multicolored cards on eleven
+multicolored rugs, and a twelfth hue has nowhere to land. Every attempt failed for
+the same reason and each one was argued on its own merits — findability, isolation,
+contrast — without ever asking whether hue was the right dimension at all. The
+table's harness column had been working the whole time, three feet down the screen,
+because `*` and a diamond differ in SHAPE.
+
+**What works: a Codex desk is a different machine.** A laptop — a narrower lid on a
+deck wider than itself — against a monitor's wide bezel on a thin neck. Opposite
+silhouettes, in the monitor area, which is the one part of a desk nothing covers
+because the occupant reaches the worktop and stops. Both harnesses stay positively
+identified: a desktop monitor is a statement, not an absence.
+
+A first version of the laptop kept the lid full width and only lowered it, and read
+as "the same desk, slightly lower". If the change is meant to be legible at desk
+scale, the OUTLINE has to change, not the contents.
+
+**Not gated on the room being mixed,** unlike the table column. The mark is the kind
+of machine on that desk, which is a fact about the desk and not a comparison with
+its neighbours — the gated version drew a room of nothing but Codex as a room of
+desktop monitors.

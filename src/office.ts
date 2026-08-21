@@ -21,9 +21,6 @@
 import { C, LOOK, ROOFS } from './theme.ts'
 import { RANK, type Session } from './data/types.ts'
 import { cut } from './data/describe.ts'
-// from data/select.ts rather than data.ts: the room has no business pulling in the
-// whole collector to ask one question about a list it was handed
-import { mixedHarness } from './data/select.ts'
 import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'
@@ -87,7 +84,6 @@ export class Office extends SimBase {
 		// a harness NAME, not Session['agent'] — the room marks Claude Code explicitly,
 		// and the session type deliberately omits the field for it
 		const harness = new Map<string, string>()
-		const mixed = mixedHarness(sessions)
 		const levels = new Map<string, number>()
 		const asking = new Set<string>()
 		for (const sp of this.spots.values()) {
@@ -99,15 +95,17 @@ export class Office extends SimBase {
 			// blinked off in every pause between turns. Hold the light briefly after,
 			// which is what a machine someone is working at actually looks like.
 			if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
-			// Which harness owns this desk, whether or not its screen is lit: the mark is
-			// there when nobody is working, which is the point of putting it on furniture.
+			// Which harness owns this desk, whether or not its screen is lit.
 			//
-			// Set for BOTH harnesses, and only when the room actually holds more than one.
-			// Two things follow from that. A room of nothing but Claude Code looks exactly
-			// as it always has — no tinted monitors, no doc images churning. And when
-			// there is a mix, Claude Code gets a mark of its own rather than being "the
-			// desks without one", which is not something you can pick out by looking.
-			if (s && mixed) harness.set(`${sp.col},${sp.row}`, s.agent ?? 'claude')
+			// NOT gated on the room holding more than one harness, which an earlier version
+			// did. The mark is now the KIND OF MACHINE on the desk — a laptop rather than a
+			// monitor — and that is a statement about the desk, not a comparison with its
+			// neighbours: a lone Codex session should still be sitting at a laptop. Gating
+			// it also drew a room of nothing but Codex as a room of desktop monitors.
+			//
+			// Only Codex is set, and Claude Code is still positively identified, because
+			// the thing it draws is a desktop monitor rather than the absence of anything.
+			if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent)
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
@@ -164,13 +162,13 @@ export class Office extends SimBase {
 				// beside the desk, in the gap column, where nobody sits
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
 				if (lvl) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false, agent: harness.get(`${c},${pod.seatRow}`) })
+					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false })
 					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
 				}
 				// a session waiting on an answer gets a placard beside its desk, since
 				// the registry never reports a plain question as "waiting"
 				if (asking.has(`${c},${pod.seatRow}`)) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true, agent: harness.get(`${c},${pod.seatRow}`) })
+					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true })
 					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 				}
 			}

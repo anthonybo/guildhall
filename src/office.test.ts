@@ -391,45 +391,46 @@ test('a label for a session with no tab and no harness gets no prefix', () => {
 	assert.doesNotMatch(screen, /⌘/, 'offered a tab that does not exist')
 })
 
-test('the room marks both harnesses when there are two, and neither when there is one', () => {
-	// The gate: `agent` is only put on a desk when the list actually holds more than one
-	// harness. That is what keeps an all-Claude room — everybody today — pixel-identical
-	// to before, and it is checked here rather than only in screens.ts because this is
-	// where the decision is made.
-	const mixed = [session('a', 'alpha', 'working'), session('b', 'alpha', 'done'), { ...session('c', 'alpha', 'done'), agent: 'codex' as const }]
-	const { cv, office } = room(mixed)
-	office.draw(cv, mixed)
-	const marks = office.monitors.filter((m) => m.agent).map((m) => m.agent).sort()
-	// One per occupied desk, and Claude Code named explicitly rather than left blank —
-	// "the desks without a mark" is not something anybody can pick out by looking.
-	assert.deepEqual(marks, ['claude', 'claude', 'codex'], `the room marked ${JSON.stringify(marks)}`)
-
-	// And with one harness, nothing is marked at all.
-	const alone = [session('a', 'alpha', 'working'), session('b', 'alpha', 'done')]
-	const solo = room(alone)
-	solo.office.draw(solo.cv, alone)
-	assert.equal(
-		solo.office.monitors.filter((m) => m.agent).length,
-		0,
-		'a single-harness room marked its desks, which changes every existing room and every doc image',
+test('a Codex desk is marked whether or not anything else is in the room', () => {
+	// NOT gated on the room being mixed, which an earlier version was. The mark is the
+	// kind of machine on the desk, which is a fact about that desk rather than a
+	// comparison with its neighbours — and the gated version drew a room of nothing but
+	// Codex as a room of desktop monitors.
+	const alone = [{ ...session('a', 'alpha', 'working'), agent: 'codex' as const }]
+	const one = room(alone)
+	one.office.draw(one.cv, alone)
+	assert.deepEqual(
+		one.office.monitors.filter((m) => m.agent).map((m) => m.agent),
+		['codex'],
+		'a lone Codex session was drawn as a desktop monitor',
 	)
+
+	// And a room of only Claude Code carries no mark at all, so every existing room and
+	// every doc image is untouched.
+	const claudeOnly = [session('a', 'alpha', 'working'), session('b', 'alpha', 'done')]
+	const two = room(claudeOnly)
+	two.office.draw(two.cv, claudeOnly)
+	assert.equal(two.office.monitors.filter((m) => m.agent).length, 0, 'a Claude-only room marked its desks')
 })
 
-test('a working session keeps its harness mark, because the mark is not on the worktop', () => {
-	// The reported bug: "when an agent is working that is not visible". Everything drawn
-	// on the desk surface is covered by whoever is sitting at it, so the first two
-	// attempts — a coloured mug, then a cable beside it — both disappeared precisely
-	// while the session was active. The badge is in the aisle and is never occluded.
-	const list = [
-		{ ...session('a', 'alpha', 'working'), agent: 'codex' as const },
-		session('b', 'alpha', 'working'),
-	]
+test('the harness mark sits above the seat, where the occupant cannot cover it', () => {
+	// The reported bug: "when an agent is working that is not visible". Everything on the
+	// worktop is covered by whoever sits at it — office.ts records the same thing about
+	// the working-light, where only ~24 pixels across five lit desks survived. So the
+	// mark has to be in the monitor area, and this pins the geometry that makes that
+	// safe rather than trusting it: the monitor row is strictly above the desk row, which
+	// is itself above the seat.
+	const list = [{ ...session('a', 'alpha', 'working'), agent: 'codex' as const }, session('b', 'alpha', 'working')]
 	const { cv, office } = room(list)
 	office.draw(cv, list)
-
-	// Both desks are lit — this is the working case, not the idle one.
 	assert.equal(office.monitors.filter((m) => m.lit).length, 2, 'the fixture is not exercising working sessions')
-	// And both badges carry a harness, the Codex one included.
-	const marks = office.badges.filter((b) => !b.asking).map((b) => b.agent).sort()
-	assert.deepEqual(marks, ['claude', 'codex'], `working desks carry ${JSON.stringify(marks)}`)
+	for (const pod of office.pods) {
+		assert.ok(pod.monitorRow < pod.deskRow, 'the monitor is not above the worktop')
+		assert.ok(pod.deskRow < pod.seatRow, 'the worktop is not above the seat')
+	}
+	// the working Codex desk still carries its mark
+	assert.ok(
+		office.monitors.some((m) => m.lit && m.agent === 'codex'),
+		'a working Codex desk lost its mark',
+	)
 })

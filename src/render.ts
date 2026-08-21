@@ -25,9 +25,7 @@ const NIGHT: RGB = [26, 28, 40]
 export type Scene = {
 	plates: { x: number; y: number; proj: string; colour: RGB }[]
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any; agent?: string }[]
-	// `agent` declared, not merely tolerated: office.badges carries it at runtime, and
-	// leaving it off this type meant the compositor drew it only by structural accident
-	badges: { x: number; y: number; level: number; asking: boolean; agent?: string }[]
+	badges: { x: number; y: number; level: number; asking: boolean }[]
 	props: { kind: keyof typeof PROP_SIZE; x: number; y: number }[]
 }
 

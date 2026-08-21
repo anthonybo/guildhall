@@ -12,13 +12,6 @@ import type { Grid } from './characters.ts'
 const W = 16
 const H = 24 // screen on top, desk surface with keyboard and mug below
 
-/** Blend two colours. `k` is how far from `a` toward `b`. */
-const mix = (a: RGB, b: RGB, k: number): RGB => [
-	Math.round(a[0] + (b[0] - a[0]) * k),
-	Math.round(a[1] + (b[1] - a[1]) * k),
-	Math.round(a[2] + (b[2] - a[2]) * k),
-]
-
 const CASE: RGB = [46, 48, 62]
 const CASE_LIT: RGB = [72, 76, 96]
 const BASE: RGB = [38, 40, 52]
@@ -173,9 +166,43 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	box(0, 16, W, 8, WOOD)
 	box(0, 16, W, 1, [168, 122, 82])
 	box(0, 23, W, 1, WOOD_DK)
-	// stand and base
-	box(7, 12, 2, 3, BASE)
-	box(5, 15, 6, 1, CASE)
+	/**
+	 * What kind of machine is on this desk, which is how the harness is told apart.
+	 *
+	 * SHAPE, after three attempts at colour all failed. The room is already saturated
+	 * with colour — a carpet hue per project, a tier strip on every badge, a tool tint
+	 * on every lit screen — so a twelfth colour meaning cannot be found in it, and all
+	 * three attempts were reported as invisible: a coloured mug, then a cable beside it,
+	 * then a tinted badge frame. The table's own harness column works for the opposite
+	 * reason: `*` and a diamond differ in shape, not in hue.
+	 *
+	 * And the MONITOR AREA, because it is the one part of a desk nothing ever covers.
+	 * A pod's monitor row is two rows above its seat and the occupant is two tall, so
+	 * they reach the worktop and stop — which is why the mug failed while somebody was
+	 * working and why this cannot.
+	 *
+	 * A laptop reads as a different machine at a glance: no neck, a screen sitting on a
+	 * wide deck. Both harnesses are still positively identified — a desktop monitor is
+	 * as much a statement as a laptop is — so this is not the "Claude is the desks
+	 * without a mark" problem that the first version had.
+	 */
+	const laptop = agent === 'codex'
+	if (!laptop) {
+		// stand and base
+		box(7, 12, 2, 3, BASE)
+		box(5, 15, 6, 1, CASE)
+	} else {
+		// A deck the full width of the sprite, and thick. The outline is the whole point:
+		// a monitor is a wide screen on a thin neck, so it is narrow at the bottom and
+		// broad at the top. This is the reverse — a smaller lid on a base wider than
+		// itself — and the eye picks that up from across the room where a hue change did
+		// not. A timid first version kept the lid full width and read as "the same desk,
+		// slightly lower".
+		box(0, 13, W, 3, lit ? CASE_LIT : CASE)
+		// the keyboard deck catching the light, so it reads as a surface not a slab
+		box(1, 13, 14, 1, [92, 98, 118])
+		box(0, 15, W, 1, BASE)
+	}
 	// keyboard
 	box(3, 18, 9, 3, [58, 62, 78])
 	box(4, 19, 7, 1, [92, 98, 118])
@@ -199,24 +226,34 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	// as noise rather than as a fact. It looked convincing in an isolated crop only
 	// because both desks in it shared one carpet. The harness lives on the level badge
 	// instead — see the note there.
-	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
-	box(2, 2, 12, 9, DARK)
+	// The lid: shorter AND narrower than a monitor's bezel, which is what makes the
+	// silhouette read as a different machine rather than as the same one moved.
+	const top = laptop ? 4 : 1
+	const tall = laptop ? 9 : 11
+	const x0 = laptop ? 2 : 1
+	const wide = laptop ? 12 : 14
+	box(x0, top, wide, tall, lit ? CASE_LIT : CASE)
+	box(x0 + 1, top + 1, wide - 2, tall - 2, DARK)
 
+	// Everything on the screen moves down with the lid, or a laptop's code lines would
+	// be painted onto its bezel. The screen contents are the tool tint and must look
+	// identical on both machines — only the frame around them differs.
+	const sy = top - 1
 	if (lit) {
 		// four ragged code lines; the ragging advances with the frame
 		const lens = [9, 6, 11, 7]
 		for (let i = 0; i < 4; i++) {
-			const y = 3 + i * 2
+			const y = sy + 3 + i * 2
 			const wob = ((frame + i * 3 + seed) % 5) - 2
 			const len = Math.max(2, Math.min(11, lens[i] + wob))
 			const indent = i === 1 || i === 3 ? 3 : 2
 			for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length])
 		}
 		// caret, blinking on alternate frames
-		if (frame % 2 === 0) put(3, 9, [250, 250, 250])
+		if (frame % 2 === 0) put(3, sy + 9, [250, 250, 250])
 	} else {
 		// a faint reflection so an idle screen still looks like glass
-		for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58])
+		for (let x = 3; x < 11; x++) put(x, sy + 3, [40, 44, 58])
 	}
 	const g: Grid = { w: W, h: H, grid }
 	cache.set(key, g)
@@ -238,7 +275,7 @@ const badges = new Map<string, Grid>()
  * arrangement that lost the harness on the desks: not one mistake, but a shape where
  * adding an input means finding every place that spells the arguments out.
  */
-export type Level = { level: number; asking: boolean; agent?: string }
+export type Level = { level: number; asking: boolean }
 
 /**
  * Which colour a badge's tier strip takes. Needs-attention outranks the rank, because
@@ -252,13 +289,13 @@ export type LevelLook = { needs: RGB; tierOf: (level: number) => RGB }
 const lookOf = (b: Level, look: LevelLook): RGB => (b.asking ? look.needs : look.tierOf(b.level))
 
 /** Draw a level badge from its descriptor. Every caller should use this. */
-export const badgeFor = (b: Level, look: LevelLook): Grid => badge(b.level, lookOf(b, look), b.asking ? '?' : '', b.agent)
+export const badgeFor = (b: Level, look: LevelLook): Grid => badge(b.level, lookOf(b, look), b.asking ? '?' : '')
 
 /** The cache key for that exact badge, derived from the same descriptor. */
-export const badgeKey = (b: Level): string => (b.asking ? 'badge:ask' : `badge:${b.level}:${b.agent ?? ''}`)
+export const badgeKey = (b: Level): string => (b.asking ? 'badge:ask' : `badge:${b.level}`)
 
-export function badge(level: number, tier: RGB, face = '', agent?: string): Grid {
-	const key = level + ':' + tier.join('') + ':' + face + ':' + (agent ?? '')
+export function badge(level: number, tier: RGB, face = ''): Grid {
+	const key = level + ':' + tier.join('') + ':' + face
 	const hit = badges.get(key)
 	if (hit) return hit
 	const grid: (RGB | null)[][] = Array.from({ length: 16 }, () => new Array<RGB | null>(16).fill(null))
@@ -270,37 +307,20 @@ export function badge(level: number, tier: RGB, face = '', agent?: string): Grid
 	}
 	const CARD: RGB = [238, 236, 228]
 	/**
-	 * The badge's frame carries the harness, and it is the only place on a desk that
-	 * reliably can.
+	 * A fixed gray, deliberately.
 	 *
-	 * Everything drawn on the WORKTOP is hidden the moment somebody is working there.
-	 * The occupant is one tile wide, sits directly at the desk and is drawn over it —
-	 * office.ts already records this about the working-light, where only about 24 pixels
-	 * across five lit desks survived to the screen. A mug and a cable on that surface
-	 * have the same problem, so the mark vanished exactly when the session was active,
-	 * which is when you most want to know whose it is.
-	 *
-	 * The bezel was tried and is drowned out: each pod's carpet shows through around the
-	 * monitor sprite, so every frame already reads as its project colour and a tint
-	 * inside that ring is low contrast against a dark screen.
-	 *
-	 * The badge sits in the aisle BESIDE the desk, is never occluded by anybody, and is
-	 * a light card on a dark floor. Its frame was a fixed grey carrying no meaning, and
-	 * the tier colour it would be confused with is a strip across the top, not the edge.
+	 * The frame was tinted toward the harness colour and it did not work — reported as
+	 * "looks the exact same". The room is already saturated with colour: a carpet hue per
+	 * project, a tier strip on every one of these badges, a tool tint on every lit screen.
+	 * One more hue among eleven multicoloured cards is not findable, and that was the
+	 * THIRD colour attempt after the mug and the cable. The harness is a shape now — a
+	 * laptop rather than a monitor — which is why the table's own harness column works.
 	 */
-	const EDGE: RGB = agent ? mix([90, 92, 102], harnessColor(agent), 0.75) : [90, 92, 102]
+	const EDGE: RGB = [90, 92, 102]
 	box(7, 0, 2, 2, EDGE)
 	box(2, 2, 12, 13, EDGE)
 	box(3, 3, 10, 3, tier)
 	box(3, 6, 10, 8, CARD)
-	// A solid bar under the number, in the harness's own colour rather than the muted
-	// frame blend, because here it sits on the white card and can afford full strength.
-	//
-	// The frame alone is one sprite pixel on each side — about three screen pixels at a
-	// real terminal's cell — which is a thin outline to hang a distinction on. This row
-	// is ten pixels wide and was already blank: the card runs to row 13 and the digits
-	// stop at row 12. So it costs no layout and reads at a glance, which the mug did not.
-	if (agent) box(3, 13, 10, 1, harnessColor(agent))
 	const INK: RGB = [40, 42, 54]
 	if (face) {
 		const glyph = DIGITS[face] ?? DIGITS['0']

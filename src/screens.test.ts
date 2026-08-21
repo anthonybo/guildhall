@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { HARNESS, badge, badgeFor, harnessMark, monitor, monitorFor, monitorKey, type Desk, type LevelLook } from './screens.ts'
+import { HARNESS, TINT, badge, harnessMark, monitor, monitorFor, monitorKey, type Desk } from './screens.ts'
 import { width } from './theme.ts'
 
 const ink = (g: { grid: (number[] | null)[][] }) =>
@@ -25,50 +25,36 @@ test('every level from 1 to 30 renders a distinct badge', () => {
 	assert.equal(seen.size, 30, 'two levels render identically')
 })
 
-test('the harness marks the BADGE, which is the only part of a desk never covered', () => {
-	// This is the whole finding, and it took two wrong attempts to get to. Anything drawn
-	// on the WORKTOP is hidden while somebody is working there: the occupant is one tile
-	// wide, sits at the desk and is drawn over it. office.ts already records the same
-	// thing about the working-light, where roughly 24 pixels across five lit desks
-	// survived to the screen. So a mug and a cable went invisible exactly when the
-	// session was active — reported as "when an agent is working that is not visible".
+test('a Codex desk is a different MACHINE, not a different colour', () => {
+	// Three colour attempts failed here and all three were reported invisible: a coloured
+	// mug, then a cable beside it, then a tinted badge frame ("looks the exact same").
+	// The reason is that colour is a saturated channel in this room — a carpet hue per
+	// project, a tier strip on every badge, a tool tint on every lit screen — so a
+	// twelfth colour meaning has nowhere to land. The table's harness column works
+	// because it is SHAPE, and this is the same idea at desk scale.
 	//
-	// The badge sits in the aisle beside the desk and is never occluded by anyone.
-	const look: LevelLook = { needs: [255, 120, 120], tierOf: () => [200, 160, 240] }
-	const claude = badgeFor({ level: 12, asking: false, agent: 'claude' }, look)
-	const codex = badgeFor({ level: 12, asking: false, agent: 'codex' }, look)
-	const plain = badgeFor({ level: 12, asking: false }, look)
+	// It also has to live in the monitor area rather than on the worktop: the occupant
+	// is drawn over the worktop while they work, which is what killed the mug.
+	const desktop = monitor(false, 0, 0, 'think')
+	const laptop = monitor(false, 0, 0, 'think', 'codex')
 
-	// The frame carries it, so it reads whichever side the eye arrives from.
-	assert.notDeepEqual(claude.grid[2]![2], codex.grid[2]![2], 'the badge frame does not distinguish the harnesses')
-	assert.deepEqual(plain.grid[2]![2], [90, 92, 102], 'an unmarked badge has a tinted frame')
-	// Plus a full-strength bar on the white card under the number, because one sprite
-	// pixel of frame is only about three screen pixels at a real terminal cell.
-	assert.deepEqual(claude.grid[13]![5], HARNESS.claude, 'no harness bar on the card')
-	assert.deepEqual(codex.grid[13]![5], HARNESS.codex)
-	assert.deepEqual(plain.grid[13]![5], [238, 236, 228], 'an unmarked badge grew a bar')
-	// The number is untouched — it is the level, and the level is not the harness.
-	// the card interior only: the frame is at x=2 and x=13 and is meant to differ
-	for (let y = 8; y <= 12; y++) assert.deepEqual(claude.grid[y]!.slice(3, 13), codex.grid[y]!.slice(3, 13), `the number changed with the harness on row ${y}`)
-	// And so is the tier strip: a session waiting on you must still look like one.
-	for (let y = 3; y <= 5; y++) assert.deepEqual(claude.grid[y]!.slice(3, 13), codex.grid[y]!.slice(3, 13), 'the tier strip changed with the harness')
-})
+	// A monitor is broad at the top and thin at the bottom: a wide bezel on a neck.
+	assert.notEqual(desktop.grid[6]![1], null, 'the monitor bezel is not full width')
+	// [38,40,52] is the stand colour; named here rather than exported, since one test
+	// is not a reason to widen a module's surface
+	assert.deepEqual(desktop.grid[13]![7], [38, 40, 52], 'the monitor has no neck')
+	assert.equal(desktop.grid[14]![0], null, 'the monitor grew a full-width base')
 
-test('the desk sprite changes by exactly the mug, and never the screen or the bezel', () => {
-	// The mug stays as a close-range detail but is no longer the mechanism, and nothing
-	// else on the sprite may move. A bezel tint was tried and reverted: every pod carpet
-	// shows through around this sprite, so the monitor already wears a ring in its
-	// project colour and a tint inside that ring reads as noise rather than as a fact.
-	const claude = monitor(true, 0, 0, 'edit', 'claude')
-	const codex = monitor(true, 0, 0, 'edit', 'codex')
-	let differing = 0
-	for (let y = 0; y < claude.grid.length; y++)
-		for (let x = 0; x < claude.grid[y]!.length; x++)
-			if (JSON.stringify(claude.grid[y]![x]) !== JSON.stringify(codex.grid[y]![x])) differing++
-	// 3x3 mug plus one handle pixel. More than that means it leaked back onto the worktop
-	// or into the bezel, both of which have been measured and shown not to work.
-	assert.equal(differing, 10, `${differing} pixels changed; the mug is 10`)
-	for (let y = 1; y <= 11; y++) assert.deepEqual(claude.grid[y], codex.grid[y], `screen or bezel row ${y} changed with the harness`)
+	// A laptop is the reverse — a narrower lid on a deck wider than itself — which is
+	// what makes the outline read as another machine rather than the same one moved.
+	assert.equal(laptop.grid[6]![1], null, 'the laptop lid is as wide as a monitor bezel')
+	assert.notEqual(laptop.grid[14]![0], null, 'the laptop has no full-width deck')
+
+	// The screen still says what it always said. The tool tint is the tool, on both
+	// machines, or this would have taken a meaning that was already spoken for.
+	const tint = (g: typeof desktop) => g.grid.flat().some((c) => c && c[0] === TINT.run[0] && c[1] === TINT.run[1] && c[2] === TINT.run[2])
+	assert.ok(tint(monitor(true, 0, 0, 'run')), 'a lit monitor lost its tool tint')
+	assert.ok(tint(monitor(true, 0, 0, 'run', 'codex')), 'a lit laptop never got its tool tint — the code lines are painted on the lid')
 })
 
 test('a room with one harness is drawn exactly as it was before there were two', () => {

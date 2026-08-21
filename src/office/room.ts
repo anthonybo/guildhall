@@ -31,7 +31,7 @@ export class RoomBase {
 	/** project nameplates, drawn rotated as images beside each pod */
 	plates: { x: number; y: number; proj: string; colour: RGB }[] = []
 	/** level badges, in the gap column beside each occupied desk */
-	badges: { x: number; y: number; level: number; asking: boolean; agent?: string }[] = []
+	badges: { x: number; y: number; level: number; asking: boolean }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,

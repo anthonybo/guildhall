@@ -163,7 +163,6 @@ function order(list) {
     return a.id.localeCompare(b.id);
   });
 }
-var mixedHarness = (list) => new Set(list.map((s) => s.agent ?? "claude")).size > 1;
 
 // src/contrast.ts
 var lin = (c) => c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
@@ -718,11 +717,6 @@ var busy = () => {
 // src/screens.ts
 var W = 16;
 var H = 24;
-var mix2 = (a, b, k) => [
-  Math.round(a[0] + (b[0] - a[0]) * k),
-  Math.round(a[1] + (b[1] - a[1]) * k),
-  Math.round(a[2] + (b[2] - a[2]) * k)
-];
 var CASE = [46, 48, 62];
 var CASE_LIT = [72, 76, 96];
 var BASE = [38, 40, 52];
@@ -784,28 +778,40 @@ function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   box(0, 16, W, 8, WOOD);
   box(0, 16, W, 1, [168, 122, 82]);
   box(0, 23, W, 1, WOOD_DK);
-  box(7, 12, 2, 3, BASE);
-  box(5, 15, 6, 1, CASE);
+  const laptop = agent === "codex";
+  if (!laptop) {
+    box(7, 12, 2, 3, BASE);
+    box(5, 15, 6, 1, CASE);
+  } else {
+    box(0, 13, W, 3, lit ? CASE_LIT : CASE);
+    box(1, 13, 14, 1, [92, 98, 118]);
+    box(0, 15, W, 1, BASE);
+  }
   box(3, 18, 9, 3, [58, 62, 78]);
   box(4, 19, 7, 1, [92, 98, 118]);
   const mug = harnessColor(agent);
   box(13, 18, 3, 3, mug);
   put(12, 19, mug);
   box(0, 19, 3, 2, [236, 234, 226]);
-  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
-  box(2, 2, 12, 9, DARK);
+  const top = laptop ? 4 : 1;
+  const tall = laptop ? 9 : 11;
+  const x0 = laptop ? 2 : 1;
+  const wide = laptop ? 12 : 14;
+  box(x0, top, wide, tall, lit ? CASE_LIT : CASE);
+  box(x0 + 1, top + 1, wide - 2, tall - 2, DARK);
+  const sy = top - 1;
   if (lit) {
     const lens = [9, 6, 11, 7];
     for (let i = 0; i < 4; i++) {
-      const y = 3 + i * 2;
+      const y = sy + 3 + i * 2;
       const wob = (frame2 + i * 3 + seed) % 5 - 2;
       const len = Math.max(2, Math.min(11, lens[i] + wob));
       const indent = i === 1 || i === 3 ? 3 : 2;
       for (let x = 0; x < len && indent + x < 13; x++) put(indent + x, y, i === 0 ? TINT[kind] : CODE[(i + seed) % CODE.length]);
     }
-    if (frame2 % 2 === 0) put(3, 9, [250, 250, 250]);
+    if (frame2 % 2 === 0) put(3, sy + 9, [250, 250, 250]);
   } else {
-    for (let x = 3; x < 11; x++) put(x, 3, [40, 44, 58]);
+    for (let x = 3; x < 11; x++) put(x, sy + 3, [40, 44, 58]);
   }
   const g = { w: W, h: H, grid };
   cache.set(key, g);
@@ -813,9 +819,9 @@ function monitor(lit, frame2, seed = 0, kind = "think", agent) {
 }
 var badges = /* @__PURE__ */ new Map();
 var lookOf = (b, look) => b.asking ? look.needs : look.tierOf(b.level);
-var badgeFor = (b, look) => badge(b.level, lookOf(b, look), b.asking ? "?" : "", b.agent);
-function badge(level, tier, face = "", agent) {
-  const key = level + ":" + tier.join("") + ":" + face + ":" + (agent ?? "");
+var badgeFor = (b, look) => badge(b.level, lookOf(b, look), b.asking ? "?" : "");
+function badge(level, tier, face = "") {
+  const key = level + ":" + tier.join("") + ":" + face;
   const hit = badges.get(key);
   if (hit) return hit;
   const grid = Array.from({ length: 16 }, () => new Array(16).fill(null));
@@ -826,12 +832,11 @@ function badge(level, tier, face = "", agent) {
     for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
   };
   const CARD = [238, 236, 228];
-  const EDGE = agent ? mix2([90, 92, 102], harnessColor(agent), 0.75) : [90, 92, 102];
+  const EDGE = [90, 92, 102];
   box(7, 0, 2, 2, EDGE);
   box(2, 2, 12, 13, EDGE);
   box(3, 3, 10, 3, tier);
   box(3, 6, 10, 8, CARD);
-  if (agent) box(3, 13, 10, 1, harnessColor(agent));
   const INK2 = [40, 42, 54];
   if (face) {
     const glyph = DIGITS[face] ?? DIGITS["0"];
@@ -2407,7 +2412,6 @@ var Office = class extends SimBase {
     this.plates = [];
     const lit = /* @__PURE__ */ new Map();
     const harness = /* @__PURE__ */ new Map();
-    const mixed = mixedHarness(sessions3);
     const levels = /* @__PURE__ */ new Map();
     const asking = /* @__PURE__ */ new Set();
     for (const sp of this.spots.values()) {
@@ -2416,7 +2420,7 @@ var Office = class extends SimBase {
       if (s) levels.set(`${sp.col},${sp.row}`, s.level);
       if (s && s.state === "needs") asking.add(`${sp.col},${sp.row}`);
       if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind);
-      if (s && mixed) harness.set(`${sp.col},${sp.row}`, s.agent ?? "claude");
+      if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent);
     }
     for (const pod of this.pods)
       for (let c = pod.c0; c <= pod.c1; c += 2) {
@@ -2440,11 +2444,11 @@ var Office = class extends SimBase {
         }
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
         if (lvl) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false, agent: harness.get(`${c},${pod.seatRow}`) });
+          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false });
           block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2);
         }
         if (asking.has(`${c},${pod.seatRow}`)) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true, agent: harness.get(`${c},${pod.seatRow}`) });
+          this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true });
           block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2);
         }
       }
