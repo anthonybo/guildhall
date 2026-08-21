@@ -13,6 +13,7 @@ import { mix, readable } from '../src/contrast.ts'
 import type { Session, State } from '../src/data/types.ts'
 import { hasControl, sendTo, setControl } from './terminal.ts'
 import { harnessMark } from '../src/screens.ts'
+import { logoRuns, logoSize } from '../src/logos.ts'
 import { ago, rgb } from './dom.ts'
 
 /**
@@ -62,6 +63,47 @@ const crtTemplate = document.createElement('template')
 crtTemplate.innerHTML = CRT
 
 const crtIcon = () => crtTemplate.content.firstElementChild!.cloneNode(true)
+
+/**
+ * The harness mark as SVG, from the same pixel art the room draws on each desk.
+ *
+ * It was a text glyph — `*` for Claude Code and `◆` for Codex — and that read as one
+ * logo and one shape, because `*` happens to resemble Anthropic's actual mark while a
+ * diamond resembles nothing. Reported as "a diamond for codex but the proper icon for
+ * Claude code", which is precisely what it was.
+ *
+ * Built from `logoRuns`, so the phone and the desks cannot drift into two ideas of what
+ * OpenAI's mark looks like. Rows of pixels become rects, with horizontal RUNS merged: a
+ * rect per lit pixel is about 40 elements each, and merging gets it to roughly 20 for
+ * markup that ships in the bundle and is cloned per row.
+ *
+ * `currentColor`, so the colour still comes from the span's own style and there is one
+ * place that decides what colour Codex is. `crispEdges` for the same reason the room
+ * upscales with smoothing off: this is pixel art and must stay hard-edged.
+ */
+function markSvg(agent: string): string | null {
+	const runs = logoRuns(agent)
+	const n = logoSize(agent)
+	if (!runs || !n) return null
+	const rects = runs.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="1"/>`)
+	return `<svg viewBox="0 0 ${n} ${n}" width="13" height="13" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true">${rects.join('')}</svg>`
+}
+
+/** Parsed once per harness and cloned per row, the same as the CRT icon above. */
+const markTemplates = new Map<string, HTMLTemplateElement>()
+
+function markIcon(agent: string): Node | null {
+	let t = markTemplates.get(agent)
+	if (!t) {
+		const svg = markSvg(agent)
+		if (!svg) return null
+		t = document.createElement('template')
+		t.innerHTML = svg
+		markTemplates.set(agent, t)
+	}
+	return t.content.firstElementChild!.cloneNode(true)
+}
+
 
 const WEIGHT: Record<string, number> = {
 	error: 0.26,
@@ -356,7 +398,7 @@ export function paintList(list: Session[]) {
 			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['›'] group-[.open]:after:rotate-90">
 				<span class="proj truncate font-bold text-(--proj)"></span>
 				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
-				<span class="harness shrink-0 text-[0.85rem] leading-none" aria-hidden="true"></span>
+				<span class="harness inline-flex shrink-0 items-center leading-none" aria-hidden="true"></span>
 			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
@@ -381,9 +423,12 @@ export function paintList(list: Session[]) {
 		// on `title`, so a screen reader gets the word rather than a decorative character.
 		const harness = li.querySelector('.harness') as HTMLElement
 		const mark = harnessMark(s.agent)
-		harness.textContent = mark.glyph
 		harness.style.color = rgb(mark.color)
 		harness.title = mark.name
+		// The real mark where there is one, and the glyph only as a fallback for a harness
+		// this build has no art for — better a character than an empty cell.
+		const icon = markIcon(s.agent ?? 'claude')
+		harness.replaceChildren(...(icon ? [icon] : [document.createTextNode(mark.glyph)]))
 		const away = li.querySelector('.away') as HTMLElement
 		if (s.away) {
 			away.textContent = `→ ${s.away}`

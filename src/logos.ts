@@ -82,6 +82,52 @@ const CODEX = [
 const ART: Record<string, string[]> = { claude: CLAUDE, codex: CODEX }
 
 /**
+ * The mark as rows of pixels, for a surface that is not this room.
+ *
+ * Exported so the browser list can draw the SAME art as SVG rather than inventing its
+ * own symbol. It had a text glyph: `*` for Claude Code, which happens to look like
+ * Anthropic's actual mark, and a plain `◆` for Codex, which looks like nothing — so one
+ * row read as a logo and the other as a shape. Reported as exactly that.
+ *
+ * One definition, three surfaces. The glyph in `harnessMark` stays for the terminal
+ * table, which can only draw characters.
+ */
+export const logoArt = (agent: string): string[] | null => ART[agent] ?? null
+
+/**
+ * The same mark as horizontal runs: `[x, y, width]` per stretch of lit pixels.
+ *
+ * Here rather than in web/list.ts so it can be tested. A rect per lit pixel is 34 and 45
+ * elements for the two marks; merging runs gets them to 23 and 32, and that markup ships
+ * in the bundle a phone downloads. The browser turns each run into one `<rect>`.
+ *
+ * Also the shape a canvas or another renderer would want, so the next surface that needs
+ * this mark does not re-derive it.
+ */
+export function logoRuns(agent: string): { x: number; y: number; w: number }[] | null {
+	const rows = ART[agent]
+	if (!rows) return null
+	const runs: { x: number; y: number; w: number }[] = []
+	rows.forEach((row, y) => {
+		let x = 0
+		while (x < row.length) {
+			if (row[x] !== '#') {
+				x++
+				continue
+			}
+			let w = 1
+			while (row[x + w] === '#') w++
+			runs.push({ x, y, w })
+			x += w
+		}
+	})
+	return runs
+}
+
+/** How many rows (and columns) the art is. Square by construction; asserted in tests. */
+export const logoSize = (agent: string): number => ART[agent]?.length ?? 0
+
+/**
  * A plate to hang the mark on, so it reads as a sign rather than as loose pixels on
  * the floor. Deliberately quiet: the room already has eleven saturated carpets and the
  * mark has to be the thing you notice, not its backing.

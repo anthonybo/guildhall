@@ -854,6 +854,81 @@ function badge(level, tier, face = "") {
   return g;
 }
 
+// src/logos.ts
+var W2 = 16;
+var H2 = 16;
+var CLAUDE = [
+  ".....#.....",
+  ".....#.....",
+  ".#...#...#.",
+  "..#..#..#..",
+  "...#.#.#...",
+  "###########",
+  "...#.#.#...",
+  "..#..#..#..",
+  ".#...#...#.",
+  ".....#.....",
+  ".....#....."
+];
+var CODEX = [
+  "...#####...",
+  "..#.....#..",
+  ".#..###..#.",
+  "#..#...#..#",
+  "#.#.....#.#",
+  "#.#.....#.#",
+  "#.#.....#.#",
+  "#..#...#..#",
+  ".#..###..#.",
+  "..#.....#..",
+  "...#####..."
+];
+var ART = { claude: CLAUDE, codex: CODEX };
+function logoRuns(agent) {
+  const rows = ART[agent];
+  if (!rows) return null;
+  const runs = [];
+  rows.forEach((row, y) => {
+    let x = 0;
+    while (x < row.length) {
+      if (row[x] !== "#") {
+        x++;
+        continue;
+      }
+      let w = 1;
+      while (row[x + w] === "#") w++;
+      runs.push({ x, y, w });
+      x += w;
+    }
+  });
+  return runs;
+}
+var logoSize = (agent) => ART[agent]?.length ?? 0;
+var PLATE = [40, 42, 54];
+var PLATE_LIP = [58, 60, 76];
+var cache2 = /* @__PURE__ */ new Map();
+var hasLogo = (agent) => !!agent && agent in ART;
+function logo(agent, tint) {
+  const key = `${agent}:${tint.join(",")}`;
+  const hit = cache2.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: H2 }, () => new Array(W2).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < W2 && y < H2) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  box(1, 1, 14, 14, PLATE);
+  box(1, 1, 14, 1, PLATE_LIP);
+  const art = ART[agent];
+  if (!art) return { w: W2, h: H2, grid };
+  art.forEach((row, y) => [...row].forEach((c, x) => c === "#" && put(2 + x, 3 + y, tint)));
+  const g = { w: W2, h: H2, grid };
+  cache2.set(key, g);
+  return g;
+}
+
 // web/list.ts
 var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
 	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
@@ -866,6 +941,25 @@ var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="cris
 var crtTemplate = document.createElement("template");
 crtTemplate.innerHTML = CRT;
 var crtIcon = () => crtTemplate.content.firstElementChild.cloneNode(true);
+function markSvg(agent) {
+  const runs = logoRuns(agent);
+  const n = logoSize(agent);
+  if (!runs || !n) return null;
+  const rects = runs.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="1"/>`);
+  return `<svg viewBox="0 0 ${n} ${n}" width="13" height="13" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true">${rects.join("")}</svg>`;
+}
+var markTemplates = /* @__PURE__ */ new Map();
+function markIcon(agent) {
+  let t = markTemplates.get(agent);
+  if (!t) {
+    const svg = markSvg(agent);
+    if (!svg) return null;
+    t = document.createElement("template");
+    t.innerHTML = svg;
+    markTemplates.set(agent, t);
+  }
+  return t.content.firstElementChild.cloneNode(true);
+}
 var WEIGHT = {
   error: 0.26,
   needs: 0.22,
@@ -1060,7 +1154,7 @@ function paintList(list) {
 			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90">
 				<span class="proj truncate font-bold text-(--proj)"></span>
 				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
-				<span class="harness shrink-0 text-[0.85rem] leading-none" aria-hidden="true"></span>
+				<span class="harness inline-flex shrink-0 items-center leading-none" aria-hidden="true"></span>
 			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
@@ -1071,9 +1165,10 @@ function paintList(list) {
     li.querySelector(".proj").textContent = s.proj;
     const harness = li.querySelector(".harness");
     const mark = harnessMark(s.agent);
-    harness.textContent = mark.glyph;
     harness.style.color = rgb(mark.color);
     harness.title = mark.name;
+    const icon = markIcon(s.agent ?? "claude");
+    harness.replaceChildren(...icon ? [icon] : [document.createTextNode(mark.glyph)]);
     const away = li.querySelector(".away");
     if (s.away) {
       away.textContent = `\u2192 ${s.away}`;
@@ -1425,67 +1520,12 @@ var PROP_SIZE = {
   whiteboard: { w: 2, h: 1 },
   shelf: { w: 1, h: 1 }
 };
-var cache2 = /* @__PURE__ */ new Map();
+var cache3 = /* @__PURE__ */ new Map();
 function prop(kind) {
-  const hit = cache2.get(kind);
+  const hit = cache3.get(kind);
   if (hit) return hit;
   const g = MAKERS[kind]();
-  cache2.set(kind, g);
-  return g;
-}
-
-// src/logos.ts
-var W2 = 16;
-var H2 = 16;
-var CLAUDE = [
-  ".....#.....",
-  ".....#.....",
-  ".#...#...#.",
-  "..#..#..#..",
-  "...#.#.#...",
-  "###########",
-  "...#.#.#...",
-  "..#..#..#..",
-  ".#...#...#.",
-  ".....#.....",
-  ".....#....."
-];
-var CODEX = [
-  "...#####...",
-  "..#.....#..",
-  ".#..###..#.",
-  "#..#...#..#",
-  "#.#.....#.#",
-  "#.#.....#.#",
-  "#.#.....#.#",
-  "#..#...#..#",
-  ".#..###..#.",
-  "..#.....#..",
-  "...#####..."
-];
-var ART = { claude: CLAUDE, codex: CODEX };
-var PLATE = [40, 42, 54];
-var PLATE_LIP = [58, 60, 76];
-var cache3 = /* @__PURE__ */ new Map();
-var hasLogo = (agent) => !!agent && agent in ART;
-function logo(agent, tint) {
-  const key = `${agent}:${tint.join(",")}`;
-  const hit = cache3.get(key);
-  if (hit) return hit;
-  const grid = Array.from({ length: H2 }, () => new Array(W2).fill(null));
-  const put = (x, y, c) => {
-    if (x >= 0 && y >= 0 && x < W2 && y < H2) grid[y][x] = c;
-  };
-  const box = (x, y, w, h, c) => {
-    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
-  };
-  box(1, 1, 14, 14, PLATE);
-  box(1, 1, 14, 1, PLATE_LIP);
-  const art = ART[agent];
-  if (!art) return { w: W2, h: H2, grid };
-  art.forEach((row, y) => [...row].forEach((c, x) => c === "#" && put(2 + x, 3 + y, tint)));
-  const g = { w: W2, h: H2, grid };
-  cache3.set(key, g);
+  cache3.set(kind, g);
   return g;
 }
 

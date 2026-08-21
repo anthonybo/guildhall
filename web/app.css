@@ -317,6 +317,9 @@
   .inline {
     display: inline;
   }
+  .inline-flex {
+    display: inline-flex;
+  }
   .table {
     display: table;
   }
@@ -764,9 +767,6 @@
   }
   .text-\[0\.82rem\] {
     font-size: 0.82rem;
-  }
-  .text-\[0\.85rem\] {
-    font-size: 0.85rem;
   }
   .text-\[0\.86rem\] {
     font-size: 0.86rem;
