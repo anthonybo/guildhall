@@ -26,6 +26,7 @@ import { prune, settle } from './data/settle.ts'
 import { stateOf } from './data/state.ts'
 import { transcriptIndex } from './data/transcript.ts'
 import type { Digest, Registry, Session } from './data/types.ts'
+import { codexSessions } from './data/codex.ts'
 
 export type { Digest, Registry, Session, State } from './data/types.ts'
 export { RANK } from './data/types.ts'
@@ -87,7 +88,15 @@ function contextUsed(d: Digest) {
 	return (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
 }
 
-export function collect(): Session[] {
+/**
+ * Every live session, as the room and the browser see them.
+ *
+ * `codex` is passed in rather than read from the config here, so this stays free of
+ * a file read on a path that runs every two seconds — and so a test can ask for the
+ * second harness without writing a config file. Defaulting to false means every
+ * existing caller keeps behaving exactly as it did.
+ */
+export function collect(codex = false): Session[] {
 	const idx = transcriptIndex()
 	const tabs = cmuxMap()
 	const now = Date.now()
@@ -99,11 +108,17 @@ export function collect(): Session[] {
 	// same character for its whole life and no two collide until the sheets run out.
 	// Ordered by cwd first, so sessions in the same repo read as one team and match
 	// the pod nameplate they sit under.
-	const looks = assignLooks(
-		[...registry]
+	// Codex sessions, or nothing at all when the flag is off — which is the default.
+	// Read BEFORE looks are handed out, because their ids have to be appended after
+	// the Claude ones: `assignLooks` assigns by index, so sorting them in among the
+	// existing sessions would silently change what everybody already looks like.
+	const extra = codex ? codexSessions(now) : []
+	const looks = assignLooks([
+		...[...registry]
 			.sort((a, b) => a.cwd.localeCompare(b.cwd) || a.sessionId.localeCompare(b.sessionId))
 			.map((s) => s.sessionId),
-	)
+		...extra.map((s) => s.id),
+	])
 
 	const out = registry.map((s) => {
 		const file = idx.get(s.sessionId)
@@ -153,7 +168,18 @@ export function collect(): Session[] {
 			hueShift: looks.get(s.sessionId)?.hueShift ?? 0,
 		}
 	})
-	return disambiguate(pairByTty(fold(out, registry)))
+	// `fold` and `pairByTty` are about Claude Code's registry — a session paired with
+	// its background jobs by tty — so Codex sessions do not go through them. They do
+	// go through `disambiguate`, because two sessions called `guildhall` need telling
+	// apart whichever harness they came from.
+	const folded = pairByTty(fold(out, registry))
+	if (!extra.length) return disambiguate(folded)
+	const withLooks = extra.map((s) => ({
+		...s,
+		palette: looks.get(s.id)?.palette ?? 0,
+		hueShift: looks.get(s.id)?.hueShift ?? 0,
+	}))
+	return disambiguate([...folded, ...withLooks])
 }
 
 /**

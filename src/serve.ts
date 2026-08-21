@@ -69,6 +69,9 @@ export type ServeOptions = {
 	/** 0.0.0.0 reaches the LAN; 127.0.0.1 is localhost only, for tunnels. */
 	host: string
 	demo: boolean
+	/** Include Codex sessions as well as Claude Code ones. Off by default; see
+	 *  docs/codex.md. */
+	codex?: boolean
 	/** Whether typing into a session is permitted at all. A function, not a
 	 *  boolean, so turning it off in the running app takes effect immediately
 	 *  rather than at the next restart. */
@@ -148,9 +151,9 @@ const MIME: Record<string, string> = {
  * `build()`, not the frozen `BUILD`: this process outlives releases, and a browser
  * that reads its version from here must not be told a stale one.
  */
-export function snapshot(demo = false): string {
+export function snapshot(demo = false, codex = false): string {
 	return JSON.stringify({
-		sessions: demo ? demoSessions() : collect(),
+		sessions: demo ? demoSessions() : collect(codex),
 		at: Date.now(),
 		version: build(),
 		update: available(),
@@ -159,8 +162,8 @@ export function snapshot(demo = false): string {
 }
 
 export function createServer(opts: ServeOptions) {
-	const sessions = () => (opts.demo ? demoSessions() : collect())
-	const payload = () => snapshot(opts.demo)
+	const sessions = () => (opts.demo ? demoSessions() : collect(!!opts.codex))
+	const payload = () => snapshot(opts.demo, !!opts.codex)
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 	/** When a message last went out, so the heartbeat below can be honest about ages. */

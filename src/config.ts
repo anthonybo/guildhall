@@ -24,6 +24,9 @@ export type Config = {
 	host: string
 	/** how a project's name sits by its desks: down the side, or along the aisle */
 	labels: 'vertical' | 'horizontal'
+	/** read Codex sessions as well as Claude Code ones. Off by default: see
+	 *  docs/codex.md for why a second harness is additive and switchable. */
+	codex: boolean
 	/** hold the display awake too, not just the machine. Off keeps the screen's own
 	 *  sleep timer, which on battery is usually two minutes and usually locks. */
 	awakeDisplay: boolean
@@ -55,7 +58,7 @@ export type Config = {
  * else can, and sharing is a deliberate change to `the network` in the menu bar
  * settings or this file.
  */
-const DEFAULTS: Config = { serve: false, port: 4318, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false }
+const DEFAULTS: Config = { serve: false, port: 4318, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false, codex: false }
 
 /**
  * A port this program will accept, in one place.
@@ -83,6 +86,10 @@ export function load(): Config {
 			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
 			awakeDisplay: typeof raw.awakeDisplay === 'boolean' ? raw.awakeDisplay : DEFAULTS.awakeDisplay,
 			control: raw.control === true,
+			// Off unless asked for. An upgrade must not start showing sessions from a
+			// second harness, and a regression in reading them must be switchable off by
+			// somebody who is not reading a stack trace.
+			codex: raw.codex === true,
 		}
 	} catch {
 		return { ...DEFAULTS }

@@ -216,3 +216,14 @@ test('a session with no agent record still gets its tab, by terminal device', as
 	const rows: Session[] = [{ ...blank, id: 'a', proj: 'x', cwd: '/x', pid: 1, tab: 3, workspace: 'REAL' }]
 	assert.equal(pairByTty(rows)[0]!.workspace, 'REAL')
 })
+
+test('a second harness is off by default, and adds nothing when off', () => {
+	// The containment claim, checked rather than asserted in a comment: `collect()`
+	// with no argument must be byte-identical to what it produced before Codex
+	// existed. If this ever fails, the additive feature stopped being additive.
+	const strip = (list: ReturnType<typeof collect>) => JSON.stringify(list.map((s) => ({ ...s, stale: 0 })))
+	assert.equal(strip(collect()), strip(collect(false)), 'the default is not "off"')
+	for (const s of collect()) {
+		assert.equal(s.agent, undefined, 'a Claude Code session was labelled with a harness')
+	}
+})

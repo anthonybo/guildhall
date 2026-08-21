@@ -222,7 +222,7 @@ if (process.argv.includes('--config')) {
  */
 if (process.argv.includes('--sessions')) {
 	const { snapshot } = await import('./serve.ts')
-	console.log(snapshot(process.argv.includes('--demo')))
+	console.log(snapshot(process.argv.includes('--demo'), cfgStore.load().codex))
 	process.exit(0)
 }
 if (process.argv.includes('--help') || process.argv.includes('-h')) {
@@ -284,7 +284,9 @@ const HEADLESS = process.argv.includes('--headless')
 /** A fictional office, for documentation and for looking at this with nothing
  *  running. Never touches the real registry. */
 const DEMO = process.argv.includes('--demo')
-const collect = () => (DEMO ? demoSessions() : collectReal())
+// `cfg.codex` is read here rather than at each call site: this wrapper is already
+// the one place that decides where sessions come from.
+const collect = () => (DEMO ? demoSessions() : collectReal(cfg.codex))
 /**
  * Sharing is off unless it was turned on deliberately, and the choice persists.
  * `--serve` / `--no-serve` override the stored setting for one run.
@@ -318,6 +320,7 @@ function syncServe() {
 		server = createServer({
 			port: cfg.port,
 			host: cfg.host,
+			codex: cfg.codex,
 			demo: DEMO,
 			// read at call time, so toggling control in the running app takes effect
 			// at once rather than at the next restart

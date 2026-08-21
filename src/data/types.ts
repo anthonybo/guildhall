@@ -80,6 +80,15 @@ export type Session = {
 	xp: number
 	/** subagents out and dispatched, in words, when there are any */
 	agents?: string
+	/**
+	 * Which harness this session belongs to, when it is not Claude Code.
+	 *
+	 * OPTIONAL, and absent for every session that exists today. A phone left open
+	 * on yesterday's bundle has to keep working against today's server — that is the
+	 * normal state of a phone, not an edge case — so this is added, never required,
+	 * and nothing reads it without a fallback.
+	 */
+	agent?: 'codex'
 }
 
 /** What one poll of a transcript yields, before it becomes a `Session`. */
