@@ -164,7 +164,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port|servers|stop-server|port-free)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port|servers|stop-server|port-free|cmux-reach)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -226,6 +226,17 @@ if (process.argv.includes('--set-passcode')) {
 		)
 		process.exit(0)
 	}
+}
+/**
+ * Can this machine's server drive cmux? Printed as JSON for the menu bar.
+ *
+ * So the panel can stop offering control as available when it structurally is not — the
+ * switch said "on" while every send came back with cmux's own refusal.
+ */
+if (process.argv.includes('--cmux-reach')) {
+	const { reach } = await import('./cmuxreach.ts')
+	console.log(JSON.stringify(reach()))
+	process.exit(0)
 }
 if (process.argv.includes('--servers')) {
 	console.log(JSON.stringify(others().map((s) => ({ ...s, supervisor: supervisor(s.pid) }))))

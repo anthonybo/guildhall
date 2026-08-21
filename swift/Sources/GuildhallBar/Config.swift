@@ -179,6 +179,30 @@ struct Config {
 		return out.sorted { $0.port < $1.port }
 	}
 
+	/// Why the process serving the browser view cannot type into sessions, if it cannot.
+	///
+	/// Read from the registry, which each server writes about ITSELF. Running the check
+	/// in this app would answer a different question: the menu bar is not started inside
+	/// cmux either, so it would report control as broken even when the serving process is
+	/// a watcher in a cmux pane that can drive it perfectly.
+	///
+	/// nil means nothing to say — either it can, or no server has announced yet.
+	static func cmuxBlockedNote() -> String? {
+		let root = dir + "/servers"
+		guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return nil }
+		for name in names where name.hasSuffix(".json") {
+			guard let pid = Int32(name.dropLast(5)), pid > 0 else { continue }
+			if kill(pid, 0) != 0 && errno != EPERM { continue }
+			guard let data = FileManager.default.contents(atPath: root + "/" + name),
+				let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+			else { continue }
+			// Only a server that says it cannot. An older build wrote no verdict at all, and
+			// absence is not a complaint.
+			if o["cmux"] as? Bool == false, let note = o["cmuxNote"] as? String { return note }
+		}
+		return nil
+	}
+
 	/// Can the service bind that port, and if not, who has it?
 	///
 	/// Asked BEFORE a new port is saved. Apply used to validate the range and nothing

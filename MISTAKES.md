@@ -803,3 +803,42 @@ diagnosable rather than opaque — the log names the holder and says whether wai
 help — but launchd will still respawn every ten seconds forever. Capping it was
 considered and not done: the retry is what makes the legitimate handover recover on its
 own, and breaking that to tidy up a case the pre-flight now prevents is the wrong trade.
+
+## The installed service can read every session and type into none
+
+**Structural, and invisible until somebody read it off a phone.** cmux's socket runs in
+`access_mode: cmuxOnly`: it accepts control connections only from processes started
+inside cmux, which inherit `CMUX_SOCKET_CAPABILITY` from their pane. launchd starts its
+jobs with almost no environment, so the installed service has no capability — and the
+installed service is the DEFAULT way to serve the browser view.
+
+Reading sessions kept working the whole time, because that comes from files on disk. Only
+control was refused, with cmux's own sentence — "only processes started inside cmux can
+connect" — shown on a phone underneath a panel that said control was on. Reported as
+"access denied — only processes".
+
+**How it hid for so long.** Control was being used from a phone successfully, through a
+`tools/serve.mjs` dev watcher started in a terminal inside cmux. Its child inherited the
+capability, so everything worked. Killing that watcher — which I did, and should not have
+— moved the serving job to launchd and broke control instantly. The feature had never
+worked from the service; it had only ever worked from the watcher, and nothing had ever
+distinguished the two.
+
+**Two fixes, both supported now.** Run the server from a cmux pane, or give cmux a socket
+password. See "Socket Auth" in `cmux --help`, which takes `--password` first, then
+`CMUX_SOCKET_PASSWORD`, then whatever is saved in cmux Settings. A password in
+`~/.config/guildhall/cmux-password` is passed to the child as an ENVIRONMENT VARIABLE,
+never as `--password`, because argv is readable by every process on this machine through
+`ps`.
+
+**Each server records its own verdict, and that detail matters.** A panel that ran the
+check in its own process would answer a different question: the menu bar app is not
+started inside cmux either, so it would report control as broken while a watcher in a
+cmux pane was driving sessions perfectly. So `announce()` writes `cmux` and `cmuxNote`
+about the process doing the serving, and the panel reads those.
+
+**Do not probe by acting.** The obvious reachability test is to send something and see
+whether it lands. `cmux send` with an empty or unmatched target falls back to whatever
+surface is FOCUSED — this repo has typed into a live session twice that way. `cmux
+capabilities` answers from local state, needs no socket, and reports `access_mode`, which
+is the fact that decides the question.

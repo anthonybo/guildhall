@@ -38,6 +38,7 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { reach } from './cmuxreach.ts'
 
 /** Resolved per call so tests can redirect it; the same rule as auth.ts and config.ts. */
 const dir = () => path.join(process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall'), 'servers')
@@ -47,6 +48,19 @@ export type Serving = {
 	port: number
 	host: string
 	at: number
+	/**
+	 * Can THIS server drive cmux — and if not, what would fix it?
+	 *
+	 * Recorded by each server about itself, because nothing else can answer it. A panel
+	 * that ran the check in its own process would be answering "could a process like me
+	 * do it", which is a different question with a different answer: a watcher started in
+	 * a cmux pane holds a socket capability and can type into sessions, while the launchd
+	 * service and the menu bar app both cannot. Asking the wrong process would have
+	 * reported control as broken while it was working, or the reverse.
+	 */
+	cmux?: boolean
+	/** Why not, and what to do, in the words the serving process chose. */
+	cmuxNote?: string
 	/**
 	 * Was this one started by launchd — i.e. is it THE service?
 	 *
@@ -74,7 +88,21 @@ const file = (pid: number) => path.join(dir(), `${pid}.json`)
 export function announce(port: number, host: string, pid = process.pid): void {
 	try {
 		fs.mkdirSync(dir(), { recursive: true })
-		fs.writeFileSync(file(pid), JSON.stringify({ pid, port, host, at: Date.now(), service: process.ppid === 1 }))
+		// Its own cmux verdict goes in, so a panel reads the answer for the process that is
+		// actually serving rather than computing one for itself.
+		const r = reach()
+		fs.writeFileSync(
+			file(pid),
+			JSON.stringify({
+				pid,
+				port,
+				host,
+				at: Date.now(),
+				service: process.ppid === 1,
+				cmux: r.ok,
+				...(r.ok ? {} : { cmuxNote: `${r.why}. ${r.fix}` }),
+			}),
+		)
 	} catch {}
 }
 
@@ -130,7 +158,16 @@ export function others(selfPid = process.pid): Serving[] {
 		}
 		try {
 			const raw = JSON.parse(fs.readFileSync(path.join(dir(), name), 'utf8')) as Serving
-			if (Number.isInteger(raw.port)) out.push({ pid, port: raw.port, host: String(raw.host ?? ''), at: Number(raw.at) || 0, service: raw.service === true })
+			if (Number.isInteger(raw.port))
+				out.push({
+					pid,
+					port: raw.port,
+					host: String(raw.host ?? ''),
+					at: Number(raw.at) || 0,
+					service: raw.service === true,
+					cmux: raw.cmux,
+					cmuxNote: raw.cmuxNote,
+				})
 		} catch {}
 	}
 	// oldest first, so the one that has been running longest — most likely the one you

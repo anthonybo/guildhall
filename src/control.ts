@@ -22,8 +22,8 @@
  *    Only the UUID from the session map is accepted.
  */
 import { execFile } from 'node:child_process'
+import { runCmux } from './cmuxreach.ts'
 import { existsSync } from 'node:fs'
-import { CMUX } from './data/cmux-bin.ts'
 import { spawnAllowed } from './data/projects.ts'
 
 /** Long enough for a busy app, short enough that a hung socket is not a stall. */
@@ -44,14 +44,15 @@ export type Result = { ok: true; text: string } | { ok: false; error: string }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-function run(args: string[]): Promise<Result> {
-	return new Promise((resolve) => {
-		execFile(CMUX, args, { timeout: TIMEOUT, maxBuffer: 4 << 20, windowsHide: true }, (err, stdout, stderr) => {
-			if (err) return resolve({ ok: false, error: (stderr || err.message || 'failed').trim().slice(0, 200) })
-			resolve({ ok: true, text: stdout })
-		})
-	})
-}
+/**
+ * Every cmux call goes through cmuxreach, which owns how this process is authorized.
+ *
+ * It used to spawn cmux with the ambient environment and nothing else. That works from a
+ * cmux pane, which inherits a socket capability, and cannot work from the launchd service,
+ * which inherits nothing — so the default installation could read every session and type
+ * into none, and reported cmux's own error to a phone.
+ */
+const run = (args: string[]): Promise<Result> => runCmux(args, TIMEOUT)
 
 /**
  * The terminal as a styled grid: every span with its colour, weight and place.

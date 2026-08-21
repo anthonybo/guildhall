@@ -85,6 +85,8 @@ struct SettingsView: View {
 	/// While `--pick-port` is running, so the button cannot be pressed twice and the
 	/// wait is visible — shelling out to node is not instant.
 	@State private var picking = false
+	/// Why control cannot work, from the serving process itself. See Config.cmuxBlockedNote.
+	@State private var cmuxNote: String?
 	/// Other guildhalls serving, so a forgotten one is visible. Refreshed when the page
 	/// appears; a registry read is cheap but there is no reason to do it per keystroke.
 	@State private var alsoServing: [(pid: Int32, port: Int)] = []
@@ -329,6 +331,17 @@ struct SettingsView: View {
 				get: { config.control },
 				set: { config.control = $0; saveNow() }
 			))
+			// Control can be ON and still impossible, and saying only the first half is how
+			// a phone ended up showing cmux's own refusal under a panel that claimed
+			// control was available. cmux accepts control only from processes it started;
+			// the installed service is not one, so the default setup can read every
+			// session and type into none. The serving process records its own verdict —
+			// this app cannot compute it, because it is not the process doing the serving.
+			if config.control, let why = cmuxNote {
+				Label(why, systemImage: "exclamationmark.triangle.fill")
+					.font(.caption).foregroundStyle(.orange)
+					.fixedSize(horizontal: false, vertical: true)
+			}
 			// The risk, next to the switch that takes it. The terminal panel keeps this
 			// visible whether its explanations are open or not, for the same reason.
 			Text(
@@ -433,6 +446,7 @@ struct SettingsView: View {
 		.task {
 			serving = await Daemon.loaded()
 			alsoServing = Config.otherServers(configuredPort: config.port)
+			cmuxNote = Config.cmuxBlockedNote()
 		}
 	}
 

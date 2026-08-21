@@ -30,6 +30,7 @@ import { available } from './update.ts'
 import { collect } from './data.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
 import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
+import { reach } from './cmuxreach.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { spawnable } from './data/projects.ts'
@@ -85,6 +86,24 @@ export type ServeOptions = {
 	/** Announce a remote send on this machine's own screen. A caller that can act
 	 *  here must not be able to do it invisibly. */
 	onSend?: (proj: string, text: string, ok: boolean) => void
+}
+
+/**
+ * Refuse in guildhall's own words when this process cannot drive cmux at all.
+ *
+ * Checked alongside the other control gates rather than left to fail at the cmux call,
+ * because what came back otherwise was cmux's sentence — "only processes started inside
+ * cmux can connect" — shown on a phone under a panel that said control was on. True,
+ * and useless: it names cmux's rule and not what to do about it.
+ *
+ * 503 rather than 403: nothing about the REQUEST is wrong. The caller is on the right
+ * network with the right password, and the server simply cannot carry it out.
+ */
+function cmuxRefusal(res: http.ServerResponse): boolean {
+	const r = reach()
+	if (r.ok) return false
+	send(res, 503, MIME['.json'], JSON.stringify({ error: `${r.why}. ${r.fix}` }))
+	return true
 }
 
 /** The session this request carries, if any. Never the passcode itself. */
@@ -292,6 +311,10 @@ export function createServer(opts: ServeOptions) {
 		if (req.method === 'POST' && url.pathname === '/api/send') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			// No cmux check HERE: this route serves both harnesses, and a Codex message goes
+			// through the codex CLI, which has nothing to do with cmux. Gating the route
+			// would have refused Codex sends on a machine where only cmux was unreachable.
+			// The check sits below, on the branch that actually needs a cmux pane.
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -327,6 +350,9 @@ export function createServer(opts: ServeOptions) {
 			// no tab to reach this through" into a 400, which is a different statement —
 			// one says the request named something unreachable, the other says the send was
 			// attempted and failed. A test caught it.
+			// A cmux pane is about to be driven, so this is where the ability to drive one
+			// belongs — after the target is known to be a cmux session.
+			if (target.agent !== 'codex' && cmuxRefusal(res)) return
 			if (target.agent !== 'codex' && !target.workspace) {
 				return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
 			}
@@ -362,6 +388,7 @@ export function createServer(opts: ServeOptions) {
 		if (req.method === 'POST' && url.pathname === '/api/spawn') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (cmuxRefusal(res)) return
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -389,6 +416,7 @@ export function createServer(opts: ServeOptions) {
 		if (req.method === 'POST' && url.pathname === '/api/key') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (cmuxRefusal(res)) return
 			const waitKey = controlLockedFor(addr)
 			if (waitKey > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitKey / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -469,6 +497,7 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/screen') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (cmuxRefusal(res)) return
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -508,6 +537,7 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/projects') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (cmuxRefusal(res)) return
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			return send(res, 200, MIME['.json'], JSON.stringify({ projects: spawnable() }))
 		}
