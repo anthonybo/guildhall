@@ -169,7 +169,7 @@ struct SettingsView: View {
 			if !alsoServing.isEmpty {
 				VStack(alignment: .leading, spacing: 6) {
 					Label(
-						"Another guildhall is also serving. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
+						"Another guildhall is serving as well as the service above. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
 						systemImage: "exclamationmark.triangle.fill"
 					)
 					.font(.caption).foregroundStyle(.orange)
@@ -185,7 +185,7 @@ struct SettingsView: View {
 							if stopping == s.pid {
 								ProgressView().controlSize(.small)
 							} else {
-								Button("Stop it") {
+								Button("Kill it") {
 									stopping = s.pid
 									Task {
 										stopNote = await Config.stopServer(s.pid)
@@ -193,7 +193,7 @@ struct SettingsView: View {
 										// re-read: the list has to reflect what happened, or the
 										// button looks like it did nothing.
 										try? await Task.sleep(for: .milliseconds(600))
-										alsoServing = Config.otherServers()
+										alsoServing = Config.otherServers(configuredPort: config.port)
 										stopping = nil
 									}
 								}
@@ -397,7 +397,7 @@ struct SettingsView: View {
 		// initial value cannot come from the config file — see the note on `serving`.
 		.task {
 			serving = await Daemon.loaded()
-			alsoServing = Config.otherServers()
+			alsoServing = Config.otherServers(configuredPort: config.port)
 		}
 	}
 

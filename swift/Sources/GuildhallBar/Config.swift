@@ -151,7 +151,7 @@ struct Config {
 	/// asks the kernel. EPERM means it exists and belongs to somebody else, which still
 	/// counts as alive. Stale entries are skipped here and pruned by the node side; this
 	/// app deliberately does not delete other processes' files.
-	static func otherServers() -> [(pid: Int32, port: Int)] {
+	static func otherServers(configuredPort: Int) -> [(pid: Int32, port: Int)] {
 		let root = dir + "/servers"
 		guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
 		var out: [(pid: Int32, port: Int)] = []
@@ -163,6 +163,17 @@ struct Config {
 				let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
 				let port = o["port"] as? Int
 			else { continue }
+			/**
+			 * The launchd service is not an "other" — it is the one this page's switch
+			 * turns on. Listing it under "another guildhall is also serving", with a
+			 * button offering to stop it, was exactly backwards.
+			 *
+			 * `service` is written by whoever announced; the port comparison is a fallback
+			 * for entries announced by a build that predates the flag, so an already
+			 * running service is recognised without waiting for it to restart.
+			 */
+			if o["service"] as? Bool == true { continue }
+			if o["service"] == nil && port == configuredPort { continue }
 			out.append((pid: pid, port: port))
 		}
 		return out.sorted { $0.port < $1.port }

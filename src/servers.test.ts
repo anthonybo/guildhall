@@ -134,3 +134,20 @@ test('an announced server really is stopped, so the refusals above are not refus
 		child.kill('SIGKILL')
 	}
 })
+
+test('the launchd service is recorded as such, so a panel can tell it from a stray', () => {
+	// The menu bar listed the service itself under "another guildhall is also serving",
+	// with a button offering to stop it — the opposite of useful. It needs to tell the
+	// server it asked for from one it forgot about.
+	//
+	// Recorded rather than inferred from the port, because the port drifts: change the
+	// setting without restarting the service and it is still bound to the old one, at
+	// which point comparing ports calls the intended server a stray.
+	announce(4250, '0.0.0.0', process.ppid)
+	const [entry] = others()
+	assert.ok(entry, 'nothing was announced')
+	// This test process is not launchd's child, so `service` must be false — the flag has
+	// to reflect the real parent rather than being hardcoded either way.
+	assert.equal(entry!.service, false, 'a process not started by launchd claimed to be the service')
+	withdraw(process.ppid)
+})

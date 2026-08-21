@@ -42,7 +42,25 @@ import path from 'node:path'
 /** Resolved per call so tests can redirect it; the same rule as auth.ts and config.ts. */
 const dir = () => path.join(process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall'), 'servers')
 
-export type Serving = { pid: number; port: number; host: string; at: number }
+export type Serving = {
+	pid: number
+	port: number
+	host: string
+	at: number
+	/**
+	 * Was this one started by launchd — i.e. is it THE service?
+	 *
+	 * The menu bar needs to tell "the server I asked for" from "a server I forgot about",
+	 * and it listed the service itself as "another guildhall … Stop it", which is the
+	 * opposite of useful. Recorded here rather than inferred from the port, because the
+	 * port can drift: change the setting without restarting and the service is still on
+	 * the old one, at which point a port comparison calls the intended server a stray.
+	 *
+	 * `ppid === 1` is the test. launchd is the parent of anything it starts; a dev
+	 * watcher's child has the watcher, and a hand-started room has a shell.
+	 */
+	service?: boolean
+}
 
 const file = (pid: number) => path.join(dir(), `${pid}.json`)
 
@@ -56,7 +74,7 @@ const file = (pid: number) => path.join(dir(), `${pid}.json`)
 export function announce(port: number, host: string, pid = process.pid): void {
 	try {
 		fs.mkdirSync(dir(), { recursive: true })
-		fs.writeFileSync(file(pid), JSON.stringify({ pid, port, host, at: Date.now() }))
+		fs.writeFileSync(file(pid), JSON.stringify({ pid, port, host, at: Date.now(), service: process.ppid === 1 }))
 	} catch {}
 }
 
@@ -112,7 +130,7 @@ export function others(selfPid = process.pid): Serving[] {
 		}
 		try {
 			const raw = JSON.parse(fs.readFileSync(path.join(dir(), name), 'utf8')) as Serving
-			if (Number.isInteger(raw.port)) out.push({ pid, port: raw.port, host: String(raw.host ?? ''), at: Number(raw.at) || 0 })
+			if (Number.isInteger(raw.port)) out.push({ pid, port: raw.port, host: String(raw.host ?? ''), at: Number(raw.at) || 0, service: raw.service === true })
 		} catch {}
 	}
 	// oldest first, so the one that has been running longest — most likely the one you

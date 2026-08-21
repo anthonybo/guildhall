@@ -56,7 +56,7 @@ struct Panel: View {
 		// warning about staying empty, and the reason is real. This is a readdir plus a
 		// kill(0) per entry: no window server, no activation, nothing that can delay the
 		// popover appearing.
-		.task { otherServers = Config.otherServers() }
+		.task { otherServers = Config.otherServers(configuredPort: Config.load().port) }
 		.onDisappear {
 			model.start(open: false)
 			// Back to the list when the popover closes. SwiftUI keeps this view alive
@@ -243,7 +243,7 @@ struct Panel: View {
 				let which = otherServers.map { ":\($0.port)" }.joined(separator: ", ")
 				HStack(spacing: 6) {
 					Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
-					Text("Another guildhall is serving on \(which) — Settings can stop it")
+					Text("Another guildhall is serving on \(which) — Settings can kill it")
 						.font(.system(size: 11))
 						.fixedSize(horizontal: false, vertical: true)
 				}
