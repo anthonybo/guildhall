@@ -478,4 +478,16 @@ test('a session waiting on you keeps its placard, and still shows its harness', 
 	assert.equal(office.badges.length, 1, 'a level badge and a placard are both drawn for one desk')
 	// and the harness sign is still there, which is the whole point of moving the placard
 	assert.deepEqual(office.logos.map((l) => l.agent), ['codex'], 'a session that needs you lost its harness sign')
+
+	// THE POINT: they must not share a slot. A placed image draws over whatever is under
+	// it, so two sprites at one position means the second silently replaces the first —
+	// and the first version of this change did put the placard exactly where the sign
+	// now goes. Counting them both proves nothing; the positions are the claim.
+	for (const b of office.badges)
+		for (const l of office.logos)
+			assert.ok(b.x !== l.x || b.y !== l.y, `a placard and a harness sign share the slot at ${b.x},${b.y}`)
+	// stacked in the gap column: sign on the monitor row, placard on the worktop row
+	const pod = office.pods.find((p) => office.logos.some((l) => l.y === p.monitorRow * TILE))!
+	assert.equal(office.badges[0]!.y, pod.deskRow * TILE, 'the placard is not in the level badge slot')
+	assert.equal(office.badges[0]!.x, office.logos[0]!.x, 'the placard and the sign are not in the same column')
 })
