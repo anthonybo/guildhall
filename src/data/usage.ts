@@ -39,10 +39,31 @@ export type Limit = {
 
 export type Usage = {
 	limits: Limit[]
-	/** when the cost was last fetched; its window is far longer than the quota's */
+	/** when the Claude spend was last fetched; its window is far longer than the quota's */
 	costAt?: number
-	/** today's spend in dollars, when ccusage could be run */
+	/**
+	 * Today's spend in dollars: every harness added together, because that is what
+	 * the one figure labelled "today" means to whoever reads it.
+	 *
+	 * DERIVED, never accumulated. Two independent fetches each adding their figure to
+	 * the previous total would double-count on the second pass — the same shape as the
+	 * `costAt` bug this file already records, where a write that dropped a field made
+	 * the other half refetch forever. The parts are stored and the total is recomputed
+	 * from them on every write.
+	 */
 	cost?: number
+	/** today's Claude Code spend, from `ccusage daily` */
+	claudeCost?: number
+	/** today's Codex spend, from `ccusage codex daily`. Its total key is `costUSD`. */
+	codexCost?: number
+	/**
+	 * When the Codex spend was last fetched.
+	 *
+	 * Its OWN clock, for the reason the quota and the cost already have separate ones:
+	 * sharing `costAt` would let a Claude refresh declare the Codex figure fresh, and
+	 * it would never be fetched.
+	 */
+	codexCostAt?: number
 	/** when this was fetched */
 	at: number
 	/** why the last attempt failed, if it did; the numbers above are then stale */
@@ -80,7 +101,11 @@ const file = () => path.join(dir(), 'usage.json')
 
 function read(): Usage | null {
 	try {
-		return JSON.parse(fs.readFileSync(file(), 'utf8')) as Usage
+		// Derived on the way OUT as well as on the way in, so the total is a function of
+		// the parts wherever it is consumed. Applying it only on write left a file that
+		// had parts but no total — one written by an older build, or by hand — reporting
+		// no spend at all while both halves sat right there in it.
+		return withTotal(JSON.parse(fs.readFileSync(file(), 'utf8')) as Usage)
 	} catch {
 		return null
 	}
@@ -88,8 +113,21 @@ function read(): Usage | null {
 
 function write(u: Usage) {
 	try {
-		writePrivate(file(), JSON.stringify(u))
+		writePrivate(file(), JSON.stringify(withTotal(u)))
 	} catch {}
+}
+
+/**
+ * Fill in `cost` from the parts.
+ *
+ * A file written before Codex existed has `cost` and no parts; that `cost` is the
+ * Claude figure, so it becomes `claudeCost` rather than being counted twice or
+ * thrown away.
+ */
+function withTotal(u: Usage): Usage {
+	const claude = u.claudeCost ?? (u.codexCost === undefined ? u.cost : undefined)
+	const parts = [claude, u.codexCost].filter((n): n is number => typeof n === 'number')
+	return { ...u, claudeCost: claude, cost: parts.length ? parts.reduce((a, b) => a + b, 0) : undefined }
 }
 
 /**
@@ -159,7 +197,7 @@ let inFlight: Promise<unknown> | null = null
  * silence the other.
  */
 function both(): Promise<unknown> {
-	return Promise.allSettled([maybeQuota(), maybeCost()])
+	return Promise.allSettled([maybeQuota(), maybeCost(), maybeCodexCost()])
 }
 
 /** Fresh enough to leave alone? Backoff applies when the last try failed. */
@@ -228,6 +266,67 @@ async function maybeQuota() {
 	}
 }
 
+/**
+ * Today's Codex spend, on its own clock.
+ *
+ * `ccusage` has a separate namespace for it — `ccusage codex daily` — and a different
+ * key: the total is `costUSD`, where the Claude side is `totalCost`. Reading the wrong
+ * one yields undefined rather than a wrong number, which is the better failure, but it
+ * is still worth naming since nothing in the shape hints at it.
+ *
+ * Only run when Codex is switched on. Somebody who does not use it should not pay for
+ * a Node spawn every half hour to be told zero.
+ */
+async function maybeCodexCost() {
+	if (!codexEnabled()) return
+	const previous = read()
+	const age = previous?.codexCostAt ? Date.now() - previous.codexCostAt : Infinity
+	if (age <= (previous?.codexCost === undefined ? COST_BACKOFF : COST_TTL)) return
+	await codexSpend()
+}
+
+/** Whether the config asks for Codex. Read here rather than threaded through every
+ *  caller: this happens on a thirty-minute window, not on the poll. */
+function codexEnabled(): boolean {
+	try {
+		const dir = process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')
+		return JSON.parse(fs.readFileSync(path.join(dir, 'config.json'), 'utf8')).codex === true
+	} catch {
+		return false
+	}
+}
+
+function codexSpend(): Promise<void> {
+	const runners = ['bunx', 'npx']
+	let settle: () => void = () => {}
+	const done = new Promise<void>((r) => (settle = r))
+	const d = new Date()
+	// Local date, for the reason spelled out in `spend()`: `toISOString()` is UTC and
+	// asked for tomorrow after 5pm, which has no usage in it yet.
+	const today = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+	const tryNext = (i: number) => {
+		if (i >= runners.length) return settle()
+		execFile(runners[i]!, ['-y', 'ccusage', 'codex', 'daily', '--json', '--since', today], { timeout: 60_000, maxBuffer: 8 << 20 }, (err, stdout) => {
+			if (err || !stdout) return tryNext(i + 1)
+			try {
+				const totals = JSON.parse(stdout)?.totals
+				const total = totals?.costUSD ?? totals?.totalCost
+				const current = read()
+				write({
+					...current,
+					limits: current?.limits ?? [],
+					codexCost: typeof total === 'number' ? total : current?.codexCost,
+					codexCostAt: Date.now(),
+					at: current?.at ?? Date.now(),
+				})
+			} catch {}
+			settle()
+		})
+	}
+	tryNext(0)
+	return done
+}
+
 /** Today's spend, from ccusage, on its own much longer window. */
 async function maybeCost() {
 	const previous = read()
@@ -270,11 +369,11 @@ function spend(): Promise<void> {
 				// Stamped even when ccusage gave nothing usable, so a machine without a
 				// runner does not retry a slow spawn every five minutes forever.
 				write({
+					...current,
 					limits: current?.limits ?? [],
-					cost: typeof total === 'number' ? total : current?.cost,
+					claudeCost: typeof total === 'number' ? total : current?.claudeCost,
 					costAt: Date.now(),
 					at: current?.at ?? Date.now(),
-					error: current?.error,
 				})
 			} catch {}
 			settle()
