@@ -88,6 +88,9 @@ struct SettingsView: View {
 	/// Other guildhalls serving, so a forgotten one is visible. Refreshed when the page
 	/// appears; a registry read is cheap but there is no reason to do it per keystroke.
 	@State private var alsoServing: [(pid: Int32, port: Int)] = []
+	/// What guildhall said about the last stop, shown where the button is
+	@State private var stopNote = ""
+	@State private var stopping: Int32?
 	/// What is on disk, so the page can tell a typed change from no change at all.
 	/// Apply used to be enabled always, which offers to save when there is nothing to
 	/// save — and gives no signal at the moment there is.
@@ -164,13 +167,48 @@ struct SettingsView: View {
 			// both reachable over the tailnet, and the only way to find out was lsof.
 			// "I have no indication of that and how would I know" is why this row exists.
 			if !alsoServing.isEmpty {
-				let which = alsoServing.map { ":\($0.port) (pid \($0.pid))" }.joined(separator: ", ")
-				Label(
-					"Another guildhall is also serving on \(which). Each costs about 1% of a core, both are reachable, and they can be running different builds.",
-					systemImage: "exclamationmark.triangle.fill"
-				)
-				.font(.caption).foregroundStyle(.orange)
-				.fixedSize(horizontal: false, vertical: true)
+				VStack(alignment: .leading, spacing: 6) {
+					Label(
+						"Another guildhall is also serving. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
+						systemImage: "exclamationmark.triangle.fill"
+					)
+					.font(.caption).foregroundStyle(.orange)
+					.fixedSize(horizontal: false, vertical: true)
+					// A button per server, because naming the problem and leaving you to
+					// find `kill` is only half an answer — the same objection this file
+					// already records about the control password and the serve toggle.
+					ForEach(alsoServing, id: \.pid) { s in
+						HStack(spacing: 8) {
+							Text("port \(String(s.port)) · pid \(String(s.pid))")
+								.font(.caption).foregroundStyle(.secondary)
+							Spacer()
+							if stopping == s.pid {
+								ProgressView().controlSize(.small)
+							} else {
+								Button("Stop it") {
+									stopping = s.pid
+									Task {
+										stopNote = await Config.stopServer(s.pid)
+										// Give it a moment to withdraw its registry entry, then
+										// re-read: the list has to reflect what happened, or the
+										// button looks like it did nothing.
+										try? await Task.sleep(for: .milliseconds(600))
+										alsoServing = Config.otherServers()
+										stopping = nil
+									}
+								}
+								.controlSize(.small)
+							}
+						}
+					}
+					if !stopNote.isEmpty {
+						// guildhall's own words: it says which process it actually signalled,
+						// which matters because a dev-watcher child is restarted by its parent
+						// and the thing that had to stop was the parent.
+						Text(stopNote).font(.caption).foregroundStyle(.secondary)
+							.fixedSize(horizontal: false, vertical: true)
+					}
+				}
 			}
 
 			Divider()

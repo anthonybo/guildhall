@@ -34,6 +34,7 @@
  * for exactly this purpose — a live-process registry as files, with the pid as the
  * liveness check.
  */
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -125,4 +126,86 @@ export function othersNote(selfPid = process.pid): string | null {
 	if (!list.length) return null
 	const which = list.map((s) => `:${s.port} (pid ${s.pid})`).join(', ')
 	return `another guildhall is also serving on ${which}`
+}
+
+/**
+ * Who supervises that server, when anything does.
+ *
+ * This is the difference between a stop button that works and one that appears to do
+ * nothing. `tools/serve.mjs` is guildhall's own dev watcher: it spawns
+ * `dist/main.mjs --headless`, and it restarts the child on ANY exit — not only on a file
+ * change. Sending SIGTERM to the child there is futile.
+ *
+ * **Measured, because the first version of this note guessed and got it wrong.** It said
+ * the port comes back "within a second". It does not: the watcher waits 2s, logs
+ * `server exited (0) — restarting in 2s`, then rebuilds, and the new child bound about
+ * **9 seconds** after the kill. That is worse than instant, not better — a check at +8s
+ * reported the port free and the kill successful, which is exactly how this would have
+ * shipped as "works on my machine".
+ *
+ * Read at call time rather than recorded at announce time. A `ps` costs about 10ms,
+ * which is nothing on a button press and would be far too much on a poll — and a
+ * recorded ppid can go stale, since a supervisor can exit and leave its child reparented
+ * to launchd.
+ */
+export function supervisor(pid: number): { pid: number; what: string } | null {
+	try {
+		const ppid = Number(execFileSync('/bin/ps', ['-o', 'ppid=', '-p', String(pid)], { encoding: 'utf8' }).trim())
+		if (!Number.isInteger(ppid) || ppid <= 1) return null
+		const cmd = execFileSync('/bin/ps', ['-o', 'command=', '-p', String(ppid)], { encoding: 'utf8' }).trim()
+		// Only guildhall's own watcher counts. Anything else supervising this — a shell, a
+		// terminal, launchd — is not ours to signal, and launchd (ppid 1) is excluded
+		// above because stopping the service is a different button that already exists.
+		if (/tools\/serve\.mjs/.test(cmd)) return { pid: ppid, what: 'the dev watcher (tools/serve.mjs)' }
+		return null
+	} catch {
+		return null
+	}
+}
+
+export type StopResult = { ok: true; note: string } | { ok: false; why: string }
+
+/**
+ * Stop one of the servers in the registry.
+ *
+ * **Only a pid this registry announced.** That is the whole guard: a stop button in a
+ * menu bar app that can signal an arbitrary pid is a much larger thing than a stop
+ * button, and refusing anything we did not write ourselves keeps it small.
+ *
+ * SIGTERM, never SIGKILL. The node side handles SIGTERM by withdrawing its registry
+ * entry and exiting cleanly; SIGKILL would skip that and leave a file naming a dead
+ * process, which is the stale entry the reader then has to prune.
+ */
+export function stop(pid: number): StopResult {
+	/**
+	 * A POSITIVE pid, checked before anything else and independently of the registry.
+	 *
+	 * `kill(0, sig)` signals THIS PROCESS GROUP and `kill(-1, sig)` signals every process
+	 * the caller is permitted to signal. Those are not edge cases to tidy up later; they
+	 * are the two worst things this function could be talked into doing, and they are one
+	 * bad argument away.
+	 *
+	 * The registry check below already excludes them, because `others()` only yields pids
+	 * it parsed as greater than zero. This is deliberately a SECOND, independent gate:
+	 * the cost is one comparison, and the failure it prevents is unbounded. It was added
+	 * after removing the registry check in a test — to prove the check was load-bearing —
+	 * and realising that with it gone the test itself would have SIGTERMed its own
+	 * process group.
+	 */
+	if (!Number.isInteger(pid) || pid <= 0) return { ok: false, why: `${pid} is not a process id` }
+	if (!others(process.pid).some((s) => s.pid === pid)) {
+		return { ok: false, why: `pid ${pid} is not a guildhall server this machine announced` }
+	}
+	// Kill the supervisor instead when there is one, or it simply restarts the child.
+	const boss = supervisor(pid)
+	const target = boss?.pid ?? pid
+	try {
+		process.kill(target, 'SIGTERM')
+	} catch (e) {
+		return { ok: false, why: `could not stop pid ${target}: ${(e as Error).message}` }
+	}
+	return {
+		ok: true,
+		note: boss ? `stopped ${boss.what}, which was restarting it` : `stopped pid ${pid}`,
+	}
 }

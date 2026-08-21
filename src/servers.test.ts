@@ -10,10 +10,11 @@ import test from 'node:test'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
 
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-servers-'))
 
-import { announce, others, othersNote, withdraw } from './servers.ts'
+import { announce, others, othersNote, stop, withdraw } from './servers.ts'
 
 const DIR = path.join(process.env.GUILDHALL_CONFIG_DIR!, 'servers')
 
@@ -74,4 +75,62 @@ test('rubbish in the directory is ignored rather than crashing the room', () => 
 	fs.rmSync(path.join(DIR, 'notes.txt'))
 	fs.rmSync(path.join(DIR, 'abc.json'))
 	fs.rmSync(path.join(DIR, `${process.ppid}.json`))
+})
+
+test('stopping refuses any pid this registry did not announce', () => {
+	// The guard that keeps a stop button from being something larger: a menu bar app able
+	// to SIGTERM an arbitrary pid is a different kind of program, so the only pids
+	// accepted are ones guildhall itself wrote a file for.
+	//
+	// ONLY pids that cannot be signalled are used here, and that is the point. An earlier
+	// version passed `process.ppid` and pid 1. With the guard deliberately removed to
+	// check it was load-bearing, the test SIGTERMed its own parent shell — which is why
+	// the run produced no output at all, including the failure it was supposed to report.
+	// A test that verifies a safety check by tripping it has to be harmless when the check
+	// is gone.
+	//
+	// 999_999 is above the default `kern.maxproc`, so kill can only ever return ESRCH.
+	for (const pid of [999_999, 999_998]) {
+		const r = stop(pid)
+		assert.equal(r.ok, false, `stop(${pid}) was allowed`)
+		if (!r.ok) assert.match(r.why, /not a guildhall server/, `stop(${pid}) refused for the wrong reason`)
+	}
+	// 0 and negatives are refused by a SEPARATE gate, before the registry is consulted,
+	// and they are the dangerous ones: kill(0) signals this process group and kill(-1)
+	// signals everything the caller may signal. Asserting the distinct wording proves the
+	// second gate stopped them, not the registry check.
+	for (const pid of [0, -1, -999, 1.5, NaN]) {
+		const r = stop(pid)
+		assert.equal(r.ok, false, `stop(${pid}) was allowed`)
+		if (!r.ok) assert.match(r.why, /is not a process id/, `stop(${pid}) was refused by the wrong gate`)
+	}
+})
+
+test('an announced server really is stopped, so the refusals above are not refusing everything', async () => {
+	// Without this, `stop()` could return false unconditionally and every assertion above
+	// would still pass — a guard test that proves nothing.
+	//
+	// A DISPOSABLE child, never a real process: `sleep` exists to be killed, and nothing
+	// depends on it. Registering someone else's pid and then signalling it is how the
+	// previous version of this test killed the shell running it.
+	const child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' })
+	try {
+		await new Promise((r) => setTimeout(r, 50)) // let it exist before announcing it
+		announce(4321, '127.0.0.1', child.pid!)
+		assert.ok(
+			others().some((s) => s.pid === child.pid),
+			'an announced live process is not in the registry, so stop would refuse it',
+		)
+		const r = stop(child.pid!)
+		assert.equal(r.ok, true, `stop refused a server it had announced: ${r.ok ? '' : r.why}`)
+		// and it is actually gone — the claim is the process, not the return value
+		const died = await new Promise<boolean>((res) => {
+			child.once('exit', () => res(true))
+			setTimeout(() => res(false), 2000)
+		})
+		assert.ok(died, 'stop reported success but the process is still running')
+		withdraw(child.pid!)
+	} finally {
+		child.kill('SIGKILL')
+	}
 })

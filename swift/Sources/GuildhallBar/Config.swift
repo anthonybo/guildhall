@@ -168,6 +168,23 @@ struct Config {
 		return out.sorted { $0.port < $1.port }
 	}
 
+	/// Stop one of the servers in the registry, and return what guildhall said about it.
+	///
+	/// The pid is all this sends. Deciding WHAT to signal is deliberately on the other
+	/// side: a server started by `tools/serve.mjs` is restarted by it within a second, so
+	/// stopping the child does nothing visible and the right target is the watcher. That
+	/// logic, and the refusal to signal any pid the registry did not announce, live in
+	/// src/servers.ts — a menu bar app that can send SIGTERM to an arbitrary pid is a
+	/// much bigger thing than a stop button.
+	///
+	/// Returns guildhall's own sentence, which already says which process it stopped.
+	static func stopServer(_ pid: Int32) async -> String {
+		guard let out = try? await guildhallOutput(["--stop-server", String(pid)]) else {
+			return "Could not stop it — guildhall refused or is not reachable."
+		}
+		return out.trimmingCharacters(in: .whitespacesAndNewlines)
+	}
+
 	/// A port nothing is listening on, from `guildhall --pick-port`.
 	///
 	/// Deliberately NOT implemented here. Binding a socket in Swift to test a port is a

@@ -54,7 +54,7 @@ import { hasControlPass, setControlPass } from './controlauth.ts'
 import * as update from './update.ts'
 import { CMUX } from './data/cmux-bin.ts'
 import { pickPort } from './port.ts'
-import { announce, othersNote, withdraw } from './servers.ts'
+import { announce, others, othersNote, stop as stopServer, supervisor, withdraw } from './servers.ts'
 
 // the tier/needs colours a badge takes, passed in so screens.ts stays theme-free
 const LEVEL_LOOK = { needs: LOOK.needs.color, tierOf: (n: number) => tierOf(n).color }
@@ -162,7 +162,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port|servers|stop-server)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -181,6 +181,34 @@ if (process.argv.includes('--set-passcode')) {
  * Exits 1 with nothing on stdout if it cannot find one, so a caller can tell the
  * difference between "no answer" and a port number.
  */
+/**
+ * List the other guildhalls serving, as JSON, so the menu bar can offer to stop one.
+ *
+ * Includes whether each is SUPERVISED, because that changes what stopping it means: a
+ * dev-watcher child comes straight back, so the button has to say it will stop the
+ * watcher rather than silently doing something else.
+ */
+if (process.argv.includes('--servers')) {
+	console.log(JSON.stringify(others().map((s) => ({ ...s, supervisor: supervisor(s.pid) }))))
+	process.exit(0)
+}
+/**
+ * Stop one of them, by pid.
+ *
+ * Here rather than in Swift because it refuses any pid this registry did not announce,
+ * and that guard is the difference between a stop button and a menu bar app that can
+ * signal arbitrary processes. One implementation of the refusal, in the place that owns
+ * the registry.
+ */
+{
+	const i = process.argv.indexOf('--stop-server')
+	if (i > 0) {
+		const pid = Number(process.argv[i + 1])
+		const r = Number.isInteger(pid) ? stopServer(pid) : ({ ok: false, why: 'guildhall --stop-server <pid>' } as const)
+		console.log(r.ok ? r.note : r.why)
+		process.exit(r.ok ? 0 : 1)
+	}
+}
 if (process.argv.includes('--pick-port')) {
 	const host = cfgStore.load().host
 	const port = await pickPort(host)

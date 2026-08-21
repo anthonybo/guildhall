@@ -715,3 +715,32 @@ which is this repo's own stated reason for keeping the spelling word list short.
 Surfaced in all three places somebody might look: the headless startup log (the only
 thing a launchd service can say), the terminal's settings panel, and the menu bar's
 Settings page.
+
+### And the stop button's own test was the dangerous part
+
+**A test that verifies a safety check by tripping it has to be harmless when the check
+is gone.** `stop()` refuses any pid the registry did not announce. To prove that guard
+was load-bearing I removed it and re-ran — and got **no output at all**, not even the
+failure it should have reported.
+
+The reason: the test used `process.ppid` as a stand-in for a stoppable server. With the
+guard removed, `stop(process.ppid)` sent SIGTERM to its own parent shell — killing the
+process that would have printed the result. Twice, before it was understood.
+
+Realising that also exposed a real hole in the code, not just the test. `kill(0, sig)`
+signals **this process group** and `kill(-1, sig)` signals **every process the caller
+may signal**. `others()` only ever yields pids above zero, so the registry check already
+excluded them — but that is one gate, and it was the gate being deliberately removed.
+There is now a second, independent one: `pid <= 0` is refused before the registry is
+consulted. One comparison, against an unbounded failure.
+
+The test uses a disposable `/bin/sleep` child now, and asserts the process actually
+exited rather than trusting the return value. Both directions confirmed: removing the
+registry check gives "refused for the wrong reason", and making `stop` a no-op gives
+"stop reported success but the process is still running".
+
+**Also measured wrong on the way, and worth recording.** The note here claimed a
+dev-watcher child comes back "within a second". It does not — the watcher waits 2s, logs
+`server exited (0) — restarting in 2s`, then rebuilds, and the replacement bound about
+**9 seconds** later. A check at +8s reported the port free and the kill successful, which
+is precisely how this would have shipped as working.

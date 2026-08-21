@@ -13,6 +13,9 @@ struct Panel: View {
 	@ObservedObject var model: Model
 	@State private var showSettings = false
 	@State private var collapsed: Set<String> = []
+	/// Other guildhalls serving, refreshed each time the panel appears. A readdir plus a
+	/// kill(0) per entry, so checking is free; see src/servers.ts for why it is a registry.
+	@State private var otherServers: [(pid: Int32, port: Int)] = []
 
 	var body: some View {
 		// Settings are a PAGE, not a sheet.
@@ -49,6 +52,11 @@ struct Panel: View {
 			// A popover that opens instantly and costs one extra click is a better trade
 			// than one that swallows the click by taking three seconds to arrive.
 		}
+		// A separate modifier, NOT added to the onAppear above — that block carries its own
+		// warning about staying empty, and the reason is real. This is a readdir plus a
+		// kill(0) per entry: no window server, no activation, nothing that can delay the
+		// popover appearing.
+		.task { otherServers = Config.otherServers() }
 		.onDisappear {
 			model.start(open: false)
 			// Back to the list when the popover closes. SwiftUI keeps this view alive
@@ -224,6 +232,24 @@ struct Panel: View {
 
 	private var controls: some View {
 		VStack(alignment: .leading, spacing: 2) {
+			// A second guildhall serving, here on the main panel and not only behind the
+			// gear. It was in Settings first and the report was "why does the taskbar not
+			// show this anywhere" — which is right: a server you have forgotten is exactly
+			// the thing you will not go looking for. This is the surface that gets opened.
+			//
+			// Read from the registry directory, which is a readdir and a kill(0) per entry,
+			// so it costs nothing to check each time the panel appears. See src/servers.ts.
+			if !otherServers.isEmpty {
+				let which = otherServers.map { ":\($0.port)" }.joined(separator: ", ")
+				HStack(spacing: 6) {
+					Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
+					Text("Another guildhall is serving on \(which) — Settings can stop it")
+						.font(.system(size: 11))
+						.fixedSize(horizontal: false, vertical: true)
+				}
+				.foregroundStyle(.orange)
+				.padding(.horizontal, 12).padding(.vertical, 4)
+			}
 			MenuItem(title: model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
 				let starting = model.daemon == .stopped
 				model.act { starting ? await Daemon.start() : await Daemon.stop() }
