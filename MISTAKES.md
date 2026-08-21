@@ -576,3 +576,37 @@ scale, the OUTLINE has to change, not the contents.
 of machine on that desk, which is a fact about the desk and not a comparison with
 its neighbours — the gated version drew a room of nothing but Codex as a room of
 desktop monitors.
+
+### Fourth and fifth: a different machine, and then reading the question properly
+
+**A laptop instead of a monitor was legible and still wrong.** Having concluded that
+color was the problem and shape was the answer, I drew Codex desks with a laptop —
+narrow lid, wide deck — against the monitor's wide bezel on a thin neck. It reads
+clearly at desk scale. It also answers a question nobody asked: it says these two
+desks have different equipment, not which agent each desk belongs to. The request
+was "a logo, a clear indication of what each desk represents", three times, and I
+kept substituting cleverness with furniture for the plain thing being asked for.
+
+**What was actually wanted: the logos.** Pixel-art reductions of the two vendor
+marks, one per desk, in `src/logos.ts`, with the trademark position stated in
+NOTICE. The concern about using them was mine, was raised, and was the user's to
+decide — after which continuing to work around it was not caution, it was ignoring
+the answer.
+
+**Placement took three attempts, and each one lost signs. Worth not repeating:**
+
+| slot | what happened |
+|---|---|
+| gap column, seat row | A placed image draws OVER text, so the sign covered the status label. `block()` is the fix for that and only moved the problem — the label then had no free cell and vanished. Two existing tests caught it. |
+| gap column, one row below the seat | Labels never go there, so the tests passed. But characters WALK that band: two of eleven signs were behind somebody in the very first frame rendered. Passing tests, visibly broken picture. |
+| gap column, monitor row | Inside the pod and blocked, so neither a label nor a wandering character can reach it. The only reliable one. |
+
+The monitor-row slot was already taken by the "needs you" placard, which moved down
+into the level badge's place rather than being dropped — what a session is waiting
+for is louder than its level, and the level is in the table anyway.
+
+**The general lesson, which cost five attempts.** Every one of them was argued on its
+own merits and each was locally reasonable. What none of them did was check the
+request: a logo. When a specific thing is asked for three times, the useful question
+is not "what would read best here" but "why am I not building the thing that was
+asked for".

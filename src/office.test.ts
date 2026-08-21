@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Canvas } from './canvas.ts'
-import { Office } from './office.ts'
+import { Office, TILE } from './office.ts'
 import type { State } from './data.ts'
 import { desks, posOf, room, seatOf, seeded, session } from './office/fixtures.ts'
 
@@ -433,4 +433,49 @@ test('the harness mark sits above the seat, where the occupant cannot cover it',
 		office.monitors.some((m) => m.lit && m.agent === 'codex'),
 		'a working Codex desk lost its mark',
 	)
+})
+
+test('every desk carries its harness logo, in a slot nothing can cover', () => {
+	// What was actually asked for: "a clear indication of what each desk represents".
+	// Four earlier attempts failed — a coloured mug, a coloured cable, a tinted badge
+	// frame, and a differently shaped machine. Three used colour, which is saturated in
+	// this room, and the fourth said "different equipment" rather than "different agent".
+	const list = [
+		{ ...session('a', 'alpha', 'working'), agent: 'codex' as const },
+		session('b', 'alpha', 'working'),
+		session('c', 'alpha', 'done'),
+	]
+	const { cv, office } = room(list)
+	office.draw(cv, list)
+
+	// One per occupied desk, and BOTH harnesses named. A desk with no sign does not
+	// answer the question, which is how the first version of this was unreadable.
+	assert.equal(office.logos.length, 3, `${office.logos.length} signs for 3 desks`)
+	assert.deepEqual(
+		office.logos.map((l) => l.agent).sort(),
+		['claude', 'claude', 'codex'],
+		'a desk was left without a sign, or Claude Code was left as the absence of one',
+	)
+
+	// The slot is the monitor row of the gap column: inside the pod, so a wandering
+	// character cannot stand on it, and clear of the seat row where labels start. Both
+	// of those were tried and both lost signs — a label was overdrawn by the image, and
+	// two of eleven signs ended up behind somebody in the aisle.
+	for (const l of office.logos) {
+		const pod = office.pods.find((p) => l.y === p.monitorRow * TILE)
+		assert.ok(pod, `a sign at y=${l.y} is not on any pod monitor row`)
+	}
+})
+
+test('a session waiting on you keeps its placard, and still shows its harness', () => {
+	// The placard used to sit in the slot the sign now occupies, and both were drawn.
+	// It moved down into the level badge's place rather than being dropped: what a
+	// session is waiting for is louder than its level, and the level is in the table.
+	const list = [{ ...session('a', 'alpha', 'needs'), agent: 'codex' as const }]
+	const { cv, office } = room(list)
+	office.draw(cv, list)
+	assert.equal(office.badges.filter((b) => b.asking).length, 1, 'the needs-you placard was lost')
+	assert.equal(office.badges.length, 1, 'a level badge and a placard are both drawn for one desk')
+	// and the harness sign is still there, which is the whole point of moving the placard
+	assert.deepEqual(office.logos.map((l) => l.agent), ['codex'], 'a session that needs you lost its harness sign')
 })

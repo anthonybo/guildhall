@@ -12,7 +12,8 @@
 import type { Canvas } from './canvas.ts'
 import type { Grid } from './characters.ts'
 import { frameOf } from './characters.ts'
-import { badgeFor, monitorFor } from './screens.ts'
+import { badgeFor, harnessColor, monitorFor } from './screens.ts'
+import { logo } from './logos.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import { LOOK, tierOf, type RGB } from './theme.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, TILE, type Placed } from './office/model.ts'
@@ -26,6 +27,7 @@ export type Scene = {
 	plates: { x: number; y: number; proj: string; colour: RGB }[]
 	monitors: { x: number; y: number; lit: boolean; seed: number; kind: RGB extends never ? never : any; agent?: string }[]
 	badges: { x: number; y: number; level: number; asking: boolean }[]
+	logos: { x: number; y: number; agent: string }[]
 	props: { kind: keyof typeof PROP_SIZE; x: number; y: number }[]
 }
 
@@ -194,6 +196,9 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 	}
 	for (const b of scene.badges) {
 		stamp(badgeFor(b, { needs: LOOK.needs.color, tierOf: (n) => tierOf(n).color }), b.x * sx, b.y * py, TILE * sx, TILE * py)
+	}
+	for (const l of scene.logos) {
+		stamp(logo(l.agent, harnessColor(l.agent)), l.x * sx, l.y * py, TILE * sx, TILE * py)
 	}
 	for (const p of placed) {
 		const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)

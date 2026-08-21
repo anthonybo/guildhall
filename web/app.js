@@ -1434,6 +1434,61 @@ function prop(kind) {
   return g;
 }
 
+// src/logos.ts
+var W2 = 16;
+var H2 = 16;
+var CLAUDE = [
+  ".....#.....",
+  ".....#.....",
+  ".#...#...#.",
+  "..#..#..#..",
+  "...#.#.#...",
+  "###########",
+  "...#.#.#...",
+  "..#..#..#..",
+  ".#...#...#.",
+  ".....#.....",
+  ".....#....."
+];
+var CODEX = [
+  "...#####...",
+  "..#.....#..",
+  ".#..###..#.",
+  "#..#...#..#",
+  "#.#.....#.#",
+  "#.#.....#.#",
+  "#.#.....#.#",
+  "#..#...#..#",
+  ".#..###..#.",
+  "..#.....#..",
+  "...#####..."
+];
+var ART = { claude: CLAUDE, codex: CODEX };
+var PLATE = [40, 42, 54];
+var PLATE_LIP = [58, 60, 76];
+var cache3 = /* @__PURE__ */ new Map();
+var hasLogo = (agent) => !!agent && agent in ART;
+function logo(agent, tint) {
+  const key = `${agent}:${tint.join(",")}`;
+  const hit = cache3.get(key);
+  if (hit) return hit;
+  const grid = Array.from({ length: H2 }, () => new Array(W2).fill(null));
+  const put = (x, y, c) => {
+    if (x >= 0 && y >= 0 && x < W2 && y < H2) grid[y][x] = c;
+  };
+  const box = (x, y, w, h, c) => {
+    for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) put(x + i, y + j, c);
+  };
+  box(1, 1, 14, 14, PLATE);
+  box(1, 1, 14, 1, PLATE_LIP);
+  const art = ART[agent];
+  if (!art) return { w: W2, h: H2, grid };
+  art.forEach((row, y) => [...row].forEach((c, x) => c === "#" && put(2 + x, 3 + y, tint)));
+  const g = { w: W2, h: H2, grid };
+  cache3.set(key, g);
+  return g;
+}
+
 // src/office/model.ts
 var TILE = 4;
 var CHAR_W = TILE;
@@ -1741,6 +1796,8 @@ var RoomBase = class {
   plates = [];
   /** level badges, in the gap column beside each occupied desk */
   badges = [];
+  /** harness logos, one slot below the level badge in the same gap column */
+  logos = [];
   /** static furniture image placements, in canvas pixels */
   props = [];
   /** cell spans covered by an image, per cell row. Kitty draws images over text,
@@ -2409,6 +2466,7 @@ var Office = class extends SimBase {
     };
     this.monitors = [];
     this.badges = [];
+    this.logos = [];
     this.plates = [];
     const lit = /* @__PURE__ */ new Map();
     const harness = /* @__PURE__ */ new Map();
@@ -2443,12 +2501,14 @@ var Office = class extends SimBase {
           cv2.tint(c * TILE - 1 + (head + span - 2) % span, y, 1, 1, tint, 0.25);
         }
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
-        if (lvl) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false });
+        const wants = asking.has(`${c},${pod.seatRow}`);
+        if (lvl || wants) {
+          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: wants });
           block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2);
         }
-        if (asking.has(`${c},${pod.seatRow}`)) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true });
+        const who = harness.get(`${c},${pod.seatRow}`) ?? "claude";
+        if (lvl && hasLogo(who)) {
+          this.logos.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, agent: who });
           block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2);
         }
       }
@@ -2633,7 +2693,7 @@ var sheets = [];
 function setSheets(imgs) {
   sheets.length = 0;
   sheets.push(...imgs);
-  cache3.clear();
+  cache4.clear();
 }
 function extract(img, rowIdx, frame2, flip) {
   const x0 = frame2 * FRAME_W;
@@ -2681,7 +2741,7 @@ function hueRotate(g, deg) {
     )
   };
 }
-var cache3 = /* @__PURE__ */ new Map();
+var cache4 = /* @__PURE__ */ new Map();
 function pinBadge(g, colour) {
   const grid = g.grid.map((row) => [...row]);
   const top = Math.round(g.h * 0.58);
@@ -2706,7 +2766,7 @@ var BLANK = { w: FRAME_W, h: FRAME_H, grid: Array.from({ length: FRAME_H }, () =
 function frameOf(palette, hueShift, facing, pose, step2, badge2) {
   if (!sheets.length) return BLANK;
   const key = `${palette}:${hueShift}:${facing}:${pose}:${step2}:${badge2?.join("") ?? ""}`;
-  const hit = cache3.get(key);
+  const hit = cache4.get(key);
   if (hit) return hit;
   const sheet = sheets[palette % sheets.length];
   const cycle = POSE_FRAMES[pose];
@@ -2714,7 +2774,7 @@ function frameOf(palette, hueShift, facing, pose, step2, badge2) {
   const rowIdx = ROWS.indexOf(facing === "left" ? "right" : facing);
   let g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame2, facing === "left"), hueShift);
   if (badge2) g = pinBadge(g, badge2);
-  cache3.set(key, g);
+  cache4.set(key, g);
   return g;
 }
 
@@ -3062,6 +3122,9 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
   }
   for (const b of scene.badges) {
     stamp(badgeFor(b, { needs: LOOK.needs.color, tierOf: (n) => tierOf(n).color }), b.x * sx, b.y * py, TILE * sx, TILE * py);
+  }
+  for (const l of scene.logos) {
+    stamp(logo(l.agent, harnessColor(l.agent)), l.x * sx, l.y * py, TILE * sx, TILE * py);
   }
   for (const p of placed) {
     const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color);

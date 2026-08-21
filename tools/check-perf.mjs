@@ -207,7 +207,7 @@ checks.push({
 			const cv = new Canvas(104 * 4, 48 * 4)
 			cv.clear([40, 38, 52])
 			off.draw(cv, sessions)
-			const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] }
+			const scene = { props: off.props, monitors: off.monitors, badges: off.badges, logos: off.logos, plates: [] }
 			for (let i = 0; i < 20; i++) renderRoom(cv, scene, [], 4, 8, 2)
 			const c = process.cpuUsage(); const N = 60
 			for (let i = 0; i < N; i++) renderRoom(cv, scene, [], 4, 8, i % 4)

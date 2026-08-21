@@ -25,6 +25,7 @@ import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'
 import { TINT } from './screens.ts'
+import { hasLogo } from './logos.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, SCREEN_HOLD, SIT_SINK, TILE, type Character, type Placed } from './office/model.ts'
 import { SimBase } from './office/sim.ts'
 
@@ -79,6 +80,7 @@ export class Office extends SimBase {
 		}
 		this.monitors = []
 		this.badges = []
+		this.logos = []
 		this.plates = []
 		const lit = new Map<string, Session['toolKind']>()
 		// a harness NAME, not Session['agent'] — the room marks Claude Code explicitly,
@@ -159,16 +161,49 @@ export class Office extends SimBase {
 					cv.tint(c * TILE - 1 + ((head + span - 1) % span), y, 1, 1, tint, 0.55)
 					cv.tint(c * TILE - 1 + ((head + span - 2) % span), y, 1, 1, tint, 0.25)
 				}
-				// beside the desk, in the gap column, where nobody sits
+				/**
+				 * Beside the desk, in the gap column, where nobody sits.
+				 *
+				 * A session waiting on an answer shows the placard HERE, in place of its
+				 * level, rather than in the slot above. Both used to be drawn — level badge
+				 * at the worktop row, placard at the monitor row — which left no room in
+				 * this column for the harness sign, and the sign is the thing that answers
+				 * "what does this desk represent". The level is still in the table; what a
+				 * session is waiting for is the louder fact and it keeps the brighter card.
+				 */
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
-				if (lvl) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: false })
+				const wants = asking.has(`${c},${pod.seatRow}`)
+				if (lvl || wants) {
+					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: wants })
 					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
 				}
-				// a session waiting on an answer gets a placard beside its desk, since
-				// the registry never reports a plain question as "waiting"
-				if (asking.has(`${c},${pod.seatRow}`)) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, level: 0, asking: true })
+				/**
+				 * The harness logo, in the gap column one slot below the level badge.
+				 *
+				 * The bottom right of the desk space, which is where a cubicle would carry a
+				 * sign. It is in the aisle where nobody sits, so nothing is ever drawn over
+				 * it — the reason four earlier attempts failed is that three used colour, in
+				 * a room already saturated with it, and the fourth sat on the worktop, which
+				 * the occupant covers while they work.
+				 *
+				 * BOTH harnesses get one. "What each desk represents" is the question, and a
+				 * desk with no sign does not answer it — that was the very first version of
+				 * this and it was unreadable for exactly that reason.
+				 *
+				 * THE MONITOR ROW of the gap column, which took three tries to arrive at.
+				 * Level with the seat is where a status label starts, and a placed image
+				 * draws OVER text, so a sign there covered "⌘5 Make statusbar responsive…";
+				 * `block()` is the fix for that and simply moved the problem, since the label
+				 * then had no free cell and vanished. Two tests caught it. One row below the
+				 * seat is the clear band, which labels never use — but characters WALK there,
+				 * and two of eleven signs were behind somebody in the first frame rendered.
+				 *
+				 * This slot is inside the pod and blocked, so neither a label nor a wandering
+				 * character can reach it. It is the only one of the three that is reliable.
+				 */
+				const who = harness.get(`${c},${pod.seatRow}`) ?? 'claude'
+				if (lvl && hasLogo(who)) {
+					this.logos.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, agent: who })
 					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
 				}
 			}

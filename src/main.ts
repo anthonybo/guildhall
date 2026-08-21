@@ -37,7 +37,8 @@ import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, shrink } from './characters.ts'
 import { loadSheets } from './sheets.ts'
-import { badgeFor, badgeKey, monitorFor, monitorKey } from './screens.ts'
+import { badgeFor, badgeKey, harnessColor, monitorFor, monitorKey } from './screens.ts'
+import { logo, logoKey } from './logos.ts'
 // the tier/needs colours the badge takes, passed in so screens.ts stays theme-free
 const LEVEL_LOOK = { needs: LOOK.needs.color, tierOf: (n: number) => tierOf(n).color }
 import { C, LOOK, tierOf } from './theme.ts'
@@ -789,8 +790,8 @@ function draw() {
 				cv.blit(pr.x, pr.y, shrink(prop(pr.kind), size.w * TILE, size.h * TILE))
 			}
 			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitorFor(m, screenFrame), CHAR_W, CHAR_W))
-			for (const b of office.badges)
-				cv.blit(b.x, b.y, shrink(badgeFor(b, LEVEL_LOOK), TILE, TILE))
+			for (const b of office.badges) cv.blit(b.x, b.y, shrink(badgeFor(b, LEVEL_LOOK), TILE, TILE))
+			for (const l of office.logos) cv.blit(l.x, l.y, shrink(logo(l.agent, harnessColor(l.agent)), TILE, TILE))
 		}
 	}
 
@@ -936,6 +937,18 @@ function drawMonitors() {
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		out += cursorTo((b.y >> 1) + 2, b.x + 1) + place(id, TILE, TILE / 2, pid++, 2)
+	}
+	// The harness sign beside each desk. Keyed by `logoKey` rather than by a string
+	// spelled out here, for the reason the desks already learned the hard way: two
+	// pictures that differ hashing to one key means the second is served the first's
+	// image, and the mark silently disappears.
+	for (const l of office.logos) {
+		const { id, fresh } = idFor(logoKey(l.agent))
+		if (fresh) {
+			const up = upscale(logo(l.agent, harnessColor(l.agent)).grid, 3)
+			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
+		}
+		out += cursorTo((l.y >> 1) + 2, l.x + 1) + place(id, TILE, TILE / 2, pid++, 2)
 	}
 	return pre.join('') + out
 }

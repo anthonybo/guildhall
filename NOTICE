@@ -8,3 +8,13 @@ impression.
 Character sprites in assets/characters/ are from pixel-agents
 (https://github.com/pixel-agents-hq/pixel-agents), used under the MIT License.
 Its notice is preserved in assets/characters/LICENSE-pixel-agents.txt.
+
+The harness marks in src/logos.ts are pixel-art reductions of the Anthropic and
+OpenAI logos, drawn for this project rather than copied — no vendor artwork is
+redistributed here. They identify which agent a session belongs to, which is what
+those marks are for. guildhall is not affiliated with, sponsored by, or endorsed by
+Anthropic or OpenAI, and their trademarks remain their own.
+
+At eleven pixels across a mark cannot be faithful, and brand guidelines generally
+ask that logos not be altered. Anyone redistributing or rebranding this should treat
+those two sprites as the part to review.
