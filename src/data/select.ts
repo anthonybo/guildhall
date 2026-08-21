@@ -34,3 +34,15 @@ export function order(list: Session[]) {
 		return a.id.localeCompare(b.id)
 	})
 }
+
+/**
+ * Is there more than one harness in this list?
+ *
+ * Here rather than in table.ts because the ROOM asks it too, and it is a question
+ * about a list of sessions rather than about a table. The rule it serves: a mark that
+ * is identical on every row, on every desk, forever, is decoration — it costs a
+ * column of the project name in the table and a hue on every monitor in the room, and
+ * tells you nothing. Both surfaces show the harness only once there is a harness to
+ * tell apart.
+ */
+export const mixedHarness = (list: Session[]) => new Set(list.map((s) => s.agent ?? 'claude')).size > 1

@@ -33,7 +33,7 @@ export { RANK } from './data/types.ts'
 export { levelFor, xpForLevel, xpOf } from './data/score.ts'
 export { cut, firstSentence } from './data/describe.ts'
 export { transcriptIndex } from './data/transcript.ts'
-export { needsAttention, order } from './data/select.ts'
+export { mixedHarness, needsAttention, order } from './data/select.ts'
 export { liveSessions } from './data/registry.ts'
 
 /** Directories that hold projects rather than being one. */

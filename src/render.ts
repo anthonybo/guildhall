@@ -12,7 +12,7 @@
 import type { Canvas } from './canvas.ts'
 import type { Grid } from './characters.ts'
 import { frameOf } from './characters.ts'
-import { badge, monitor } from './screens.ts'
+import { badge, monitorFor } from './screens.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import { LOOK, tierOf, type RGB } from './theme.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, PLATE_COLS, PLATE_ROWS, TILE, type Placed } from './office/model.ts'
@@ -183,7 +183,7 @@ export function renderRoom(cv: Canvas, scene: Scene, placed: Placed[], sx: numbe
 		stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py)
 	}
 	for (const m of scene.monitors) {
-		stamp(monitor(m.lit, frame, m.seed, m.kind, m.agent), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy)
+		stamp(monitorFor(m, frame), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy)
 	}
 	// Nameplates. Authored at the box size like everything else here, so `choose`
 	// sees the real pixels and picks a font and scale that suit them — a caller

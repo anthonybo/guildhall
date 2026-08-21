@@ -390,3 +390,27 @@ test('a label for a session with no tab and no harness gets no prefix', () => {
 	assert.doesNotMatch(screen, /cx /, 'labelled a Claude session as a second harness')
 	assert.doesNotMatch(screen, /⌘/, 'offered a tab that does not exist')
 })
+
+test('the room marks both harnesses when there are two, and neither when there is one', () => {
+	// The gate: `agent` is only put on a desk when the list actually holds more than one
+	// harness. That is what keeps an all-Claude room — everybody today — pixel-identical
+	// to before, and it is checked here rather than only in screens.ts because this is
+	// where the decision is made.
+	const mixed = [session('a', 'alpha', 'working'), session('b', 'alpha', 'done'), { ...session('c', 'alpha', 'done'), agent: 'codex' as const }]
+	const { cv, office } = room(mixed)
+	office.draw(cv, mixed)
+	const marks = office.monitors.filter((m) => m.agent).map((m) => m.agent).sort()
+	// One per occupied desk, and Claude Code named explicitly rather than left blank —
+	// "the desks without a mark" is not something anybody can pick out by looking.
+	assert.deepEqual(marks, ['claude', 'claude', 'codex'], `the room marked ${JSON.stringify(marks)}`)
+
+	// And with one harness, nothing is marked at all.
+	const alone = [session('a', 'alpha', 'working'), session('b', 'alpha', 'done')]
+	const solo = room(alone)
+	solo.office.draw(solo.cv, alone)
+	assert.equal(
+		solo.office.monitors.filter((m) => m.agent).length,
+		0,
+		'a single-harness room marked its desks, which changes every existing room and every doc image',
+	)
+})

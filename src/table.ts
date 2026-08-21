@@ -10,7 +10,7 @@
 import { C, LOOK, R, ago, bg, bold, clip, fg, gauge, levelGlyph, padL, padR, tierOf, tokens, width, type RGB } from './theme.ts'
 import { BUILD } from './version.ts'
 import { available } from './update.ts'
-import { cut, needsAttention, order, type Session } from './data.ts'
+import { cut, mixedHarness, needsAttention, order, type Session } from './data.ts'
 import { harnessMark } from './screens.ts'
 
 export type Row = { s: Session; line: string; extra?: string[] }
@@ -60,17 +60,6 @@ const W_LVL = 2
  * draws; see the note there for why they are glyphs and not the vendors' logos.
  */
 const W_AGENT = 1
-
-/**
- * Is there more than one harness in this list?
- *
- * The column only appears when it says something. A cell that is identical on every row
- * is the inverse of the gutter rule three columns to the left — that one is blank on
- * nine rows in ten so it is loud when it fills; this one would be the same glyph on
- * every row forever for anybody running Claude Code alone, which is a column of pure
- * decoration and a character of width taken from the project name.
- */
-export const mixedHarness = (list: Session[]) => new Set(list.map((s) => s.agent ?? 'claude')).size > 1
 
 /**
  * Identity is never dropped.

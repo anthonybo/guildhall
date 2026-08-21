@@ -31,13 +31,13 @@ import {
 	transmit,
 	upscale,
 } from './kitty.ts'
-import { collect as collectReal, needsAttention, order, type Session } from './data.ts'
+import { collect as collectReal, mixedHarness, needsAttention, order, type Session } from './data.ts'
 import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
 import { frameOf, shrink } from './characters.ts'
 import { loadSheets } from './sheets.ts'
-import { badge, monitor } from './screens.ts'
+import { badge, monitorFor, monitorKey } from './screens.ts'
 import { C, LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
@@ -786,7 +786,7 @@ function draw() {
 				const size = PROP_SIZE[pr.kind]
 				cv.blit(pr.x, pr.y, shrink(prop(pr.kind), size.w * TILE, size.h * TILE))
 			}
-			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitor(m.lit, screenFrame, m.seed, m.kind), CHAR_W, CHAR_W))
+			for (const m of office.monitors) cv.blit(m.x, m.y, shrink(monitorFor(m, screenFrame), CHAR_W, CHAR_W))
 			for (const b of office.badges)
 				cv.blit(b.x, b.y, shrink(badge(b.level, b.asking ? LOOK.needs.color : tierOf(b.level).color, b.asking ? '?' : ''), TILE, TILE))
 		}
@@ -798,7 +798,7 @@ function draw() {
 		const rowsOut = T.rows(list, cols, selectedId ?? undefined, (p) => office.colourOf(p), expanded)
 		const sel = rowsOut.find((r) => r.s.id === selectedId)?.s
 		const det = T.detail(sel, cols)
-		body.push(T.header(cols, T.mixedHarness(sessions)))
+		body.push(T.header(cols, mixedHarness(sessions)))
 		// An expanded row brings its detail with it, and the whole thing still has to
 		// fit the space the table was given. Count the lines WE add — `body` already
 		// holds the whole room, so budgeting against its length skipped every row.
@@ -916,9 +916,11 @@ function drawMonitors() {
 	let out = ''
 	let pid = 500
 	for (const m of office.monitors) {
-		const { id, fresh } = idFor(`mon:${m.lit ? 'on' : 'off'}:${m.lit ? screenFrame % 4 : 0}:${m.seed % 8}:${m.kind}`)
+		// Key and picture from the same descriptor, so they cannot describe different
+		// desks — see the note on `Desk` for the version of this that shipped.
+		const { id, fresh } = idFor(monitorKey(m, screenFrame))
 		if (fresh) {
-			const up = upscale(monitor(m.lit, screenFrame, m.seed, m.kind).grid, 3)
+			const up = upscale(monitorFor(m, screenFrame).grid, 3)
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		// the first workstation is the sentinel; if the store was wiped it answers

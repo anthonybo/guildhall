@@ -163,6 +163,7 @@ function order(list) {
     return a.id.localeCompare(b.id);
   });
 }
+var mixedHarness = (list) => new Set(list.map((s) => s.agent ?? "claude")).size > 1;
 
 // src/contrast.ts
 var lin = (c) => c / 255 <= 0.03928 ? c / 255 / 12.92 : ((c / 255 + 0.055) / 1.055) ** 2.4;
@@ -717,6 +718,11 @@ var busy = () => {
 // src/screens.ts
 var W = 16;
 var H = 24;
+var mix2 = (a, b, k) => [
+  Math.round(a[0] + (b[0] - a[0]) * k),
+  Math.round(a[1] + (b[1] - a[1]) * k),
+  Math.round(a[2] + (b[2] - a[2]) * k)
+];
 var CASE = [46, 48, 62];
 var CASE_LIT = [72, 76, 96];
 var BASE = [38, 40, 52];
@@ -761,6 +767,7 @@ var MARK = {
   codex: { glyph: "\u25C6", color: HARNESS.codex, name: "Codex \u2014 queued messages, no terminal tab" }
 };
 var harnessMark = (agent) => MARK[agent ?? "claude"] ?? { glyph: "\xB7", color: HARNESS.claude, name: agent ?? "unknown" };
+var monitorFor = (d, frame2) => monitor(d.lit, frame2, d.seed, d.kind, d.agent);
 function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   const key = `${lit ? 1 : 0}:${lit ? frame2 % 4 : 0}:${seed % 8}:${kind}:${agent ?? ""}`;
   const hit = cache.get(key);
@@ -784,8 +791,10 @@ function monitor(lit, frame2, seed = 0, kind = "think", agent) {
   const mug = harnessColor(agent);
   box(13, 18, 3, 3, mug);
   put(12, 19, mug);
+  if (agent) box(12, 22, 4, 1, mug);
   box(0, 19, 3, 2, [236, 234, 226]);
-  box(1, 1, 14, 11, lit ? CASE_LIT : CASE);
+  const bezel = agent ? mix2(lit ? CASE_LIT : CASE, harnessColor(agent), 0.4) : lit ? CASE_LIT : CASE;
+  box(1, 1, 14, 11, bezel);
   box(2, 2, 12, 9, DARK);
   if (lit) {
     const lens = [9, 6, 11, 7];
@@ -2397,6 +2406,7 @@ var Office = class extends SimBase {
     this.plates = [];
     const lit = /* @__PURE__ */ new Map();
     const harness = /* @__PURE__ */ new Map();
+    const mixed = mixedHarness(sessions3);
     const levels = /* @__PURE__ */ new Map();
     const asking = /* @__PURE__ */ new Set();
     for (const sp of this.spots.values()) {
@@ -2405,7 +2415,7 @@ var Office = class extends SimBase {
       if (s) levels.set(`${sp.col},${sp.row}`, s.level);
       if (s && s.state === "needs") asking.add(`${sp.col},${sp.row}`);
       if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind);
-      if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent);
+      if (s && mixed) harness.set(`${sp.col},${sp.row}`, s.agent ?? "claude");
     }
     for (const pod of this.pods)
       for (let c = pod.c0; c <= pod.c1; c += 2) {
@@ -3039,7 +3049,7 @@ function renderRoom(cv2, scene, placed, sx, sy, frame2 = 2) {
     stamp(prop(pr.kind), pr.x * sx, pr.y * py, size.w * TILE * sx, size.h * TILE * py);
   }
   for (const m of scene.monitors) {
-    stamp(monitor(m.lit, frame2, m.seed, m.kind, m.agent), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
+    stamp(monitorFor(m, frame2), m.x * sx, m.y * py, MON_COLS * sx, MON_ROWS * sy);
   }
   for (const p of scene.plates) {
     const pick2 = choose(p.proj, PLATE_COLS * sx, PLATE_ROWS * sy);

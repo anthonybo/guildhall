@@ -12,6 +12,13 @@ import type { Grid } from './characters.ts'
 const W = 16
 const H = 24 // screen on top, desk surface with keyboard and mug below
 
+/** Blend two colours. `k` is how far from `a` toward `b`. */
+const mix = (a: RGB, b: RGB, k: number): RGB => [
+	Math.round(a[0] + (b[0] - a[0]) * k),
+	Math.round(a[1] + (b[1] - a[1]) * k),
+	Math.round(a[2] + (b[2] - a[2]) * k),
+]
+
 const CASE: RGB = [46, 48, 62]
 const CASE_LIT: RGB = [72, 76, 96]
 const BASE: RGB = [38, 40, 52]
@@ -114,6 +121,40 @@ const MARK: Record<string, Harness> = {
  *  guessing wrong here is worse than admitting the mark is not known. */
 export const harnessMark = (agent?: string): Harness => MARK[agent ?? 'claude'] ?? { glyph: '·', color: HARNESS.claude!, name: agent ?? 'unknown' }
 
+/**
+ * One desk's worth of drawing inputs.
+ *
+ * This type and the two helpers under it exist because of a real, shipped failure.
+ * `monitor()` takes five positional arguments and had THREE call sites — the
+ * terminal's half-block path, the terminal's image path, and the compositor the
+ * browser and the docs share. When `agent` was added, only the compositor was
+ * updated, so the harness mark appeared in the browser and never once in the
+ * terminal. The room was reported as having "no logo at the desks anywhere", and it
+ * was right: in the terminal there was none.
+ *
+ * Worse, the image path's cache key was assembled by hand from the same five values
+ * and also omitted `agent`, so even once the draw call was fixed two desks differing
+ * only by harness would hash alike and the second would be served the first's
+ * picture.
+ *
+ * Passing the descriptor means a new field reaches the drawing and the key together
+ * or not at all.
+ */
+export type Desk = { lit: boolean; seed: number; kind: Kind; agent?: string }
+
+/** Draw a desk from its descriptor. Every caller should use this, not `monitor`. */
+export const monitorFor = (d: Desk, frame: number): Grid => monitor(d.lit, frame, d.seed, d.kind, d.agent)
+
+/**
+ * The cache key for that exact picture.
+ *
+ * Derived from the same descriptor as the drawing, so the two cannot disagree. An
+ * unlit screen is static, so its frame is pinned to 0 rather than churning a new
+ * image every tick for a desk nobody is at.
+ */
+export const monitorKey = (d: Desk, frame: number): string =>
+	`mon:${d.lit ? 'on' : 'off'}:${d.lit ? frame % 4 : 0}:${d.seed % 8}:${d.kind}:${d.agent ?? ''}`
+
 export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'think', agent?: string): Grid {
 	const key = `${lit ? 1 : 0}:${lit ? frame % 4 : 0}:${seed % 8}:${kind}:${agent ?? ''}`
 	const hit = cache.get(key)
@@ -142,10 +183,27 @@ export function monitor(lit: boolean, frame: number, seed = 0, kind: Kind = 'thi
 	const mug = harnessColor(agent)
 	box(13, 18, 3, 3, mug)
 	put(12, 19, mug)
+	// A cable in the same colour, running off the back of the desk.
+	//
+	// The mug alone was not findable. It is ten pixels at the edge of the worktop with
+	// a bright level badge immediately beside it, and the report was simply "there is
+	// no logo at the desks anywhere" — from somebody who knew to look for one. This
+	// adds a second, longer run of the same colour on a different axis, which is what
+	// makes it catch the eye from across the room rather than only under inspection.
+	if (agent) box(12, 22, 4, 1, mug)
 	// a small stack of paper where the badge used to sit
 	box(0, 19, 3, 2, [236, 234, 226])
-	// bezel
-	box(1, 1, 14, 11, lit ? CASE_LIT : CASE)
+	// bezel — tinted toward the harness colour when there is a harness to tell apart
+	//
+	// This is the channel that actually reads at a glance, because it is the largest
+	// thing on a desk. Hue carries the harness and BRIGHTNESS still carries lit-ness,
+	// so the two facts stack instead of competing: a dark coral frame is an idle Claude
+	// desk, a bright teal one is a Codex desk mid-turn.
+	//
+	// `agent` is only set when the room holds more than one harness (see office.ts), so
+	// a room of nothing but Claude Code draws exactly the frame it always has.
+	const bezel = agent ? mix(lit ? CASE_LIT : CASE, harnessColor(agent), 0.4) : lit ? CASE_LIT : CASE
+	box(1, 1, 14, 11, bezel)
 	box(2, 2, 12, 9, DARK)
 
 	if (lit) {

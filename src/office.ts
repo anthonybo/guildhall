@@ -21,6 +21,9 @@
 import { C, LOOK, ROOFS } from './theme.ts'
 import { RANK, type Session } from './data/types.ts'
 import { cut } from './data/describe.ts'
+// from data/select.ts rather than data.ts: the room has no business pulling in the
+// whole collector to ask one question about a list it was handed
+import { mixedHarness } from './data/select.ts'
 import { Canvas } from './canvas.ts'
 import type { Pose } from './characters.ts'
 import { PROP_SIZE } from './props.ts'
@@ -81,7 +84,10 @@ export class Office extends SimBase {
 		this.badges = []
 		this.plates = []
 		const lit = new Map<string, Session['toolKind']>()
-		const harness = new Map<string, Session['agent']>()
+		// a harness NAME, not Session['agent'] — the room marks Claude Code explicitly,
+		// and the session type deliberately omits the field for it
+		const harness = new Map<string, string>()
+		const mixed = mixedHarness(sessions)
 		const levels = new Map<string, number>()
 		const asking = new Set<string>()
 		for (const sp of this.spots.values()) {
@@ -93,9 +99,15 @@ export class Office extends SimBase {
 			// blinked off in every pause between turns. Hold the light briefly after,
 			// which is what a machine someone is working at actually looks like.
 			if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind)
-			// Which harness owns this desk, whether or not its screen is lit: the mug is
-			// there when nobody is working, and that is the point of putting it on the mug.
-			if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent)
+			// Which harness owns this desk, whether or not its screen is lit: the mark is
+			// there when nobody is working, which is the point of putting it on furniture.
+			//
+			// Set for BOTH harnesses, and only when the room actually holds more than one.
+			// Two things follow from that. A room of nothing but Claude Code looks exactly
+			// as it always has — no tinted monitors, no doc images churning. And when
+			// there is a mix, Claude Code gets a mark of its own rather than being "the
+			// desks without one", which is not something you can pick out by looking.
+			if (s && mixed) harness.set(`${sp.col},${sp.row}`, s.agent ?? 'claude')
 		}
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)

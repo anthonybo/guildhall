@@ -23,7 +23,7 @@ import { loadSheets } from '../src/sheets.ts'
 import type { RGB } from '../src/theme.ts'
 import { encodePNG } from '../src/kitty.ts'
 import * as T from '../src/table.ts'
-import { order } from '../src/data.ts'
+import { mixedHarness, order } from '../src/data.ts'
 
 // 12/24, matching a real terminal's cell rather than the smallest one that works.
 // This only sets the raster's resolution — the SVG still displays at CW x LH — and
@@ -68,7 +68,7 @@ const { rgba: raster, w: W, h: H } = renderRoom(cv, office, placed, SX, SY)
 const png = encodePNG(raster, W, H)
 const roomW = cv.w * CW
 const roomH = cv.rows * LH
-const lines = [T.header(COLS, T.mixedHarness(sessions)), ...T.rows(sessions, COLS, sessions[0].id, (p) => office.colourOf(p)).map((r) => r.line)]
+const lines = [T.header(COLS, mixedHarness(sessions)), ...T.rows(sessions, COLS, sessions[0].id, (p) => office.colourOf(p)).map((r) => r.line)]
 const detail = T.detail(order(sessions)[0], COLS)
 const footer = T.footer(COLS, office.hiddenCount, false, 'split', { armed: true, holding: true })
 // no version stamp: it would make this file differ on every commit

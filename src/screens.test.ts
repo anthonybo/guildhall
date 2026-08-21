@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { HARNESS, badge, harnessMark, monitor } from './screens.ts'
+import { HARNESS, badge, harnessMark, monitor, monitorFor, monitorKey, type Desk } from './screens.ts'
 import { width } from './theme.ts'
+import type { Grid } from './characters.ts'
 
 const ink = (g: { grid: (number[] | null)[][] }) =>
 	g.grid.map((r) => r.map((c) => (c && c[0] === 40 ? '#' : '.')).join('')).join('\n')
@@ -25,27 +26,48 @@ test('every level from 1 to 30 renders a distinct badge', () => {
 	assert.equal(seen.size, 30, 'two levels render identically')
 })
 
-test('the mug says which harness the desk belongs to, and nothing else moves', () => {
+test('the harness marks the desk, and never the screen', () => {
 	// Two Claude sessions and a Codex session in one project sit as three identical
-	// workers in the same pod. The label prefix only appears when a session is urgent or
-	// selected, so at rest nothing told them apart. Both obvious channels were taken —
-	// the sprite badge IS the level tier and the screen tint IS the tool class — so this
-	// uses the one thing on a desk that carried no meaning.
-	const claude = monitor(true, 0, 0, 'edit')
+	// workers in the same pod, and at rest nothing told them apart — the label prefix
+	// only appears when a session is urgent or selected.
+	//
+	// The mug alone was tried first and was NOT findable: ten pixels at the edge of the
+	// worktop, with a bright level badge beside it. The report was "there is no logo at
+	// the desks anywhere", from somebody looking for one. So the mark is now three things
+	// on different axes — mug, cable, and the bezel, which is the largest thing on a desk
+	// and the only one that reads across a room.
+	const claude = monitor(true, 0, 0, 'edit', 'claude')
 	const codex = monitor(true, 0, 0, 'edit', 'codex')
 
-	let differing = 0
-	for (let y = 0; y < claude.grid.length; y++) {
-		for (let x = 0; x < claude.grid[y]!.length; x++) {
-			if (JSON.stringify(claude.grid[y]![x]) !== JSON.stringify(codex.grid[y]![x])) differing++
-		}
+	const diff = (a: Grid, b: Grid) => {
+		let n = 0
+		for (let y = 0; y < a.grid.length; y++)
+			for (let x = 0; x < a.grid[y]!.length; x++) if (JSON.stringify(a.grid[y]![x]) !== JSON.stringify(b.grid[y]![x])) n++
+		return n
 	}
-	// The mug is 3x3 with one handle pixel. Anything more means the change leaked into
-	// the screen or the bezel, which carry other meanings.
-	assert.equal(differing, 10, `${differing} pixels changed; the mug is 10`)
+	// mug 3x3 + one handle pixel = 10, cable 4x1 = 4, and the bezel ring is
+	// box(1,1,14,11) minus the dark screen box(2,2,12,9) drawn over it = 154 - 108 = 46.
+	assert.equal(diff(claude, codex), 10 + 4 + 46, 'the harness changed a different number of pixels than mug + cable + bezel')
 
-	// And the screen itself is untouched, which is what keeps the tool tint honest.
-	assert.deepEqual(claude.grid[4], codex.grid[4], 'the screen changed with the harness')
+	// The screen is untouched, which is what keeps the tool tint meaning the tool and
+	// nothing else. Checked across every screen row, not one sample: the first version
+	// of this test checked row 4 alone and would have missed a leak anywhere else.
+	for (let y = 2; y <= 10; y++) assert.deepEqual(claude.grid[y]!.slice(2, 14), codex.grid[y]!.slice(2, 14), `screen row ${y} changed with the harness`)
+})
+
+test('a room with one harness is drawn exactly as it was before there were two', () => {
+	// office.ts only sets `agent` when the room actually holds more than one harness, so
+	// `undefined` is the everyday case: everybody running Claude Code alone. It must be
+	// pixel-identical to the old drawing, or every doc image and every existing room
+	// changes for a distinction that has nothing to distinguish.
+	const plain = monitor(true, 0, 0, 'edit')
+	// no cable — row 22 is still bare desk wood — and the bezel is the unmodified case
+	assert.deepEqual(plain.grid[22]![13], [138, 96, 62], 'an unmarked desk grew a cable')
+	// and the marked one does have it, or the assertion above proves nothing
+	assert.deepEqual(monitor(true, 0, 0, 'edit', 'codex').grid[22]![13], HARNESS.codex, 'a marked desk has no cable')
+	assert.deepEqual(plain.grid[1]![1], [72, 76, 96], 'an unmarked desk has a tinted bezel')
+	// the mug is still there and still the ordinary one
+	assert.deepEqual(plain.grid[19]![14], HARNESS.claude)
 })
 
 test('an unknown harness falls back to the ordinary mug', () => {
@@ -92,4 +114,25 @@ test('an unrecognized harness is marked as unknown rather than as Claude Code', 
 	assert.notEqual(odd.glyph, harnessMark('codex').glyph)
 	assert.equal(width(odd.glyph), 1)
 	assert.match(odd.name, /gemini-cli/, 'the unknown harness is not named in its own label')
+})
+
+test('a desk descriptor reaches both the picture and its cache key', () => {
+	// The shipped bug this prevents: `monitor()` had three call sites and `agent` was
+	// added to only one, so the harness mark drew in the browser and never in the
+	// terminal — "there is no logo at the desks anywhere", which was accurate. The
+	// image path's hand-assembled cache key omitted it too, so even a fixed draw call
+	// would have served the first desk's cached picture to the second.
+	const claude: Desk = { lit: true, seed: 0, kind: 'edit', agent: 'claude' }
+	const codex: Desk = { ...claude, agent: 'codex' }
+
+	// Different desks must not share a cached image.
+	assert.notEqual(monitorKey(claude, 0), monitorKey(codex, 0), 'two harnesses hash to the same cached image')
+	// And the descriptor's agent must actually reach the drawing.
+	assert.notDeepEqual(monitorFor(claude, 0).grid[19]![14], monitorFor(codex, 0).grid[19]![14], 'the descriptor agent never reached the mug')
+	assert.deepEqual(monitorFor(codex, 0).grid, monitor(true, 0, 0, 'edit', 'codex').grid, 'monitorFor and monitor disagree about the same desk')
+
+	// The key still collapses the frame for a dark screen, or an unoccupied desk would
+	// transmit a new identical image every tick forever.
+	assert.equal(monitorKey({ lit: false, seed: 0, kind: 'edit' }, 3), monitorKey({ lit: false, seed: 0, kind: 'edit' }, 7))
+	assert.notEqual(monitorKey({ lit: true, seed: 0, kind: 'edit' }, 3), monitorKey({ lit: true, seed: 0, kind: 'edit' }, 0))
 })
