@@ -70,8 +70,14 @@ export type ServeOptions = {
 	host: string
 	demo: boolean
 	/** Include Codex sessions as well as Claude Code ones. Off by default; see
-	 *  docs/codex.md. */
-	codex?: boolean
+	 *  docs/codex.md.
+	 *
+	 *  A function for the same reason `control` below is one, and it was a plain
+	 *  boolean first: captured once at `createServer`, so flipping the setting in
+	 *  the running app changed the room and left the browser serving Claude-only
+	 *  until a restart. Two surfaces of one program disagreeing about which
+	 *  harnesses exist is the shape of bug this whole setting was meant to avoid. */
+	codex?: () => boolean
 	/** Whether typing into a session is permitted at all. A function, not a
 	 *  boolean, so turning it off in the running app takes effect immediately
 	 *  rather than at the next restart. */
@@ -162,8 +168,8 @@ export function snapshot(demo = false, codex = false): string {
 }
 
 export function createServer(opts: ServeOptions) {
-	const sessions = () => (opts.demo ? demoSessions() : collect(!!opts.codex))
-	const payload = () => snapshot(opts.demo, !!opts.codex)
+	const sessions = () => (opts.demo ? demoSessions() : collect(!!opts.codex?.()))
+	const payload = () => snapshot(opts.demo, !!opts.codex?.())
 	const listeners = new Set<http.ServerResponse>()
 	let last = ''
 	/** When a message last went out, so the heartbeat below can be honest about ages. */

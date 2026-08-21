@@ -244,6 +244,19 @@ struct SettingsView: View {
 
 			Divider()
 
+			SwitchRow(title: "Show Codex sessions too", caption: nil, tint: Color(red: 0.43, green: 0.73, blue: 0.77), isOn: Binding(
+				get: { config.codex },
+				set: { config.codex = $0; saveNow() }
+			))
+			// What it costs and what it does not do, because "show another agent" sounds
+			// like it might go looking on the network. It reads the same kind of local
+			// files the Claude side already does.
+			Text("Reads ~/.codex on this machine, the same way Claude Code sessions are read. Nothing is sent anywhere. Codex desks are marked with a teal ◆.")
+				.font(.caption).foregroundStyle(.secondary)
+				.fixedSize(horizontal: false, vertical: true)
+
+			Divider()
+
 			SwitchRow(title: "Hold the screen on while sessions work", caption: nil, isOn: Binding(
 				get: { config.awakeDisplay },
 				set: { config.awakeDisplay = $0; saveNow() }

@@ -30,6 +30,7 @@ struct Config {
 	var labels = "vertical"
 	var awakeDisplay = true
 	var control = false
+	var codex = false
 
 	static var dir: String {
 		ProcessInfo.processInfo.environment["GUILDHALL_CONFIG_DIR"]
@@ -65,6 +66,7 @@ struct Config {
 		c.labels = o["labels"] as? String ?? c.labels
 		c.awakeDisplay = o["awakeDisplay"] as? Bool ?? c.awakeDisplay
 		c.control = o["control"] as? Bool ?? c.control
+		c.codex = o["codex"] as? Bool ?? c.codex
 		return c
 	}
 
@@ -87,6 +89,7 @@ struct Config {
 		o["labels"] = labels
 		o["awakeDisplay"] = awakeDisplay
 		o["control"] = control
+		o["codex"] = codex
 		let data = try JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys])
 		try Config.write(data, to: Config.file)
 	}

@@ -303,6 +303,9 @@ if (process.argv.includes('--no-serve')) cfg.serve = false
 // neither, and was not in --help either.
 if (process.argv.includes('--codex')) cfg.codex = true
 if (process.argv.includes('--no-codex')) cfg.codex = false
+/** Was it given on the command line? Then the file must not take it back — see
+ *  `adoptDiskSettings`, whose whole job is letting the file win. */
+const CODEX_PINNED = process.argv.includes('--codex') || process.argv.includes('--no-codex')
 const portArg = process.argv.indexOf('--port')
 if (portArg > 0) cfg.port = Number(process.argv[portArg + 1]) || cfg.port
 
@@ -329,7 +332,9 @@ function syncServe() {
 		server = createServer({
 			port: cfg.port,
 			host: cfg.host,
-			codex: cfg.codex,
+			// read at call time, like `control` below, so pressing x or flipping the
+			// menu bar switch reaches the browser without a restart
+			codex: () => cfg.codex,
 			demo: DEMO,
 			// read at call time, so toggling control in the running app takes effect
 			// at once rather than at the next restart
@@ -528,7 +533,7 @@ const shareInfo = () => {
 	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote }
 }
 const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
-const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), labels: cfg.labels })
+const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), labels: cfg.labels, codex: cfg.codex })
 
 /**
  * The three toggles, extracted so the help panel and the global keys run the same
@@ -552,6 +557,43 @@ function toggleLabels() {
 	// the room re-reads this every frame, so nothing needs re-planning
 	cfg.labels = cfg.labels === 'vertical' ? 'horizontal' : 'vertical'
 	cfgStore.save(cfg)
+	prev = []
+}
+/**
+ * Take up the settings another surface may have changed on disk.
+ *
+ * Every process here loaded `cfg` once at launch, so the menu bar's switches wrote
+ * config.json and reached nothing that was already running: the headless service
+ * kept serving what it started with, and a room went one worse — its next
+ * `cfgStore.save(cfg)` wrote the stale value straight back over the change.
+ *
+ * Called before the save-capable code in each poll for that reason: disk wins, then
+ * a keystroke here beats disk, which is the order that cannot lose an edit.
+ *
+ * Only the two fields built to be read live. `port` and `host` cannot move under a
+ * bound listener, `serve` is the headless process's entire job, and `labels` is
+ * already re-read every frame.
+ */
+function adoptDiskSettings() {
+	const disk = cfgStore.load()
+	// A one-run flag outranks the file for the whole run. Without this the first poll
+	// two seconds in silently undid `--no-codex`, which is the flag somebody reaches
+	// for precisely because something looks wrong.
+	if (!CODEX_PINNED) cfg.codex = disk.codex
+	cfg.control = disk.control
+}
+function toggleCodex() {
+	cfg.codex = !cfg.codex
+	cfgStore.save(cfg)
+	// Re-collect NOW rather than waiting up to two seconds for the next poll. Every
+	// other toggle here shows its effect on the keystroke, and a switch whose whole
+	// visible result is "desks appear" is the one where a delay reads as it not
+	// having worked.
+	// The same four steps the two-second poll runs, because desks are appearing or
+	// disappearing — a redraw alone would paint new sessions into the old floor plan.
+	sessions = collect()
+	awake.sync(sessions)
+	layout()
 	prev = []
 }
 /** digits typed so far while changing the passcode, or null when not changing it */
@@ -1055,6 +1097,7 @@ function onKey(b: Buffer) {
 				else if (hit?.act.kind === 'sharing') toggleShare()
 				else if (hit?.act.kind === 'awake') toggleAwake()
 				else if (hit?.act.kind === 'labels') toggleLabels()
+				else if (hit?.act.kind === 'codex') toggleCodex()
 				else if (hit?.act.kind === 'section') {
 					const id = hit.act.id
 					// Opening a section moves everything below it, so the scroll position
@@ -1087,6 +1130,11 @@ function onKey(b: Buffer) {
 		}
 		if (k === 'v') {
 			toggleLabels()
+			draw()
+			return
+		}
+		if (k === 'x') {
+			toggleCodex()
 			draw()
 			return
 		}
@@ -1210,6 +1258,8 @@ function start() {
 	)
 	timers.push(
 		setInterval(() => {
+			// so the menu bar's switches reach a room that is already open
+			adoptDiskSettings()
 			sessions = collect()
 			// hold the machine open while anyone is mid-task, and let go when they stop
 			awake.sync(sessions)
@@ -1269,6 +1319,7 @@ function headless() {
 		process.exit(1)
 	}, 500)
 	const tick = () => {
+		adoptDiskSettings()
 		sessions = collect()
 		awake.sync(sessions)
 	}

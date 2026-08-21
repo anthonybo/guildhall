@@ -133,10 +133,10 @@ test('the clickable rows line up with the picture, at any scroll', () => {
 test('the panel opens as settings plus headings, not ninety lines of prose', () => {
 	const share = { on: true, port: 4318, token: '8421', lan: ['192.168.1.24'], vpn: [], pin: null, pinNote: '' }
 	const control = { on: true, isSet: true, typing: null, note: '' }
-	const env = { awakeArmed: true, awakeHolding: false, labels: 'vertical' }
+	const env = { awakeArmed: true, awakeHolding: false, labels: 'vertical', codex: true }
 	const shut = strip(panel(96, 44, share, control, 0, env, new Set()).join('\n'))
 	// every changeable thing is in one block, with its key beside it
-	for (const label of ['sharing', 'port', 'address', 'passcode', 'control', 'awake', 'labels']) {
+	for (const label of ['sharing', 'port', 'address', 'passcode', 'control', 'awake', 'labels', 'codex']) {
 		assert.ok(new RegExp(`^\\s*${label}\\s`, 'm').test(shut), `${label} is not a settings row`)
 	}
 	// and the explanations are behind headings rather than on screen
@@ -155,7 +155,9 @@ test('every changeable value is underlined, and nothing else is', () => {
 	// to tell them from prose — "I would have no idea the port is clickable".
 	const share = { on: true, port: 4318, token: '8421', lan: ['192.168.1.24'], vpn: [], pin: null, pinNote: '' }
 	const control = { on: true, isSet: true, typing: null, note: '' }
-	const env = { awakeArmed: true, awakeHolding: false, labels: 'vertical' }
+	// codex off here and on in the test above, so both renderings of the row are
+	// covered — the underline has to survive either branch of the ternary.
+	const env = { awakeArmed: true, awakeHolding: false, labels: 'vertical', codex: false }
 	const v = H.view(96, 44, share, control, 0, env, new Set())
 	for (const h of v.hits) {
 		if (h.act.kind === 'section') continue // headings carry a caret instead

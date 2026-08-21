@@ -9,6 +9,9 @@
  * `working` when nothing is on screen, and what a level counts.
  */
 import { C, LOOK, R, bold, clip, fg, tierOf, underline, width } from './theme.ts'
+// The same colour the desk mug and the table column use, so "codex: shown" here is
+// visibly the same teal as the mark it turns on.
+import { harnessColor } from './screens.ts'
 import type { State } from './data.ts'
 import { available } from './update.ts'
 
@@ -28,6 +31,7 @@ export type Act =
 	| { kind: 'sharing' }
 	| { kind: 'awake' }
 	| { kind: 'labels' }
+	| { kind: 'codex' }
 	/** open or close one of the explanatory sections */
 	| { kind: 'section'; id: string }
 
@@ -56,7 +60,7 @@ export type Hit = { row: number; act: Act }
 type Line = { text: string; kind?: 'title' | 'head' | 'dim'; act?: Act }
 
 /** Live values the settings block shows that are not about sharing. */
-export type Env = { awakeArmed: boolean; awakeHolding: boolean; labels: string }
+export type Env = { awakeArmed: boolean; awakeHolding: boolean; labels: string; codex: boolean }
 
 /**
  * Hide the prose under any closed heading.
@@ -154,6 +158,17 @@ function settingsBlock(share?: ShareInfo, control?: ControlInfo, env?: Env): (st
 	if (env) {
 		rows.push(setting('awake', env.awakeHolding ? `${fg(C.fillOk)}${hot('holding awake')}${R}` : env.awakeArmed ? `${fg(C.screenEdit)}${hot('awake when working')}${R}` : `${fg(C.fillWarn)}${hot('sleeps normally')}${R}`, 'a', { kind: 'awake' }))
 		rows.push(setting('labels', `${fg(C.muted)}${hot(env.labels)}${R}`, 'v', { kind: 'labels' }))
+		// Named for the harness rather than for the setting ("codex: on"), because the
+		// question being answered is "why don't I see my Codex sessions" — and the
+		// answer has to be findable by the word the person is looking for.
+		rows.push(
+			setting(
+				'codex',
+				env.codex ? `${fg(harnessColor('codex'))}${hot('shown')}${R}` : `${fg(C.muted)}${hot('hidden')}${R}`,
+				env.codex ? 'x' : 'x · Claude only',
+				{ kind: 'codex' },
+			),
+		)
 	}
 	return rows
 }
@@ -293,6 +308,7 @@ function body(share?: ShareInfo, control?: ControlInfo, env?: Env): (string | Li
 		key('l', 'all labels, or only the ones that need you'),
 		key('v', 'project names beside the desk, or under it'),
 		key('a', 'keep the machine awake, or let it sleep'),
+		key('x', 'show Codex sessions too, or only Claude Code'),
 		key('s', 'share to your network, or stop sharing'),
 		key('tab', 'room / split / table'),
 		key('r', 'force a redraw'),
