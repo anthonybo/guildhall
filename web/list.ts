@@ -10,7 +10,7 @@
 import { LOOK, projectColours, tierOf, type RGB } from '../src/theme.ts'
 import { needsAttention, order } from '../src/data/select.ts'
 import { mix, readable } from '../src/contrast.ts'
-import type { Session } from '../src/data/types.ts'
+import type { Session, State } from '../src/data/types.ts'
 import { hasControl, sendTo, setControl } from './terminal.ts'
 import { harnessMark } from '../src/screens.ts'
 import { ago, rgb } from './dom.ts'
@@ -106,8 +106,8 @@ function paint(fg: RGB, bg: RGB, target?: number): string {
 	return v
 }
 
-const cardOf = (state: string) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, PANEL)
-const bandOf = (state: string) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, BG)
+const cardOf = (state: State) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, PANEL)
+const bandOf = (state: State) => mix(LOOK[state].color, WEIGHT[state] ?? 0.1, BG)
 
 const BANDS: { key: string; label: string; has: (s: Session) => boolean }[] = [
 	{ key: 'error', label: 'failed', has: (s) => s.state === 'error' },

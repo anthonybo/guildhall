@@ -129,13 +129,20 @@ function frame(now: number) {
 	// as a rotated bitmap because a terminal cannot rotate text, and at 4px per
 	// column that bitmap would hold six characters. A canvas has real fonts and
 	// rotate(), so the plates are drawn below at display resolution instead.
-	const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] }
+	// Every layer the compositor draws, spelled out. Forgetting `logos` here threw
+	// `scene.logos is not iterable` on the first frame and left the browser blank with a
+	// working header above it — and `tsc` could not say so, because tsconfig only
+	// included `src`. It includes `web` now; see the note in tsconfig.json.
+	const scene = { props: off.props, monitors: off.monitors, badges: off.badges, logos: off.logos, plates: [] }
 	const { rgba, w, h } = renderRoom(cv!, scene, placed, 4, 8, screenFrame)
 	if (buffer.width !== w || buffer.height !== h) {
 		buffer.width = w
 		buffer.height = h
 	}
-	bufferCtx.putImageData(new ImageData(rgba, w, h), 0, 0)
+	// The cast is narrow and safe: typed arrays became generic over their buffer, and
+	// ImageData insists on one backed by a plain ArrayBuffer. renderRoom allocates this
+	// with `new Uint8ClampedArray(bytes)`, which is exactly that — never shared memory.
+	bufferCtx.putImageData(new ImageData(rgba as Uint8ClampedArray<ArrayBuffer>, w, h), 0, 0)
 
 	const dpr = Math.min(3, window.devicePixelRatio || 1)
 	const cssW = roomEl.clientWidth

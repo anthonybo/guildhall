@@ -396,7 +396,7 @@ function repaintSoon() {
 }
 var openId = null;
 var openName = "";
-var timer = 0;
+var timer;
 var el;
 var onClose = () => {
 };
@@ -420,7 +420,7 @@ async function api(path, init = {}) {
 }
 function askForToken(why) {
   clearInterval(timer);
-  timer = 0;
+  timer = void 0;
   el.innerHTML = "";
   el.style.maxWidth = "";
   el.style.marginInline = "";
@@ -667,7 +667,7 @@ function close() {
   openId = null;
   lastTag = "";
   clearInterval(timer);
-  timer = 0;
+  timer = void 0;
   el.hidden = true;
   el.innerHTML = "";
   el.style.maxWidth = "";
@@ -686,7 +686,7 @@ function mountTerminal(host2, closed) {
     if (e.key === "Escape" && openId) close();
   });
   watch(host2, isOpen);
-  let t = 0;
+  let t;
   addEventListener("resize", () => {
     if (!openId) return;
     holdPage();
@@ -3221,7 +3221,7 @@ function mountSettings(button, panel, onChange) {
   };
   button.addEventListener("click", (e) => {
     e.stopPropagation();
-    open3(panel.hidden);
+    open3(!!panel.hidden);
   });
   document.addEventListener("pointerdown", (e) => {
     if (!panel.hidden && !panel.contains(e.target) && e.target !== button) open3(false);
@@ -3297,7 +3297,7 @@ function frame(now) {
   off.vertical = settings.labels === "vertical";
   const placed = off.draw(cv, sessions);
   off.overlay(cv, placed, void 0, true);
-  const scene = { props: off.props, monitors: off.monitors, badges: off.badges, plates: [] };
+  const scene = { props: off.props, monitors: off.monitors, badges: off.badges, logos: off.logos, plates: [] };
   const { rgba, w, h } = renderRoom(cv, scene, placed, 4, 8, screenFrame);
   if (buffer2.width !== w || buffer2.height !== h) {
     buffer2.width = w;
@@ -3384,7 +3384,7 @@ var DEPLOYS = "guildhall.press.deploys";
 var LOCAL_WAIT = 2e4;
 var FULL_WAIT = 1e5;
 var el2;
-var timer2 = 0;
+var timer2;
 var open = false;
 var settled2 = false;
 var lastRender = "";
@@ -3682,7 +3682,7 @@ function show2() {
 function close2() {
   open = false;
   clearInterval(timer2);
-  timer2 = 0;
+  timer2 = void 0;
   el2.hidden = true;
   el2.replaceChildren();
   lastRender = "";
@@ -3940,7 +3940,7 @@ function freshness() {
 function connect() {
   let es = null;
   let delay = 1e3;
-  let timer3 = 0;
+  let timer3;
   const retry = () => {
     clearTimeout(timer3);
     timer3 = setTimeout(probe, delay);

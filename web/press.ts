@@ -57,7 +57,15 @@ const LOCAL_WAIT = 20_000
 const FULL_WAIT = 100_000
 
 let el: HTMLElement
-let timer = 0
+/**
+ * A timer handle, not a number.
+ *
+ * `let timer = 0` infers `number`, which is what a browser's setTimeout returns — but
+ * this file is type-checked with node's types in the program, where it returns a
+ * `Timeout` object. `ReturnType<typeof setTimeout>` is right in both, and it means the
+ * handle is never compared to or arithmetic'd with an integer by accident.
+ */
+let timer: ReturnType<typeof setInterval> | undefined
 let open = false
 /** Whether the fast open-time poll has been handed back to the slow watching one. */
 let settled = false
@@ -530,7 +538,7 @@ export function show() {
 export function close() {
 	open = false
 	clearInterval(timer)
-	timer = 0
+	timer = undefined
 	el.hidden = true
 	el.replaceChildren()
 	// or reopening would match the signature of a panel that no longer has any nodes

@@ -3,7 +3,7 @@
 		"target": "ES2023",
 		"module": "nodenext",
 		"moduleResolution": "nodenext",
-		"lib": ["ES2023"],
+		"lib": ["ES2023", "DOM", "DOM.Iterable"],
 		"jsx": "react-jsx",
 		"strict": true,
 		"noUncheckedIndexedAccess": false,
@@ -17,5 +17,13 @@
 		"forceConsistentCasingInFileNames": true,
 		"types": ["node"]
 	},
-	"include": ["src"]
+	// `web` as well as `src`, and that was a real hole rather than an oversight.
+	//
+	// The browser client had NEVER been type-checked. web/room.ts built the compositor's
+	// Scene as an object literal and left out a required field, tsc said nothing because
+	// the directory was not in the program, and the browser threw
+	// "scene.logos is not iterable" on its first frame — a blank page under a working
+	// header. The one part of this that is used from a phone, away from the machine, had
+	// the least checking of anything here.
+	"include": ["src", "web", "tools"]
 }

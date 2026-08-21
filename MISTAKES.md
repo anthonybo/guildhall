@@ -642,3 +642,36 @@ bind-tested before being offered.
 
 **The settings panel now has a Random button**, because "Choose another port" with no
 way to choose one is an error message that blames the reader.
+
+## The browser client was never type-checked
+
+**How a blank page shipped.** `web/room.ts` builds the compositor's `Scene` as an
+object literal and I added a required field (`logos`) to that type without adding it
+there. The browser threw `scene.logos is not iterable` on its first
+`requestAnimationFrame` and every frame after, so the page showed a working header —
+version, session counts, "live" — above an empty room. Data was arriving fine; only
+the drawing was dead.
+
+`npm run check:types` passed the whole time. **`tsconfig.json` had
+`"include": ["src"]`.** The part of this program that gets used from a phone, away
+from the machine, had the least checking of anything in the repository — a missing
+required property is precisely what tsc exists to catch, and it was never looking.
+
+**Two near-misses in the same hour, from the same cause.** `tools/check-perf.mjs`
+builds the same Scene literal and threw the same error — that one surfaced because the
+perf gate runs it. So the gate caught the harness and nothing caught the browser.
+
+**And my own search missed it.** Looking for other Scene literals I ran
+`grep -rn 'monitors:.*badges:\|badges:.*plates:' src tools web | grep -v 'room.ts:'` —
+the exclusion was meant to skip `src/office/room.ts`, and it filtered out
+`web/room.ts`, the one file with the bug. A negative filter on a path fragment is not
+a filter on a file.
+
+**Fixed by including `web` and `tools`,** which surfaced 21 real type errors that had
+accumulated unseen — timer handles typed as `number` while node's types say `Timeout`,
+`LOOK[state]` indexed by a bare `string`, `ImageData` refusing a generically-typed
+`Uint8ClampedArray`, and `hidden` now being `boolean | "until-found"`. None were
+runtime bugs, which is exactly why they had survived: nothing was asking.
+
+Verified by reintroducing the original mistake and watching tsc name it:
+`Property 'logos' is missing in type ... but required in type 'Scene'`.

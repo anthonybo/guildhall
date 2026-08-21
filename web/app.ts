@@ -186,7 +186,8 @@ function freshness() {
 function connect() {
 	let es: EventSource | null = null
 	let delay = 1000
-	let timer = 0
+	// see the note on `timer` in press.ts: a handle, not an integer
+	let timer: ReturnType<typeof setTimeout> | undefined
 
 	const retry = () => {
 		clearTimeout(timer)

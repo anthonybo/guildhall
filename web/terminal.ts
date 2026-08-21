@@ -75,7 +75,8 @@ function repaintSoon() {
 
 let openId: string | null = null
 let openName = ''
-let timer = 0
+// a handle, not an integer — see the note in press.ts
+let timer: ReturnType<typeof setTimeout> | undefined
 let el: HTMLElement
 let onClose = () => {}
 
@@ -142,7 +143,7 @@ function askForToken(why: string) {
 	// A refused request is now the end of the conversation. Only submitting a
 	// password starts it again.
 	clearInterval(timer)
-	timer = 0
+	timer = undefined
 	el.innerHTML = ''
 	// the panel was sized to a terminal; a password form is not one
 	el.style.maxWidth = ''
@@ -598,7 +599,7 @@ export function close() {
 	openId = null
 	lastTag = ''
 	clearInterval(timer)
-	timer = 0
+	timer = undefined
 	el.hidden = true
 	el.innerHTML = ''
 	el.style.maxWidth = ''
@@ -624,7 +625,7 @@ export function mountTerminal(host: HTMLElement, closed: () => void) {
 	// A rotation changes the width the type is sized from, and the grid does not
 	// change at all — so without this the screen keeps the old size until the session
 	// happens to print. Debounced because a rotation fires this repeatedly.
-	let t = 0
+	let t: ReturnType<typeof setTimeout> | undefined
 	addEventListener('resize', () => {
 		if (!openId) return
 		// A window dragged across 880px turns an overlay into an inline panel and back,

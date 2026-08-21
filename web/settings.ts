@@ -128,7 +128,8 @@ export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onC
 	}
 	button.addEventListener('click', (e) => {
 		e.stopPropagation()
-		open(panel.hidden)
+		// `hidden` is `boolean | "until-found"`, so coerce: hidden by any means means open it
+		open(!!panel.hidden)
 	})
 	// Clicking anywhere else closes it. Pointerdown rather than click so a drag
 	// that starts outside does not leave the panel open under the cursor.
