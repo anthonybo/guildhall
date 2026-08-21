@@ -105,7 +105,7 @@ function settingsBlock(share?: ShareInfo, control?: ControlInfo, env?: Env): (st
 	// Mid-entry, the row being edited becomes the field. Same rule as before: the
 	// value you are replacing and the one you are typing belong in one place.
 	if (share?.portEntry !== null && share?.portEntry !== undefined) {
-		rows.push(setting('port', `${bold}${fg(C.gold)}${share.portEntry || '…'}${R}`, '1024-65535 · ⏎ move · esc cancel', { kind: 'port' }))
+		rows.push(setting('port', `${bold}${fg(C.gold)}${share.portEntry || '…'}${R}`, '1024-65535 · r random · ⏎ move · esc cancel', { kind: 'port' }))
 		rows.push(`${fg(C.muted)}Every device has to be told the new address.${R}`)
 		if (share.portNote) rows.push(`${fg(C.fillWarn)}${share.portNote}${R}`)
 		return rows

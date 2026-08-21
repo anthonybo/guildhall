@@ -13,6 +13,7 @@
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import { DEFAULT_PORT, okPort } from './port.ts'
 import { writePrivate } from './privatefile.ts'
 
 export type Config = {
@@ -58,7 +59,7 @@ export type Config = {
  * else can, and sharing is a deliberate change to `the network` in the menu bar
  * settings or this file.
  */
-const DEFAULTS: Config = { serve: false, port: 4318, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false, codex: false }
+const DEFAULTS: Config = { serve: false, port: DEFAULT_PORT, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false, codex: false }
 
 /**
  * A port this program will accept, in one place.
@@ -68,9 +69,9 @@ const DEFAULTS: Config = { serve: false, port: 4318, host: '127.0.0.1', labels: 
  * could be rejected by the next. Below 1024 needs root on macOS, so the menu bar
  * was the correct one and it is now the only one.
  */
-export const PORT_MIN = 1024
-export const PORT_MAX = 65535
-export const okPort = (n: unknown): n is number => Number.isInteger(n) && (n as number) >= PORT_MIN && (n as number) <= PORT_MAX
+// Re-exported, not redefined: port policy — the range, the default, and how a free
+// one is found — lives in port.ts so the three surfaces that ask cannot disagree.
+export { DEFAULT_PORT, PORT_MAX, PORT_MIN, okPort } from './port.ts'
 
 /** Resolved per call so tests can redirect it; see the note in auth.ts. */
 const dir = () => process.env.GUILDHALL_CONFIG_DIR || path.join(os.homedir(), '.config', 'guildhall')

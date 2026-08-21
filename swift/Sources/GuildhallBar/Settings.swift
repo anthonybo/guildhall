@@ -82,6 +82,9 @@ struct SettingsView: View {
 	@State private var serveNote = ""
 	@State private var serveFailed = false
 	@State private var serveBusy = false
+	/// While `--pick-port` is running, so the button cannot be pressed twice and the
+	/// wait is visible — shelling out to node is not instant.
+	@State private var picking = false
 	/// What is on disk, so the page can tell a typed change from no change at all.
 	/// Apply used to be enabled always, which offers to save when there is nothing to
 	/// save — and gives no signal at the moment there is.
@@ -161,8 +164,29 @@ struct SettingsView: View {
 			Grid(alignment: .leading, horizontalSpacing: 10, verticalSpacing: 8) {
 				GridRow {
 					Text("Port")
-					TextField("4318", value: $config.port, format: .number.grouping(.never))
-						.frame(width: 90)
+					HStack(spacing: 6) {
+						TextField("4250", value: $config.port, format: .number.grouping(.never))
+							.frame(width: 90)
+						// Because the default collided: 4318 is the OTLP/HTTP port, so any
+						// machine running a trace collector already had it, and the panel's
+						// only advice was "Choose another port" with no way to choose one.
+						//
+						// The number comes from `guildhall --pick-port`, not from Swift. Which
+						// ports are safe is a real decision — see src/port.ts on why anything
+						// above 32768 is wrong on macOS — and a second implementation here
+						// would be a second chance to get it wrong.
+						Button {
+							picking = true
+							Task {
+								if let p = await Config.freePort() { config.port = p }
+								picking = false
+							}
+						} label: {
+							if picking { ProgressView().controlSize(.small) } else { Text("Random") }
+						}
+						.disabled(picking)
+						.help("Pick a port nothing is listening on")
+					}
 				}
 				GridRow {
 					Text("Passcode")
@@ -272,22 +296,39 @@ struct SettingsView: View {
 					.fixedSize(horizontal: false, vertical: true)
 			}
 
-			HStack(spacing: 8) {
+			// The caption on its own line, ABOVE the button, and allowed to wrap.
+			//
+			// It was beside the button in an HStack, where the button takes its intrinsic
+			// width first and the text gets whatever is left — inside a 380pt popover that
+			// left "Everything else applies as you c…", which is not a sentence and had to
+			// be asked about. A line that explains which controls need Apply is worth the
+			// vertical space; a truncated one is worth nothing.
+			VStack(alignment: .leading, spacing: 8) {
 				Text(dirty
-					? "Unsaved changes above."
-					: "Everything else applies as you change it.")
+					? "Port and passcode are typed, so they need Apply. Everything else on this page saves the moment you change it."
+					: "Everything on this page saves as you change it. Port and passcode are the exceptions — type them, then press Apply.")
 					.font(.caption)
 					.foregroundStyle(dirty ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-				Spacer()
-				// Grey until there is something to apply, and prominent when there is.
-				// A button that is always enabled offers to save when nothing has changed
-				// and gives no signal at the moment something has — so it reads as a step
-				// you must always perform, which is why a flipped switch felt unsaved.
-				Button("Apply port & passcode") { apply() }
-					.keyboardShortcut(.defaultAction)
-					.disabled(!dirty)
-					.buttonStyle(.borderedProminent)
-					.tint(dirty ? .accentColor : .gray)
+					.fixedSize(horizontal: false, vertical: true)
+				HStack {
+					Spacer()
+					// Two branches rather than a conditional style, because a button style is
+					// not a value you can pick between — there is no type-erased wrapper for
+					// it, and trying reads as if there were.
+					//
+					// It was always `.borderedProminent` with a grey tint while disabled, which
+					// draws a white label on a near-white fill: a blank white pill with no
+					// readable text, which is how "what does this even do" happens.
+					if dirty {
+						Button("Apply port & passcode") { apply() }
+							.keyboardShortcut(.defaultAction)
+							.buttonStyle(.borderedProminent)
+					} else {
+						Button("Apply port & passcode") {}
+							.disabled(true)
+							.buttonStyle(.bordered)
+					}
+				}
 			}
 		}
 		.padding(14)

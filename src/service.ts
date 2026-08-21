@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DEFAULT_PORT } from './port.ts'
 
 /**
  * Install or remove the login service that serves the browser view.
@@ -28,9 +29,9 @@ const domain = () => `gui/${process.getuid?.() ?? 0}`
 function port(): number {
 	try {
 		const raw = JSON.parse(fs.readFileSync(path.join(os.homedir(), '.config', 'guildhall', 'config.json'), 'utf8'))
-		return Number.isInteger(raw.port) ? raw.port : 4318
+		return Number.isInteger(raw.port) ? raw.port : DEFAULT_PORT
 	} catch {
-		return 4318
+		return DEFAULT_PORT
 	}
 }
 

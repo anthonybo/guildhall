@@ -39,8 +39,6 @@ import { frameOf, shrink } from './characters.ts'
 import { loadSheets } from './sheets.ts'
 import { badgeFor, badgeKey, harnessColor, monitorFor, monitorKey } from './screens.ts'
 import { logo, logoKey } from './logos.ts'
-// the tier/needs colours the badge takes, passed in so screens.ts stays theme-free
-const LEVEL_LOOK = { needs: LOOK.needs.color, tierOf: (n: number) => tierOf(n).color }
 import { C, LOOK, tierOf } from './theme.ts'
 import { PROP_SIZE, prop } from './props.ts'
 import * as T from './table.ts'
@@ -55,6 +53,10 @@ import { passcode, setPasscode } from './auth.ts'
 import { hasControlPass, setControlPass } from './controlauth.ts'
 import * as update from './update.ts'
 import { CMUX } from './data/cmux-bin.ts'
+import { pickPort } from './port.ts'
+
+// the tier/needs colours a badge takes, passed in so screens.ts stays theme-free
+const LEVEL_LOOK = { needs: LOOK.needs.color, tierOf: (n: number) => tierOf(n).color }
 
 if (process.argv.includes('--version') || process.argv.includes('-v')) {
 	console.log(BUILD)
@@ -159,12 +161,34 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
 		process.exit(2)
 	}
+}
+/**
+ * Print a free port, so the menu bar's randomize button and the terminal's port
+ * prompt get the same answer from the same implementation.
+ *
+ * Here rather than in Swift because "which ports are safe" is a decision with real
+ * reasoning behind it — see src/port.ts, and in particular why anything above 32768
+ * is wrong on macOS. A second copy in another language would be a second chance to
+ * get that wrong, which is the mistake the settings defaults already made once.
+ *
+ * Exits 1 with nothing on stdout if it cannot find one, so a caller can tell the
+ * difference between "no answer" and a port number.
+ */
+if (process.argv.includes('--pick-port')) {
+	const host = cfgStore.load().host
+	const port = await pickPort(host)
+	if (port === null) {
+		console.error('guildhall: could not find a free port')
+		process.exit(1)
+	}
+	console.log(String(port))
+	process.exit(0)
 }
 if (process.argv.includes('--usage')) {
 	const { fetchNow } = await import('./data/usage.ts')
@@ -243,7 +267,7 @@ watching
 serving the browser view — these draw nothing and want no terminal
   guildhall --headless     serve it and nothing else (what the LaunchAgent runs)
   guildhall --guard        hold sleep off while sessions work, but do NOT serve
-  guildhall --port 4400    listen elsewhere; default 4318, remembered in the config
+  guildhall --port 4400    listen elsewhere; default 4250, remembered in the config
 
 alongside the room
   guildhall --serve        share while the room is on screen
@@ -1056,6 +1080,18 @@ function onKey(b: Buffer) {
 				else if (n === cfg.port) portNote = `already on ${n}`
 				else movePort(n)
 				portEntry = null
+			} else if (key === 'r') {
+				// Fill the field with a free one, the same `--pick-port` the menu bar's
+				// Random button calls. Async, so the field shows what it is doing rather
+				// than appearing to ignore the key for a moment.
+				portEntry = ''
+				portNote = 'looking for a free port…'
+				void pickPort(cfg.host).then((n) => {
+					if (portEntry === null) return // the panel closed while we looked
+					if (n === null) portNote = 'no free port found'
+					else ((portEntry = String(n)), (portNote = `${n} is free — ⏎ to move`))
+					draw()
+				})
 			} else if (/^\d$/.test(key) && portEntry.length < 5) portEntry += key
 		}
 		draw()

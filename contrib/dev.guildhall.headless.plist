@@ -21,7 +21,7 @@
   choosing.
 
   It is running when this answers:
-    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4318/    # 401 = up
+    curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4250/    # 401 = up
 
   A 401 is the passcode gate, which means the server is answering. Anything else
   — no connection at all — means it is not.
@@ -39,7 +39,7 @@
 
   **The port comes from ~/.config/guildhall/config.json.** Add `--port 4400`
   after `--headless` below to override it for this service only, which is what
-  you want if something else on the machine already holds 4318 — guildhall does
+  you want if something else on the machine already holds 4250 — guildhall does
   not pick another port for you, it reports the clash and gives up.
 
   KeepAlive restarts it if it dies. That matters more here than for the guard: a

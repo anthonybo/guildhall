@@ -610,3 +610,35 @@ own merits and each was locally reasonable. What none of them did was check the
 request: a logo. When a specific thing is asked for three times, the useful question
 is not "what would read best here" but "why am I not building the thing that was
 asked for".
+
+## The default port was 4318, which is OpenTelemetry's
+
+**Shipped, and it failed for a predictable reason.** 4318 is the OTLP/HTTP port by
+convention, so any machine running a trace collector already holds it — and a
+developer's machine is the only kind this program runs on. Reported from the settings
+panel: `port 4318 is held by jaeger, which is not guildhall. Choose another port.` The panel was right, and had no way to help.
+
+**"Pick something high and obscure" is the wrong fix, and it was the first one.** On
+macOS `net.inet.ip.portrange.first` is **32768**, so every port above it can be taken
+by an outgoing connection's ephemeral allocation. A listener up there works until the
+day it does not, which is worse than a conflict you hit immediately. The 40000-49150
+range was searched, a candidate picked, and the whole band then discarded.
+
+**A bind test alone does not tell you a port is free — measured, and surprising.**
+Binding `0.0.0.0:4318` **succeeds** on macOS while jaeger holds `127.0.0.1:4318`:
+node sets SO_REUSEADDR and BSD permits a wildcard bind alongside a specific-address
+one. So the obvious check called the conflicting port free. Serving there would send
+every `localhost` request to jaeger while only the LAN address reached guildhall —
+broken in a way that looks like it worked. `portFree()` now also binds loopback when
+asked about the wildcard. The test that asserts the opposite is what found this.
+
+**How the replacement was chosen,** so it is a method and not a preference: over
+1024-9999, exclude everything assigned in `/etc/services`, everything listening on
+the machine, every port declared in any local checkout, every well-known dev-tool
+default, and everything within four ports of any of those. The largest clear run left
+was 4205-4295; 4250 is its midpoint, with about 45 ports of clearance each way. That
+run is also the band the randomize button draws from, and every candidate is
+bind-tested before being offered.
+
+**The settings panel now has a Random button**, because "Choose another port" with no
+way to choose one is an error message that blames the reader.

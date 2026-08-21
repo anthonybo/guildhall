@@ -25,7 +25,9 @@ struct Config {
 	// They are only reached when config.json is missing or unreadable; the file is the
 	// source of truth whenever it exists.
 	var serve = false
-	var port = 4318
+	// 4250, matching src/port.ts, which explains the choice. Was 4318 — the OTLP
+	// port, so any machine running a trace collector already had it.
+	var port = 4250
 	var host = "127.0.0.1"
 	var labels = "vertical"
 	var awakeDisplay = true
@@ -138,6 +140,21 @@ struct Config {
 		try await guildhall(["--set-control-password"], stdin: password)
 	}
 
+	/// A port nothing is listening on, from `guildhall --pick-port`.
+	///
+	/// Deliberately NOT implemented here. Binding a socket in Swift to test a port is a
+	/// dozen lines and would work, but it would also be a second opinion about which
+	/// ports are acceptable — and that policy has real reasoning behind it, including
+	/// that anything above 32768 is unsafe on macOS because it is the ephemeral range.
+	/// src/port.ts holds it; this asks.
+	///
+	/// nil on any failure, so the caller leaves the field alone rather than writing a
+	/// zero into it.
+	static func freePort() async -> Int? {
+		guard let out = try? await guildhallOutput(["--pick-port"]) else { return nil }
+		return Int(out.trimmingCharacters(in: .whitespacesAndNewlines))
+	}
+
 	/// Where node and guildhall are, resolved at RUN time.
 	///
 	/// The build bakes both paths into Info.plist, and that path is a hint rather
@@ -174,6 +191,36 @@ struct Config {
 	private static var home: String { FileManager.default.homeDirectoryForCurrentUser.path }
 
 	/// Run guildhall with a secret on stdin, and surface its own words on refusal.
+	/// Run guildhall and return what it printed.
+	///
+	/// Separate from `guildhall(_:stdin:)` above rather than a flag on it, because that
+	/// one exists to write a CREDENTIAL to stdin and throws away the output on purpose.
+	/// Giving it a "return stdout too" mode would put a secret-writing path and a
+	/// value-reading path in one function, and the next person adding a case there has
+	/// to notice which is which. This writes no stdin at all.
+	private static func guildhallOutput(_ args: [String]) async throws -> String {
+		guard let found = tools() else { throw Failure.noCLI }
+		let task = Process()
+		task.executableURL = URL(fileURLWithPath: found.node)
+		task.arguments = [found.entry] + args
+		let output = Pipe(), errors = Pipe()
+		task.standardOutput = output
+		// Kept apart from stdout: a warning on stderr must not end up parsed as the
+		// answer. `--pick-port` prints a bare number and nothing else on success.
+		task.standardError = errors
+		let result: (Int32, String) = try await withCheckedThrowingContinuation { continuation in
+			task.terminationHandler = { finished in
+				let said = String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+				continuation.resume(returning: (finished.terminationStatus, said))
+			}
+			do { try task.run() } catch { continuation.resume(throwing: error) }
+		}
+		guard result.0 == 0 else {
+			throw Failure.refused(String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "")
+		}
+		return result.1
+	}
+
 	private static func guildhall(_ args: [String], stdin secret: String) async throws {
 		guard let found = tools() else { throw Failure.noCLI }
 
