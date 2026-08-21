@@ -60,8 +60,21 @@ const IDLE_MS = 10 * 60 * 1000
 const TAIL_BYTES = 65_536
 const TAIL_RETRY_BYTES = 4 << 20
 
-/** The header is one line: 246–470 bytes across the real corpus, so this is ample. */
-const HEAD_BYTES = 8_192
+/**
+ * How much to read looking for the header line.
+ *
+ * This was 8KB, on a measurement of twelve files that put the header at 246–470 bytes,
+ * and the comment said "ample". Over the whole corpus of 45 it is nothing like ample:
+ * **20 of them exceed 8KB and the largest is 21,856 bytes**, because `session_meta`
+ * embeds `base_instructions`. Every one of those sessions was silently dropped — the
+ * truncated line failed to parse and the file was treated as having no header at all.
+ * A live session on this machine disappeared exactly this way.
+ *
+ * A sample of twelve was the whole mistake, so the window does not rely on being big
+ * enough: if no newline is found in it, the read grows once and tries again.
+ */
+const HEAD_BYTES = 65_536
+const HEAD_RETRY_BYTES = 1 << 20
 
 /** A rollout that has not grown cannot have changed. Same trick as digest.ts. */
 const cache = new Map<string, { size: number; r: Rollout }>()
@@ -222,6 +235,27 @@ function files(at: string, want: Set<string> | null): Found[] {
 	return out
 }
 
+/**
+ * The first line, however long it is.
+ *
+ * `null` when no complete line could be found even in the larger window, which means a
+ * header bigger than a megabyte or a file with no newline in it at all — not something
+ * to guess about.
+ */
+function headerLine(fd: number, size: number): string | null {
+	for (const window of [HEAD_BYTES, HEAD_RETRY_BYTES]) {
+		const want = Math.min(window, size)
+		const buf = Buffer.alloc(want)
+		const got = fs.readSync(fd, buf, 0, want, 0)
+		const text = buf.subarray(0, got).toString('utf8')
+		const nl = text.indexOf('\n')
+		if (nl >= 0) return text.slice(0, nl)
+		// The whole file has no newline; there is no more to read.
+		if (want >= size) return null
+	}
+	return null
+}
+
 /** The window, parsed. Separate so it can be retried larger. */
 function scan(fd: number, size: number, id: string, cwd: string, window: number): Rollout | null {
 	const from = Math.max(0, size - window)
@@ -285,9 +319,8 @@ function read(file: string, size: number, wantId: string): Rollout | null {
 		return null
 	}
 	try {
-		const head = Buffer.alloc(Math.min(HEAD_BYTES, size))
-		const readHead = fs.readSync(fd, head, 0, head.length, 0)
-		const firstLine = head.subarray(0, readHead).toString('utf8').split('\n')[0] ?? ''
+		const firstLine = headerLine(fd, size)
+		if (firstLine === null) return null
 		let meta: Record<string, unknown> = {}
 		try {
 			meta = (JSON.parse(firstLine).payload ?? {}) as Record<string, unknown>

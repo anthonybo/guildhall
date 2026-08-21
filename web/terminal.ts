@@ -641,6 +641,27 @@ export function mountTerminal(host: HTMLElement, closed: () => void) {
 	})
 }
 
+/**
+ * The control grant, and one way to send with it.
+ *
+ * Exported because a Codex session has no terminal panel — it is not a cmux pane — so
+ * the list needs to send without one. What it must NOT do is keep its own copy of the
+ * password or its own fetch: one storage key, one deadline, one place that knows the
+ * header's name. `api()` already carries the 20-second deadline, and a fetch without
+ * one never settles on a phone changing networks.
+ */
+export const hasControl = () => token() !== ''
+export const setControl = (v: string) => sessionStorage.setItem(KEY, v.trim())
+
+/** Type into a session that has no panel to type into. */
+export async function sendTo(id: string, text: string) {
+	return api('/api/send', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ id, text }),
+	})
+}
+
 export const isOpen = () => openId !== null
 
 /**

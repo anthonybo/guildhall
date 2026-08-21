@@ -191,13 +191,18 @@ accurate one is: with the flag off, nothing changes at all — verified byte-for
 against `main`, including key order; with it on, an existing row can gain a
 disambiguator, and nothing else.
 
-**"The browser can type into a Codex session" overstates what shipped.** The send path
-works and is reachable over HTTP, but both browser entry points to the terminal panel
-gate on `s.workspace`, which a Codex session does not have — so there is no button, and
-the list's own tooltip says there is no terminal tab to open. `/api/screen` and
-`/api/key` still refuse a Codex target, correctly, since there is no pane to read or
-send keys to. What exists is an API-reachable send with no affordance in the UI. Either
-a send-only box for rows carrying `agent`, or say so plainly.
+**"The browser can type into a Codex session" overstated what shipped, and now it does
+not.** The send path worked and was reachable only over HTTP, because both browser entry
+points to the terminal panel gate on `s.workspace`, which a Codex session does not have.
+A row carrying `agent` with no workspace now gets a send box in its own detail area: a
+message field, a Queue button, and the control password field when the grant is not
+already held. It reuses the panel's storage key and its fetch helper rather than keeping
+a second copy of the password or a second idea of the deadline.
+
+It is deliberately not a terminal. `/api/screen` and `/api/key` still refuse a Codex
+target — there is no pane to read and no keys to press — and the message is queued for
+the session's next turn, so the box offers exactly that and nothing that looks like
+more.
 
 ## Phases
 
@@ -279,10 +284,32 @@ API was. One `readdir` of a directory with two files in it was the answer.
   session idle at a prompt and one mid-turn that has not written for ten seconds are
   currently both read the same way. `turn/started` and `turn/completed` would settle
   it, which is the one thing the app-server would still be good for.
-- **`waitingOnApproval`.** Codex has the state and guildhall has `needs`, and the file
-  path cannot see it — an approval prompt is a question the process is holding in
-  memory, not a record it has written. This is the gap most worth closing, because
-  "something is blocked on you" is the thing the room exists to show.
+- **`waitingOnApproval`, and what was ruled out trying to reach it.** Codex has the
+  state and guildhall has `needs`, and a session blocked on an approval currently reads
+  as finished — it never enters the "needs you" band and never turns the menu bar icon
+  orange, which is the moment being away from the machine hurts most.
+
+  Checked, so nobody repeats it: there is **no approval record in the rollout files** —
+  21 distinct record types across 45 files, none of them an approval. Tool calls and
+  their outputs are perfectly balanced (3769/3769), so "a call with no output yet" is a
+  real signal in principle but says only that a tool has not finished, not why.
+
+  The daemon still cannot be reached, and now the reason is known rather than guessed:
+  the control socket speaks **the WebSocket HTTP Upgrade handshake and WebSocket
+  frames**, not raw newline-delimited JSON, which is why connecting directly returns
+  nothing. `codex app-server proxy` is supposed to bridge that to stdio and does
+  negotiate, but the daemon closes the connection immediately — `failed to copy data
+  from stdin to socket: Broken pipe`. The protocol also requires an `initialize` request
+  followed by an `initialized` NOTIFICATION before anything else is accepted; sending
+  that did not change the outcome. `daemon enable-remote-control` exists and was NOT
+  tried, since turning on remote control of somebody's machine is not a debugging step.
+
+  One lead, unverified and not built on: `~/.codex/logs_2.sqlite` has a `logs` table
+  carrying `thread_id`, and 18 of its rows mention approval, at DEBUG and INFO from
+  `codex_core::session::handlers` and `codex_core::session::turn`. It is an internal
+  rolling log — 150,797 rows written, 2,445 retained — so a feature built on it would
+  stop working silently. Worth checking against a session that is actually waiting,
+  which is how the lock directory was settled.
 - **Subagents.** `agentRole`, `parentThreadId` and `forkedFromId` look like they map
   onto what `agents.ts` already models for Claude. Worth checking rather than
   assuming.

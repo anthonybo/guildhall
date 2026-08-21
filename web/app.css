@@ -672,6 +672,9 @@
   .py-px {
     padding-block: 1px;
   }
+  .pt-2 {
+    padding-top: calc(var(--spacing) * 2);
+  }
   .pt-2\.5 {
     padding-top: calc(var(--spacing) * 2.5);
   }
@@ -1052,6 +1055,12 @@
   }
   .active\:text-gold:active {
     color: var(--color-gold);
+  }
+  .disabled\:cursor-default:disabled {
+    cursor: default;
+  }
+  .disabled\:opacity-50:disabled {
+    opacity: 50%;
   }
   .aria-checked\:border-gold[aria-checked="true"] {
     border-color: var(--color-gold);

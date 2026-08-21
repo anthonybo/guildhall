@@ -11,6 +11,7 @@ import { LOOK, projectColours, tierOf, type RGB } from '../src/theme.ts'
 import { needsAttention, order } from '../src/data/select.ts'
 import { mix, readable } from '../src/contrast.ts'
 import type { Session } from '../src/data/types.ts'
+import { hasControl, sendTo, setControl } from './terminal.ts'
 import { ago, rgb } from './dom.ts'
 
 /**
@@ -175,6 +176,98 @@ function details(s: Session) {
 	return dl
 }
 
+/**
+ * A place to type, for a session with no terminal to open.
+ *
+ * The send path worked before this existed and was reachable only by hand: the message
+ * box lives inside the terminal panel, and that panel opens for a cmux pane, which a
+ * Codex session is not. So "the browser can type into a Codex session" described an API
+ * with no button.
+ *
+ * Deliberately not a terminal. There is no screen to read and no keys to press — the
+ * message is queued for the session's next turn — so this offers exactly what the
+ * mechanism does and nothing that looks like more.
+ */
+function sendBox(s: Session) {
+	const box = document.createElement('div')
+	box.className = '[grid-area:detail] mt-2 border-t border-line pt-2'
+
+	const say = document.createElement('p')
+	say.className = 'm-0 mb-1.5 text-[0.78rem] text-faint'
+	box.append(say)
+
+	// The password, only when it is not already held. The panel owns the grant and the
+	// storage key; this reuses both rather than keeping a second copy of the password.
+	const pass = document.createElement('input')
+	pass.type = 'password'
+	pass.autocomplete = 'off'
+	pass.placeholder = 'control password'
+	// 16px, like every other input here: below that a phone zooms the page on focus.
+	pass.className = 'mb-1.5 min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
+
+	const row = document.createElement('div')
+	row.className = 'flex gap-1.5'
+	const text = document.createElement('input')
+	text.type = 'text'
+	text.placeholder = 'queue a message'
+	text.className = 'min-h-11 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 text-[16px] text-label'
+	const go = document.createElement('button')
+	go.type = 'button'
+	go.textContent = 'Queue'
+	go.className = 'min-h-11 cursor-pointer rounded border border-gold bg-gold px-3 font-bold text-bg disabled:cursor-default disabled:opacity-50'
+	row.append(text, go)
+
+	const draw = () => {
+		const locked = !hasControl()
+		pass.hidden = !locked
+		say.textContent = locked
+			? 'Queued for its next turn. Unlock with the control password first.'
+			: 'Queued for its next turn — there is no terminal to open for a Codex session.'
+		say.className = 'm-0 mb-1.5 text-[0.78rem] text-faint'
+	}
+	draw()
+
+	const submit = async () => {
+		if (pass.value.trim()) {
+			setControl(pass.value)
+			pass.value = ''
+			draw()
+		}
+		const body = text.value.trim()
+		if (!body) return
+		// Disabled while in flight, and re-enabled in a finally: the panel learned this
+		// the hard way — a fetch that never settles leaves a dead button and pressing it
+		// "does nothing" for the rest of the session.
+		go.disabled = true
+		try {
+			const r = await sendTo(s.id, body)
+			if (r.ok) {
+				text.value = ''
+				say.textContent = r.note ? `Queued. ${r.note}` : 'Queued.'
+				say.className = 'm-0 mb-1.5 text-[0.78rem] text-ok'
+			} else {
+				say.textContent = r.error ?? 'could not queue it'
+				say.className = 'm-0 mb-1.5 text-[0.78rem] text-bad'
+			}
+		} finally {
+			go.disabled = false
+		}
+	}
+	go.addEventListener('click', (e) => {
+		e.stopPropagation() // this queues a message, not the row's own detail
+		void submit()
+	})
+	for (const el of [text, pass]) {
+		el.addEventListener('click', (e) => e.stopPropagation())
+		el.addEventListener('keydown', (e) => {
+			e.stopPropagation()
+			if (e.key === 'Enter') void submit()
+		})
+	}
+	box.append(pass, row)
+	return box
+}
+
 export function paintList(list: Session[]) {
 	current = list
 	const sorted = order(list)
@@ -336,6 +429,10 @@ export function paintList(list: Session[]) {
 			// turns the chevron; `open` is only a hook for that one rule
 			li.classList.add('open')
 			li.append(details(s))
+			// Somewhere to type, for a session the terminal panel cannot open. Only when
+			// there is genuinely no other route: a cmux session gets the panel, which can
+			// read the screen and press keys as well as send.
+			if (s.agent && !s.workspace) li.append(sendBox(s))
 		}
 		const toggle = () => {
 			if (opened.has(s.id)) opened.delete(s.id)

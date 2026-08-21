@@ -188,6 +188,532 @@ function readable(fg, bg, target = 4.5) {
   return mix(toward, hi, fg);
 }
 
+// web/links.ts
+var URL_RE = /https?:\/\/[^\s'"`<>()[\]{}]+/g;
+var TRAILING = /[.,;:!?)\]}>'"`]+$/;
+function linkParts(text) {
+  const out = [];
+  URL_RE.lastIndex = 0;
+  let at = 0;
+  let m;
+  while (m = URL_RE.exec(text)) {
+    const href = m[0].replace(TRAILING, "");
+    if (!href || !/^https?:\/\/[^/]/.test(href)) continue;
+    if (m.index > at) out.push({ text: text.slice(at, m.index) });
+    out.push({ text: href, href });
+    at = m.index + href.length;
+  }
+  if (at < text.length) out.push({ text: text.slice(at) });
+  return out;
+}
+
+// web/viewport.ts
+var fullScreen = () => window.matchMedia("(width < 880px)").matches;
+var KEYBOARD = 60;
+var savedScroll = 0;
+var holders = /* @__PURE__ */ new Set();
+function lockPage(who) {
+  if (!holders.size) {
+    savedScroll = window.scrollY;
+    const s = document.body.style;
+    s.position = "fixed";
+    s.top = `${-savedScroll}px`;
+    s.left = "0";
+    s.right = "0";
+    s.width = "100%";
+  }
+  holders.add(who);
+}
+function unlockPage(who) {
+  if (!holders.delete(who) || holders.size) return;
+  const s = document.body.style;
+  s.position = "";
+  s.top = "";
+  s.left = "";
+  s.right = "";
+  s.width = "";
+  window.scrollTo(0, savedScroll);
+}
+var host = null;
+var showing = () => false;
+function release() {
+  if (!host) return;
+  host.style.height = "";
+  host.style.top = "";
+  host.style.bottom = "";
+  host.style.transform = "";
+}
+function measure() {
+  if (!host) return;
+  const vv = window.visualViewport;
+  if (!vv || !showing() || !fullScreen()) return release();
+  if (window.innerHeight - vv.height < KEYBOARD) return release();
+  host.style.height = `${vv.height}px`;
+  host.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
+  host.style.bottom = "auto";
+}
+var raf = 0;
+var stable = 0;
+var seen = "";
+var until = 0;
+var STEADY = 3;
+var LIMIT = 1200;
+function settle() {
+  until = performance.now() + LIMIT;
+  stable = 0;
+  if (!raf) raf = requestAnimationFrame(step);
+}
+function step() {
+  raf = 0;
+  const vv = window.visualViewport;
+  const now = vv ? `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}` : "";
+  measure();
+  if (now === seen) stable++;
+  else {
+    stable = 0;
+    seen = now;
+  }
+  if (stable >= STEADY || performance.now() > until) return;
+  raf = requestAnimationFrame(step);
+}
+function watch(el4, open3) {
+  host = el4;
+  showing = open3;
+  el4.addEventListener("pointerdown", measure, { passive: true });
+  window.visualViewport?.addEventListener("resize", settle);
+  window.visualViewport?.addEventListener("scroll", measure);
+}
+
+// web/grid.ts
+var COMFORTABLE = 15;
+var LEGIBLE = 8;
+var READABLE = 12;
+var PAD = 24;
+var RULE = /^(\S)\1{7,}$/;
+function fill(host2, text) {
+  const parts = linkParts(text);
+  if (parts.length === 1 && !parts[0].href) return void host2.append(text);
+  for (const p of parts) {
+    if (!p.href) {
+      host2.append(p.text);
+      continue;
+    }
+    const a = document.createElement("a");
+    a.href = p.href;
+    a.textContent = p.text;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "underline decoration-dotted underline-offset-2 hover:decoration-solid";
+    host2.append(a);
+  }
+}
+var ratio = 0;
+function advanceRatio(host2) {
+  if (ratio) return ratio;
+  const probe = document.createElement("span");
+  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:100px";
+  probe.textContent = "M".repeat(100);
+  host2.append(probe);
+  const w = probe.getBoundingClientRect().width;
+  probe.remove();
+  ratio = w > 0 ? w / 1e4 : 0.6;
+  return ratio;
+}
+function paint(pre, g, panel, wrap2) {
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
+  const byId = new Map(g.styles.map((st) => [st.id, st]));
+  const rows = /* @__PURE__ */ new Map();
+  for (const sp of g.row_spans) {
+    const list = rows.get(sp.row) ?? [];
+    list.push(sp);
+    rows.set(sp.row, list);
+  }
+  pre.style.background = g.terminal_background ?? "transparent";
+  pre.style.color = g.terminal_foreground ?? "inherit";
+  panel.style.maxWidth = "";
+  panel.style.marginInline = "";
+  const advance = advanceRatio(pre);
+  const usable = Math.max(200, pre.clientWidth - PAD);
+  const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
+  const cramped = exact < READABLE;
+  const reflow = wrap2 && cramped;
+  const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
+  pre.style.fontSize = `${size.toFixed(2)}px`;
+  pre.style.lineHeight = "1.25";
+  const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size);
+  pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`;
+  pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
+  pre.style.overflowWrap = reflow ? "break-word" : "";
+  if (fullScreen()) {
+    pre.style.maxHeight = "";
+  } else {
+    const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
+    const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
+    const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0;
+    pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
+  }
+  const out = [];
+  for (let r = 0; r < g.rows; r++) {
+    const line = document.createElement("div");
+    const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
+    let col = 0;
+    for (const sp of spans) {
+      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
+      const st = byId.get(sp.style_id);
+      const cell = document.createElement("span");
+      const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
+      const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
+      if (fg) cell.style.color = fg;
+      if (bg && bg !== g.terminal_background) cell.style.background = bg;
+      if (st?.bold) cell.style.fontWeight = "700";
+      if (st?.faint) cell.style.opacity = "0.7";
+      if (st?.italic) cell.style.fontStyle = "italic";
+      if (st?.underline || st?.strikethrough) cell.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
+      if (st?.invisible) cell.style.visibility = "hidden";
+      if (reflow && RULE.test(sp.text)) cell.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
+      fill(cell, sp.text);
+      line.append(cell);
+      col = sp.column + [...sp.text].length;
+    }
+    if (!spans.length) line.append("\xA0");
+    out.push(line);
+  }
+  pre.replaceChildren(...out);
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+  return cramped;
+}
+
+// web/terminal.ts
+var KEY = "guildhall.control";
+var WRAP = "guildhall.terminal.wrap";
+var KEYPAD = "guildhall.terminal.keys";
+var wrap = localStorage.getItem(WRAP) !== "exact";
+var keypad = localStorage.getItem(KEYPAD) === "on";
+var lastSig = "";
+function repaintSoon() {
+  lastSig = "";
+  lastTag = "";
+}
+var openId = null;
+var openName = "";
+var timer = 0;
+var el;
+var onClose = () => {
+};
+function holdPage() {
+  if (fullScreen()) lockPage("terminal");
+  else unlockPage("terminal");
+}
+var token = () => sessionStorage.getItem(KEY) ?? "";
+var lastTag = "";
+async function api(path, init = {}) {
+  try {
+    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+    if (res.status === 304) return { status: 304 };
+    lastTag = res.headers.get("etag") ?? lastTag;
+    const body = await res.json().catch(() => ({ error: "unreadable reply" }));
+    return { status: res.status, ...body };
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
+  }
+}
+function askForToken(why) {
+  clearInterval(timer);
+  timer = 0;
+  el.innerHTML = "";
+  el.style.maxWidth = "";
+  el.style.marginInline = "";
+  el.append(titleBar(openName, "password needed"));
+  const wrap2 = document.createElement("div");
+  wrap2.className = "p-4";
+  const h = document.createElement("p");
+  h.className = "mt-0 mb-2 text-label";
+  h.textContent = "Control password";
+  const p = document.createElement("p");
+  p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
+  p.textContent = `${why} It is the password you set on the machine running guildhall \u2014 press ? there, then c.`;
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "the password you set";
+  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "Unlock";
+  go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
+  const submit = () => {
+    sessionStorage.setItem(KEY, input.value.trim());
+    if (openId) show(openId, openName);
+  };
+  go.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+  wrap2.append(h, p, input, go);
+  el.append(wrap2);
+  input.focus();
+}
+function titleBar(name, subtitle) {
+  const bar3 = document.createElement("div");
+  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "shrink-0 text-[0.72rem] text-faint";
+  live2.textContent = subtitle;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, close);
+  bar3.append(title, live2, x);
+  return bar3;
+}
+function chrome(name) {
+  el.innerHTML = "";
+  const bar3 = document.createElement("div");
+  bar3.id = "screenbar";
+  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "text-[0.72rem] text-faint";
+  live2.textContent = "live terminal";
+  const mode = document.createElement("button");
+  mode.type = "button";
+  mode.id = "screenmode";
+  mode.hidden = true;
+  mode.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+  const label = () => {
+    mode.textContent = wrap ? "Wrapped" : "Exact";
+    mode.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
+  };
+  label();
+  mode.addEventListener("click", () => {
+    wrap = !wrap;
+    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
+    label();
+    repaintSoon();
+    refresh();
+  });
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, close);
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.id = "keystoggle";
+  const labelKeys = () => {
+    keysBtn.textContent = "\u2328";
+    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
+    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
+  };
+  labelKeys();
+  tap(keysBtn, () => {
+    keypad = !keypad;
+    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
+    labelKeys();
+    const row = document.getElementById("promptkeys");
+    if (row) row.hidden = !keypad;
+  });
+  const tail = document.createElement("div");
+  tail.className = "ml-auto flex items-center gap-2";
+  tail.append(mode, keysBtn, x);
+  bar3.append(title, live2, tail);
+  const pre = document.createElement("pre");
+  pre.id = "screen";
+  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
+  pre.textContent = "reading\u2026";
+  const form = document.createElement("form");
+  form.className = "flex gap-2 border-t border-line p-2";
+  const input = document.createElement("input");
+  input.id = "ask";
+  input.autocomplete = "off";
+  input.placeholder = "Type into this session\u2026";
+  input.enterKeyHint = "send";
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    form.requestSubmit();
+  });
+  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
+  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.textContent = "Send";
+  send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
+  tap(send, () => form.requestSubmit());
+  const note = document.createElement("p");
+  note.id = "sendnote";
+  note.hidden = true;
+  note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
+  form.append(input, send);
+  const keys = document.createElement("div");
+  keys.id = "promptkeys";
+  keys.hidden = !keypad;
+  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
+  const hint = document.createElement("span");
+  hint.className = "mr-auto text-[0.72rem] text-faint";
+  hint.textContent = "answer a prompt";
+  keys.append(hint);
+  for (const [label2, key, title2] of [
+    ["\u25B2", "up", "Move up the list"],
+    ["\u25BC", "down", "Move down the list"],
+    ["\u23CE", "enter", "Choose the highlighted option"],
+    ["esc", "escape", "Cancel the prompt"]
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = title2;
+    b.textContent = label2;
+    b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
+    tap(b, () => {
+      if (key === "enter" && input.value.trim()) return void form.requestSubmit();
+      sendKey(key, pre);
+    });
+    keys.append(b);
+  }
+  el.append(keys);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value;
+    if (!text.trim() || sending) return;
+    input.value = "";
+    sending = true;
+    send.disabled = true;
+    send.textContent = "Sending\u2026";
+    let r;
+    try {
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
+    } finally {
+      sending = false;
+      send.disabled = false;
+      send.textContent = "Send";
+    }
+    if (r.error) {
+      pre.textContent = `${r.error}
+
+${pre.textContent}`;
+      input.value = text;
+    }
+    note.textContent = r.note ?? "";
+    note.hidden = !r.note;
+    refresh();
+  });
+  el.append(bar3, pre, note, form);
+  return { pre, input };
+}
+var polling = false;
+var sending = false;
+async function sendKey(key, pre) {
+  if (!openId) return;
+  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId, key }) });
+  if (r.error) {
+    pre.textContent = `${r.error}
+
+${pre.textContent}`;
+    return;
+  }
+  await new Promise((r2) => setTimeout(r2, 120));
+  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
+  refresh();
+}
+async function refresh() {
+  if (!openId || polling || sending) return;
+  polling = true;
+  try {
+    await poll();
+  } finally {
+    polling = false;
+  }
+}
+async function poll() {
+  if (!openId) return;
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  if (r.status === 304) return;
+  if (r.status === 401) return askForToken("That password was not accepted.");
+  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
+  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
+  const pre = document.getElementById("screen");
+  if (!pre) return;
+  if (r.error) return void (pre.textContent = r.error);
+  if (!r.render_grid) return;
+  const sig = JSON.stringify(r.render_grid.row_spans);
+  if (sig === lastSig && pre.childElementCount) return;
+  lastSig = sig;
+  const btn = document.getElementById("screenmode");
+  const cramped = paint(pre, r.render_grid, el, wrap);
+  if (btn) btn.hidden = !cramped;
+}
+function show(id, name) {
+  openId = id;
+  openName = name;
+  el.hidden = false;
+  holdPage();
+  measure();
+  if (!token()) return askForToken("This is behind a separate password from the passcode.");
+  const { input } = chrome(name);
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 2e3);
+  if (!fullScreen()) input.focus();
+}
+function close() {
+  openId = null;
+  lastTag = "";
+  clearInterval(timer);
+  timer = 0;
+  el.hidden = true;
+  el.innerHTML = "";
+  el.style.maxWidth = "";
+  el.style.marginInline = "";
+  el.style.height = "";
+  el.style.top = "";
+  el.style.bottom = "";
+  el.style.transform = "";
+  unlockPage("terminal");
+  onClose();
+}
+function mountTerminal(host2, closed) {
+  el = host2;
+  onClose = closed;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && openId) close();
+  });
+  watch(host2, isOpen);
+  let t = 0;
+  addEventListener("resize", () => {
+    if (!openId) return;
+    holdPage();
+    settle();
+    clearTimeout(t);
+    t = setTimeout(() => {
+      repaintSoon();
+      refresh();
+    }, 120);
+  });
+}
+var hasControl = () => token() !== "";
+var setControl = (v) => sessionStorage.setItem(KEY, v.trim());
+async function sendTo(id, text) {
+  return api("/api/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, text })
+  });
+}
+var isOpen = () => openId !== null;
+var busy = () => {
+  if (!openId) return false;
+  if (sending) return true;
+  return !!document.getElementById("ask")?.value.trim();
+};
+
 // web/list.ts
 var CRT = `<svg viewBox="0 0 16 14" width="26" height="23" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor">
 	<rect x="0" y="0" width="16" height="11" opacity=".55"/>
@@ -215,7 +741,7 @@ var PANEL = [34, 31, 46];
 var FAINT = [129, 136, 146];
 var MUTED = [138, 138, 138];
 var inks = /* @__PURE__ */ new Map();
-function paint(fg, bg, target) {
+function paint2(fg, bg, target) {
   const key = `${fg}|${bg}|${target ?? ""}`;
   let v = inks.get(key);
   if (v === void 0) {
@@ -278,6 +804,72 @@ function details(s) {
   }
   return dl;
 }
+function sendBox(s) {
+  const box = document.createElement("div");
+  box.className = "[grid-area:detail] mt-2 border-t border-line pt-2";
+  const say2 = document.createElement("p");
+  say2.className = "m-0 mb-1.5 text-[0.78rem] text-faint";
+  box.append(say2);
+  const pass = document.createElement("input");
+  pass.type = "password";
+  pass.autocomplete = "off";
+  pass.placeholder = "control password";
+  pass.className = "mb-1.5 min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const row = document.createElement("div");
+  row.className = "flex gap-1.5";
+  const text = document.createElement("input");
+  text.type = "text";
+  text.placeholder = "queue a message";
+  text.className = "min-h-11 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 text-[16px] text-label";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "Queue";
+  go.className = "min-h-11 cursor-pointer rounded border border-gold bg-gold px-3 font-bold text-bg disabled:cursor-default disabled:opacity-50";
+  row.append(text, go);
+  const draw = () => {
+    const locked = !hasControl();
+    pass.hidden = !locked;
+    say2.textContent = locked ? "Queued for its next turn. Unlock with the control password first." : "Queued for its next turn \u2014 there is no terminal to open for a Codex session.";
+    say2.className = "m-0 mb-1.5 text-[0.78rem] text-faint";
+  };
+  draw();
+  const submit = async () => {
+    if (pass.value.trim()) {
+      setControl(pass.value);
+      pass.value = "";
+      draw();
+    }
+    const body = text.value.trim();
+    if (!body) return;
+    go.disabled = true;
+    try {
+      const r = await sendTo(s.id, body);
+      if (r.ok) {
+        text.value = "";
+        say2.textContent = r.note ? `Queued. ${r.note}` : "Queued.";
+        say2.className = "m-0 mb-1.5 text-[0.78rem] text-ok";
+      } else {
+        say2.textContent = r.error ?? "could not queue it";
+        say2.className = "m-0 mb-1.5 text-[0.78rem] text-bad";
+      }
+    } finally {
+      go.disabled = false;
+    }
+  };
+  go.addEventListener("click", (e) => {
+    e.stopPropagation();
+    void submit();
+  });
+  for (const el4 of [text, pass]) {
+    el4.addEventListener("click", (e) => e.stopPropagation());
+    el4.addEventListener("keydown", (e) => {
+      e.stopPropagation();
+      if (e.key === "Enter") void submit();
+    });
+  }
+  box.append(pass, row);
+  return box;
+}
 function paintList(list) {
   current = list;
   const sorted = order(list);
@@ -315,13 +907,13 @@ function paintList(list) {
     if (busy2) li.style.setProperty("--phase", `-${Date.now() % 1600}ms`);
     const card = cardOf(s.state);
     li.style.setProperty("--state", rgb(look.color));
-    li.style.setProperty("--ink", paint(look.color, card));
-    li.style.setProperty("--hot", paint([255, 95, 95], card));
-    li.style.setProperty("--dim", paint(FAINT, card));
-    li.style.setProperty("--soft", paint(MUTED, card, 5.5));
+    li.style.setProperty("--ink", paint2(look.color, card));
+    li.style.setProperty("--hot", paint2([255, 95, 95], card));
+    li.style.setProperty("--dim", paint2(FAINT, card));
+    li.style.setProperty("--soft", paint2(MUTED, card, 5.5));
     li.style.setProperty("--tint", tintOf(s.state));
     li.style.setProperty("--tier", rgb(tierOf(s.level).color));
-    li.style.setProperty("--proj", paint(hues.get(s.proj) ?? look.color, card));
+    li.style.setProperty("--proj", paint2(hues.get(s.proj) ?? look.color, card));
     const pct = s.ctxLimit ? Math.round(s.ctxUsed / s.ctxLimit * 100) : 0;
     li.innerHTML = `
 			<span class="[grid-area:lv] self-center min-w-[2.1rem] rounded px-1.5 py-0.5 text-center text-[0.8rem] font-bold text-[#1a1c28] bg-(--tier)">${s.level}</span>
@@ -373,6 +965,7 @@ function paintList(list) {
     if (open3) {
       li.classList.add("open");
       li.append(details(s));
+      if (s.agent && !s.workspace) li.append(sendBox(s));
     }
     const toggle = () => {
       if (opened.has(s.id)) opened.delete(s.id);
@@ -2472,10 +3065,10 @@ var SETTINGS = [
     ]
   }
 ];
-var KEY = "guildhall.settings";
+var KEY2 = "guildhall.settings";
 function read() {
   try {
-    const raw = JSON.parse(localStorage.getItem(KEY) ?? "{}");
+    const raw = JSON.parse(localStorage.getItem(KEY2) ?? "{}");
     const out = { ...DEFAULTS };
     for (const s of SETTINGS) {
       const v = raw[s.key];
@@ -2511,7 +3104,7 @@ function mountSettings(button, panel, onChange) {
         ;
         settings[s.key] = o.value;
         try {
-          localStorage.setItem(KEY, JSON.stringify(settings));
+          localStorage.setItem(KEY2, JSON.stringify(settings));
         } catch {
         }
         for (const el4 of choices.querySelectorAll("[role=radio]")) el4.setAttribute("aria-checked", "false");
@@ -2695,523 +3288,6 @@ function mountRoom(room, el4) {
   });
   requestAnimationFrame(frame);
 }
-
-// web/links.ts
-var URL_RE = /https?:\/\/[^\s'"`<>()[\]{}]+/g;
-var TRAILING = /[.,;:!?)\]}>'"`]+$/;
-function linkParts(text) {
-  const out = [];
-  URL_RE.lastIndex = 0;
-  let at = 0;
-  let m;
-  while (m = URL_RE.exec(text)) {
-    const href = m[0].replace(TRAILING, "");
-    if (!href || !/^https?:\/\/[^/]/.test(href)) continue;
-    if (m.index > at) out.push({ text: text.slice(at, m.index) });
-    out.push({ text: href, href });
-    at = m.index + href.length;
-  }
-  if (at < text.length) out.push({ text: text.slice(at) });
-  return out;
-}
-
-// web/viewport.ts
-var fullScreen = () => window.matchMedia("(width < 880px)").matches;
-var KEYBOARD = 60;
-var savedScroll = 0;
-var holders = /* @__PURE__ */ new Set();
-function lockPage(who) {
-  if (!holders.size) {
-    savedScroll = window.scrollY;
-    const s = document.body.style;
-    s.position = "fixed";
-    s.top = `${-savedScroll}px`;
-    s.left = "0";
-    s.right = "0";
-    s.width = "100%";
-  }
-  holders.add(who);
-}
-function unlockPage(who) {
-  if (!holders.delete(who) || holders.size) return;
-  const s = document.body.style;
-  s.position = "";
-  s.top = "";
-  s.left = "";
-  s.right = "";
-  s.width = "";
-  window.scrollTo(0, savedScroll);
-}
-var host = null;
-var showing = () => false;
-function release() {
-  if (!host) return;
-  host.style.height = "";
-  host.style.top = "";
-  host.style.bottom = "";
-  host.style.transform = "";
-}
-function measure() {
-  if (!host) return;
-  const vv = window.visualViewport;
-  if (!vv || !showing() || !fullScreen()) return release();
-  if (window.innerHeight - vv.height < KEYBOARD) return release();
-  host.style.height = `${vv.height}px`;
-  host.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : "";
-  host.style.bottom = "auto";
-}
-var raf = 0;
-var stable = 0;
-var seen = "";
-var until = 0;
-var STEADY = 3;
-var LIMIT = 1200;
-function settle() {
-  until = performance.now() + LIMIT;
-  stable = 0;
-  if (!raf) raf = requestAnimationFrame(step);
-}
-function step() {
-  raf = 0;
-  const vv = window.visualViewport;
-  const now = vv ? `${Math.round(vv.height)}:${Math.round(vv.offsetTop)}` : "";
-  measure();
-  if (now === seen) stable++;
-  else {
-    stable = 0;
-    seen = now;
-  }
-  if (stable >= STEADY || performance.now() > until) return;
-  raf = requestAnimationFrame(step);
-}
-function watch(el4, open3) {
-  host = el4;
-  showing = open3;
-  el4.addEventListener("pointerdown", measure, { passive: true });
-  window.visualViewport?.addEventListener("resize", settle);
-  window.visualViewport?.addEventListener("scroll", measure);
-}
-
-// web/grid.ts
-var COMFORTABLE = 15;
-var LEGIBLE = 8;
-var READABLE = 12;
-var PAD = 24;
-var RULE = /^(\S)\1{7,}$/;
-function fill(host2, text) {
-  const parts = linkParts(text);
-  if (parts.length === 1 && !parts[0].href) return void host2.append(text);
-  for (const p of parts) {
-    if (!p.href) {
-      host2.append(p.text);
-      continue;
-    }
-    const a = document.createElement("a");
-    a.href = p.href;
-    a.textContent = p.text;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "underline decoration-dotted underline-offset-2 hover:decoration-solid";
-    host2.append(a);
-  }
-}
-var ratio = 0;
-function advanceRatio(host2) {
-  if (ratio) return ratio;
-  const probe = document.createElement("span");
-  probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font-size:100px";
-  probe.textContent = "M".repeat(100);
-  host2.append(probe);
-  const w = probe.getBoundingClientRect().width;
-  probe.remove();
-  ratio = w > 0 ? w / 1e4 : 0.6;
-  return ratio;
-}
-function paint2(pre, g, panel, wrap2) {
-  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
-  const byId = new Map(g.styles.map((st) => [st.id, st]));
-  const rows = /* @__PURE__ */ new Map();
-  for (const sp of g.row_spans) {
-    const list = rows.get(sp.row) ?? [];
-    list.push(sp);
-    rows.set(sp.row, list);
-  }
-  pre.style.background = g.terminal_background ?? "transparent";
-  pre.style.color = g.terminal_foreground ?? "inherit";
-  panel.style.maxWidth = "";
-  panel.style.marginInline = "";
-  const advance = advanceRatio(pre);
-  const usable = Math.max(200, pre.clientWidth - PAD);
-  const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
-  const cramped = exact < READABLE;
-  const reflow = wrap2 && cramped;
-  const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
-  pre.style.fontSize = `${size.toFixed(2)}px`;
-  pre.style.lineHeight = "1.25";
-  const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size);
-  pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`;
-  pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
-  pre.style.overflowWrap = reflow ? "break-word" : "";
-  if (fullScreen()) {
-    pre.style.maxHeight = "";
-  } else {
-    const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
-    const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
-    const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0;
-    pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
-  }
-  const out = [];
-  for (let r = 0; r < g.rows; r++) {
-    const line = document.createElement("div");
-    const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
-    let col = 0;
-    for (const sp of spans) {
-      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
-      const st = byId.get(sp.style_id);
-      const cell = document.createElement("span");
-      const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
-      const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
-      if (fg) cell.style.color = fg;
-      if (bg && bg !== g.terminal_background) cell.style.background = bg;
-      if (st?.bold) cell.style.fontWeight = "700";
-      if (st?.faint) cell.style.opacity = "0.7";
-      if (st?.italic) cell.style.fontStyle = "italic";
-      if (st?.underline || st?.strikethrough) cell.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
-      if (st?.invisible) cell.style.visibility = "hidden";
-      if (reflow && RULE.test(sp.text)) cell.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
-      fill(cell, sp.text);
-      line.append(cell);
-      col = sp.column + [...sp.text].length;
-    }
-    if (!spans.length) line.append("\xA0");
-    out.push(line);
-  }
-  pre.replaceChildren(...out);
-  if (atBottom) pre.scrollTop = pre.scrollHeight;
-  return cramped;
-}
-
-// web/terminal.ts
-var KEY2 = "guildhall.control";
-var WRAP = "guildhall.terminal.wrap";
-var KEYPAD = "guildhall.terminal.keys";
-var wrap = localStorage.getItem(WRAP) !== "exact";
-var keypad = localStorage.getItem(KEYPAD) === "on";
-var lastSig = "";
-function repaintSoon() {
-  lastSig = "";
-  lastTag = "";
-}
-var openId = null;
-var openName = "";
-var timer = 0;
-var el;
-var onClose = () => {
-};
-function holdPage() {
-  if (fullScreen()) lockPage("terminal");
-  else unlockPage("terminal");
-}
-var token = () => sessionStorage.getItem(KEY2) ?? "";
-var lastTag = "";
-async function api(path, init = {}) {
-  try {
-    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
-    if (res.status === 304) return { status: 304 };
-    lastTag = res.headers.get("etag") ?? lastTag;
-    const body = await res.json().catch(() => ({ error: "unreadable reply" }));
-    return { status: res.status, ...body };
-  } catch (e) {
-    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
-    return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
-  }
-}
-function askForToken(why) {
-  clearInterval(timer);
-  timer = 0;
-  el.innerHTML = "";
-  el.style.maxWidth = "";
-  el.style.marginInline = "";
-  el.append(titleBar(openName, "password needed"));
-  const wrap2 = document.createElement("div");
-  wrap2.className = "p-4";
-  const h = document.createElement("p");
-  h.className = "mt-0 mb-2 text-label";
-  h.textContent = "Control password";
-  const p = document.createElement("p");
-  p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
-  p.textContent = `${why} It is the password you set on the machine running guildhall \u2014 press ? there, then c.`;
-  const input = document.createElement("input");
-  input.type = "password";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  input.placeholder = "the password you set";
-  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
-  const go = document.createElement("button");
-  go.type = "button";
-  go.textContent = "Unlock";
-  go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
-  const submit = () => {
-    sessionStorage.setItem(KEY2, input.value.trim());
-    if (openId) show(openId, openName);
-  };
-  go.addEventListener("click", submit);
-  input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
-  wrap2.append(h, p, input, go);
-  el.append(wrap2);
-  input.focus();
-}
-function titleBar(name, subtitle) {
-  const bar3 = document.createElement("div");
-  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "truncate font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "shrink-0 text-[0.72rem] text-faint";
-  live2.textContent = subtitle;
-  const x = document.createElement("button");
-  x.type = "button";
-  x.textContent = "\u2715 Close";
-  x.title = "Close the terminal (Esc)";
-  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  bar3.append(title, live2, x);
-  return bar3;
-}
-function chrome(name) {
-  el.innerHTML = "";
-  const bar3 = document.createElement("div");
-  bar3.id = "screenbar";
-  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "text-[0.72rem] text-faint";
-  live2.textContent = "live terminal";
-  const mode = document.createElement("button");
-  mode.type = "button";
-  mode.id = "screenmode";
-  mode.hidden = true;
-  mode.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
-  const label = () => {
-    mode.textContent = wrap ? "Wrapped" : "Exact";
-    mode.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
-  };
-  label();
-  mode.addEventListener("click", () => {
-    wrap = !wrap;
-    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
-    label();
-    repaintSoon();
-    refresh();
-  });
-  const x = document.createElement("button");
-  x.type = "button";
-  x.textContent = "\u2715 Close";
-  x.title = "Close the terminal (Esc)";
-  x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  const keysBtn = document.createElement("button");
-  keysBtn.type = "button";
-  keysBtn.id = "keystoggle";
-  const labelKeys = () => {
-    keysBtn.textContent = "\u2328";
-    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
-    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
-  };
-  labelKeys();
-  tap(keysBtn, () => {
-    keypad = !keypad;
-    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
-    labelKeys();
-    const row = document.getElementById("promptkeys");
-    if (row) row.hidden = !keypad;
-  });
-  const tail = document.createElement("div");
-  tail.className = "ml-auto flex items-center gap-2";
-  tail.append(mode, keysBtn, x);
-  bar3.append(title, live2, tail);
-  const pre = document.createElement("pre");
-  pre.id = "screen";
-  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
-  pre.textContent = "reading\u2026";
-  const form = document.createElement("form");
-  form.className = "flex gap-2 border-t border-line p-2";
-  const input = document.createElement("input");
-  input.id = "ask";
-  input.autocomplete = "off";
-  input.placeholder = "Type into this session\u2026";
-  input.enterKeyHint = "send";
-  input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
-    e.preventDefault();
-    form.requestSubmit();
-  });
-  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
-  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
-  const send = document.createElement("button");
-  send.type = "submit";
-  send.textContent = "Send";
-  send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
-  tap(send, () => form.requestSubmit());
-  const note = document.createElement("p");
-  note.id = "sendnote";
-  note.hidden = true;
-  note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
-  form.append(input, send);
-  const keys = document.createElement("div");
-  keys.id = "promptkeys";
-  keys.hidden = !keypad;
-  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
-  const hint = document.createElement("span");
-  hint.className = "mr-auto text-[0.72rem] text-faint";
-  hint.textContent = "answer a prompt";
-  keys.append(hint);
-  for (const [label2, key, title2] of [
-    ["\u25B2", "up", "Move up the list"],
-    ["\u25BC", "down", "Move down the list"],
-    ["\u23CE", "enter", "Choose the highlighted option"],
-    ["esc", "escape", "Cancel the prompt"]
-  ]) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.title = title2;
-    b.textContent = label2;
-    b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
-    tap(b, () => {
-      if (key === "enter" && input.value.trim()) return void form.requestSubmit();
-      sendKey(key, pre);
-    });
-    keys.append(b);
-  }
-  el.append(keys);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = input.value;
-    if (!text.trim() || sending) return;
-    input.value = "";
-    sending = true;
-    send.disabled = true;
-    send.textContent = "Sending\u2026";
-    let r;
-    try {
-      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
-    } finally {
-      sending = false;
-      send.disabled = false;
-      send.textContent = "Send";
-    }
-    if (r.error) {
-      pre.textContent = `${r.error}
-
-${pre.textContent}`;
-      input.value = text;
-    }
-    note.textContent = r.note ?? "";
-    note.hidden = !r.note;
-    refresh();
-  });
-  el.append(bar3, pre, note, form);
-  return { pre, input };
-}
-var polling = false;
-var sending = false;
-async function sendKey(key, pre) {
-  if (!openId) return;
-  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId, key }) });
-  if (r.error) {
-    pre.textContent = `${r.error}
-
-${pre.textContent}`;
-    return;
-  }
-  await new Promise((r2) => setTimeout(r2, 120));
-  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
-  refresh();
-}
-async function refresh() {
-  if (!openId || polling || sending) return;
-  polling = true;
-  try {
-    await poll();
-  } finally {
-    polling = false;
-  }
-}
-async function poll() {
-  if (!openId) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
-  if (r.status === 304) return;
-  if (r.status === 401) return askForToken("That password was not accepted.");
-  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
-  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
-  const pre = document.getElementById("screen");
-  if (!pre) return;
-  if (r.error) return void (pre.textContent = r.error);
-  if (!r.render_grid) return;
-  const sig = JSON.stringify(r.render_grid.row_spans);
-  if (sig === lastSig && pre.childElementCount) return;
-  lastSig = sig;
-  const btn = document.getElementById("screenmode");
-  const cramped = paint2(pre, r.render_grid, el, wrap);
-  if (btn) btn.hidden = !cramped;
-}
-function show(id, name) {
-  openId = id;
-  openName = name;
-  el.hidden = false;
-  holdPage();
-  measure();
-  if (!token()) return askForToken("This is behind a separate password from the passcode.");
-  const { input } = chrome(name);
-  refresh();
-  clearInterval(timer);
-  timer = setInterval(refresh, 2e3);
-  if (!fullScreen()) input.focus();
-}
-function close() {
-  openId = null;
-  lastTag = "";
-  clearInterval(timer);
-  timer = 0;
-  el.hidden = true;
-  el.innerHTML = "";
-  el.style.maxWidth = "";
-  el.style.marginInline = "";
-  el.style.height = "";
-  el.style.top = "";
-  el.style.bottom = "";
-  el.style.transform = "";
-  unlockPage("terminal");
-  onClose();
-}
-function mountTerminal(host2, closed) {
-  el = host2;
-  onClose = closed;
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && openId) close();
-  });
-  watch(host2, isOpen);
-  let t = 0;
-  addEventListener("resize", () => {
-    if (!openId) return;
-    holdPage();
-    settle();
-    clearTimeout(t);
-    t = setTimeout(() => {
-      repaintSoon();
-      refresh();
-    }, 120);
-  });
-}
-var isOpen = () => openId !== null;
-var busy = () => {
-  if (!openId) return false;
-  if (sending) return true;
-  return !!document.getElementById("ask")?.value.trim();
-};
 
 // web/press.ts
 var DEPLOYS = "guildhall.press.deploys";

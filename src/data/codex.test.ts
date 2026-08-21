@@ -314,3 +314,27 @@ test('an orphaned lock does not cost a walk on every poll', () => {
 	// this fixture costs an order of magnitude more.
 	assert.ok(per < 1.5, `an orphaned lock still costs ${per.toFixed(2)} cpu-ms per poll`)
 })
+
+test('a header larger than the read window is not a missing session', () => {
+	// `session_meta` embeds `base_instructions`, so headers get big: 20 of the 45 real
+	// rollouts exceed 8KB and the largest is 21,856 bytes. An 8KB window — chosen on a
+	// sample of TWELVE files that all sat under 500 bytes — silently dropped 44% of
+	// sessions, including a live one, because the truncated line failed to parse and the
+	// file looked headerless.
+	reset()
+	const fat = { ...meta(ID.a, '/x/projects/orchard') }
+	;(fat.payload as Record<string, unknown>).base_instructions = 'i'.repeat(120_000)
+	rollout(ID.a, [fat, started, done], { live: true })
+	const out = read()
+	assert.equal(out.length, 1, 'a session with a large header vanished')
+	assert.equal(out[0]!.proj, 'orchard', 'the cwd was lost with the header')
+})
+
+test('a file with no newline at all is skipped, not hung on', () => {
+	reset()
+	const at = path.join(dir, '2026/08/20')
+	fs.mkdirSync(at, { recursive: true })
+	fs.writeFileSync(path.join(at, `rollout-2026-08-20T10-00-00-${ID.b}.jsonl`), 'x'.repeat(300_000))
+	fs.writeFileSync(path.join(locks, `${ID.b}.lock`), '')
+	assert.deepEqual(read(), [])
+})
