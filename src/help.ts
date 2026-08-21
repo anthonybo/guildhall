@@ -137,6 +137,18 @@ function settingsBlock(share?: ShareInfo, control?: ControlInfo, env?: Env): (st
 		if (share.pinNote) rows.push(`${fg(C.faint)}${share.pinNote}${R}`)
 		if (share.portNote) rows.push(`${fg(C.faint)}${share.portNote}${R}`)
 	}
+	/**
+	 * A second guildhall serving, named.
+	 *
+	 * Shown whether sharing is on or off, and not behind a heading: the case that
+	 * matters is a server you have forgotten, and you cannot go looking for something
+	 * you do not know exists. Two of these were running on this machine for half an
+	 * hour, both reachable over the tailnet, and the only way to find out was lsof.
+	 */
+	if (share?.others) {
+		rows.push(`${fg(C.fillWarn)}${share.others}${R}`)
+		rows.push(`${fg(C.muted)}Each costs about 1% of a core, and both are reachable.${R}`)
+	}
 	// Visible whether sharing is on or off, and collapsed or not. The case that
 	// matters most is somebody DECIDING whether to enable it, which is when sharing
 	// is still off — and serve.test.ts checks the panel with no sharing state at all
@@ -180,6 +192,8 @@ function stateLine(state: State, meaning: string) {
 }
 
 export type ShareInfo = {
+	/** another guildhall serving right now, if any — see src/servers.ts */
+	others?: string | null
 	on: boolean
 	port: number
 	token: string

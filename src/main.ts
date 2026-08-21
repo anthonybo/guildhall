@@ -54,6 +54,7 @@ import { hasControlPass, setControlPass } from './controlauth.ts'
 import * as update from './update.ts'
 import { CMUX } from './data/cmux-bin.ts'
 import { pickPort } from './port.ts'
+import { announce, othersNote, withdraw } from './servers.ts'
 
 // the tier/needs colours a badge takes, passed in so screens.ts stays theme-free
 const LEVEL_LOOK = { needs: LOOK.needs.color, tierOf: (n: number) => tierOf(n).color }
@@ -353,6 +354,7 @@ function syncServe() {
 	if (!cfg.serve) {
 		server?.close()
 		server = null
+		withdraw()
 		return
 	}
 	try {
@@ -389,6 +391,10 @@ function syncServe() {
 			server = null
 			cfg.serve = false
 		})
+		// Announced once the bind SUCCEEDS, not before: a failed listen must not leave a
+		// file claiming this process is serving, or the next room would warn about a
+		// server that never started.
+		server.on('listening', () => announce(cfg.port, cfg.host))
 		server.listen(cfg.port, cfg.host)
 		serveError = ''
 	} catch {
@@ -557,7 +563,10 @@ let helpOpen = new Set<string>()
  */
 const shareInfo = () => {
 	const net = addresses()
-	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote }
+	// `others()` is a directory read and a few kill(0) calls — microseconds — so it is
+	// recomputed here on every draw rather than cached. The lsof version cost 90 cpu-ms,
+	// which is what a registry exists to avoid; see src/servers.ts.
+	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote, others: othersNote() }
 }
 const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
 const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), labels: cfg.labels, codex: cfg.codex })
@@ -1347,6 +1356,14 @@ function headless() {
 	cfg.serve = true
 	syncServe()
 	console.log(`${stamp()}  guildhall headless on ${cfg.host}:${cfg.port} (pid ${process.pid}) — ${BUILD}`)
+	// Named at startup, because this log is the only thing a launchd service can say.
+	// Two servers on different ports never collide, so nothing else notices: each is
+	// about 1% of a core, both are reachable on the tailnet, and they can be running
+	// different builds of the server while serving the same browser client.
+	{
+		const also = othersNote()
+		if (also) console.log(`${stamp()}  ${also} — two servers cost twice as much and both are reachable`)
+	}
 	// Serving is the entire job, so failing to serve is failing to run.
 	//
 	// This used to log the error and carry on: a live process, polling every two
@@ -1381,6 +1398,8 @@ function headless() {
 	const stop = () => {
 		for (const t of timers) clearInterval(t)
 		awake.configure(false)
+		// so the next room does not warn about a server that has gone
+		withdraw()
 		console.log(`${stamp()}  headless stopped`)
 		process.exit(0)
 	}

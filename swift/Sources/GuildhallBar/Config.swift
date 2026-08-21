@@ -140,6 +140,34 @@ struct Config {
 		try await guildhall(["--set-control-password"], stdin: password)
 	}
 
+	/// Other guildhalls serving right now, as a port and a pid each.
+	///
+	/// Read straight from the registry directory rather than by shelling out, because
+	/// this is drawn every time the Settings page opens and node takes about a second to
+	/// boot. The format is deliberately trivial for that reason — see src/servers.ts,
+	/// which owns it and explains why it is a registry and not an `lsof` scan.
+	///
+	/// `kill(pid, 0)` is the liveness check on both sides: it sends no signal and just
+	/// asks the kernel. EPERM means it exists and belongs to somebody else, which still
+	/// counts as alive. Stale entries are skipped here and pruned by the node side; this
+	/// app deliberately does not delete other processes' files.
+	static func otherServers() -> [(pid: Int32, port: Int)] {
+		let root = dir + "/servers"
+		guard let names = try? FileManager.default.contentsOfDirectory(atPath: root) else { return [] }
+		var out: [(pid: Int32, port: Int)] = []
+		for name in names where name.hasSuffix(".json") {
+			guard let pid = Int32(name.dropLast(5)), pid > 0 else { continue }
+			// alive? ESRCH means gone; EPERM means alive and not ours
+			if kill(pid, 0) != 0 && errno != EPERM { continue }
+			guard let data = FileManager.default.contents(atPath: root + "/" + name),
+				let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+				let port = o["port"] as? Int
+			else { continue }
+			out.append((pid: pid, port: port))
+		}
+		return out.sorted { $0.port < $1.port }
+	}
+
 	/// A port nothing is listening on, from `guildhall --pick-port`.
 	///
 	/// Deliberately NOT implemented here. Binding a socket in Swift to test a port is a

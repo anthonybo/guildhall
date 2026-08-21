@@ -675,3 +675,43 @@ runtime bugs, which is exactly why they had survived: nothing was asking.
 
 Verified by reintroducing the original mistake and watching tsc name it:
 `Property 'logos' is missing in type ... but required in type 'Scene'`.
+
+## Two servers ran for half an hour and nothing said so
+
+**Not a crash — an absence.** The launchd service was serving the configured port and
+a `tools/serve.mjs --port 4319` dev watcher was serving another, both bound to every
+interface, both reachable over the tailnet. They never collided, because they were on
+different ports, so no code path anywhere had reason to notice. It surfaced only when
+somebody asked why the old port still worked from their phone, and the answer took an
+`lsof` by hand: "I have no indication of that and how would I know".
+
+**Why two is worth reporting, measured rather than assumed:**
+
+- **About 1% of a core each, continuously** — 13.6 cpu-seconds over 24 minutes, and
+  13.1 over 17. Doubling that buys nothing.
+- Two doors on the tailnet. The passcode guards both, but a door you have forgotten is
+  not one you can decide to close.
+- **They can be different builds.** `dist/main.mjs` is loaded at process start while
+  `web/app.js` is read from disk per request, so an old server serves a current browser
+  client — half fresh, half stale, which is genuinely hard to reason about.
+
+**`--port` is why the config change could not dislodge it.** A flag overrides the file
+for that run, and the watcher re-passes it on every restart. A bound listener's port
+cannot change anyway.
+
+**A registry, because the scan is too expensive — measured before choosing.**
+`lsof -nP -iTCP -sTCP:LISTEN` costs **90 cpu-ms** and `ps -axo pid=,command=` **80**.
+The whole `collect()` poll budget is 12. Anything that cannot be afforded per tick ends
+up behind a TTL nobody measured, which is the shape of the 30-second refresh that once
+cost a third of a core here. So each server writes `~/.config/guildhall/servers/<pid>.json`
+and removes it on the way out; reading the directory and calling `kill(pid, 0)` is
+microseconds, so the answer is recomputed on every draw and can never be stale.
+
+**Stale entries are pruned on read, not merely skipped.** SIGKILL runs no cleanup, so
+without that the directory fills with the pid of every server that ever crashed and the
+warning names processes that do not exist. A warning that cries wolf gets ignored,
+which is this repo's own stated reason for keeping the spelling word list short.
+
+Surfaced in all three places somebody might look: the headless startup log (the only
+thing a launchd service can say), the terminal's settings panel, and the menu bar's
+Settings page.

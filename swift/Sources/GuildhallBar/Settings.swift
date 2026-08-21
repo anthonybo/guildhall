@@ -85,6 +85,9 @@ struct SettingsView: View {
 	/// While `--pick-port` is running, so the button cannot be pressed twice and the
 	/// wait is visible — shelling out to node is not instant.
 	@State private var picking = false
+	/// Other guildhalls serving, so a forgotten one is visible. Refreshed when the page
+	/// appears; a registry read is cheap but there is no reason to do it per keystroke.
+	@State private var alsoServing: [(pid: Int32, port: Int)] = []
 	/// What is on disk, so the page can tell a typed change from no change at all.
 	/// Apply used to be enabled always, which offers to save when there is nothing to
 	/// save — and gives no signal at the moment there is.
@@ -152,6 +155,23 @@ struct SettingsView: View {
 					}
 				)
 			)
+
+			// A second guildhall serving, named.
+			//
+			// Two were running here for half an hour — the launchd service and a
+			// `tools/serve.mjs --port 4319` dev watcher — on different ports, so nothing
+			// ever collided and nothing said a word. Both were bound to every interface,
+			// both reachable over the tailnet, and the only way to find out was lsof.
+			// "I have no indication of that and how would I know" is why this row exists.
+			if !alsoServing.isEmpty {
+				let which = alsoServing.map { ":\($0.port) (pid \($0.pid))" }.joined(separator: ", ")
+				Label(
+					"Another guildhall is also serving on \(which). Each costs about 1% of a core, both are reachable, and they can be running different builds.",
+					systemImage: "exclamationmark.triangle.fill"
+				)
+				.font(.caption).foregroundStyle(.orange)
+				.fixedSize(horizontal: false, vertical: true)
+			}
 
 			Divider()
 
@@ -337,7 +357,10 @@ struct SettingsView: View {
 		.frame(width: 380)
 		// Ask launchd what is actually true, once, when the page opens. The toggle's
 		// initial value cannot come from the config file — see the note on `serving`.
-		.task { serving = await Daemon.loaded() }
+		.task {
+			serving = await Daemon.loaded()
+			alsoServing = Config.otherServers()
+		}
 	}
 
 	/// Flip the service, then report what launchd actually did rather than what was
