@@ -21,16 +21,52 @@ const HOME = os.homedir()
 export const CODEX_DIR = process.env.GUILDHALL_CODEX_DIR || path.join(HOME, '.codex', 'sessions')
 
 /**
- * How recently a rollout must have been written to count as a session worth showing.
+ * Codex's own registry, which it turns out to have had all along.
  *
- * There is no registry to ask, which is the whole difficulty: a rollout file says
- * what happened, not whether anything is still happening. Six hours is long enough
- * that a session left sitting after a long task still appears, and short enough that
- * a directory holding months of them — 44 files here, back to September — does not
- * fill the room with history. Phase 3 replaces this guess with `thread/list`, which
- * answers the question properly.
+ * `~/.codex/thread-writer-locks/<thread-id>.lock` exists while the process writing
+ * that thread is alive. Observed against a live session: the lock appeared with the
+ * thread, stayed put while the session sat idle at a prompt with `task_complete` as
+ * its last record, and the two five-hour-old threads beside it had no lock at all.
+ *
+ * That makes it the exact counterpart of `~/.claude/sessions/<pid>.json` — which
+ * settles the hard part of this whole exercise. The plan assumed no agent CLI but
+ * Claude Code writes a live registry, and went looking for one in the app-server
+ * instead: a JSON-RPC daemon whose status turned out to be per-instance, so a
+ * freshly spawned one reports `notLoaded` for everything and answers nothing. This is
+ * one readdir of a directory with a handful of entries.
+ *
+ * `.coordination.lock` sits beside them and is not a thread, which is why dotfiles
+ * are skipped rather than parsed.
+ */
+const LOCK_DIR = process.env.GUILDHALL_CODEX_LOCKS || path.join(HOME, '.codex', 'thread-writer-locks')
+
+/**
+ * How recently a rollout must have been written to count, when there is no lock
+ * directory to ask.
+ *
+ * Only a fallback now. An older Codex without the lock directory leaves us guessing
+ * from mtime, and six hours is long enough that a session left sitting still appears
+ * while a directory holding months of history does not fill the room. Where the locks
+ * exist they decide instead, and age stops mattering: a locked thread is live however
+ * long ago it last wrote, and an unlocked one is gone however recently it did.
  */
 const RECENT_MS = 6 * 60 * 60 * 1000
+
+/** Thread ids whose writing process is still alive, or null if there is no registry. */
+function liveThreads(dir: string): Set<string> | null {
+	let names: string[]
+	try {
+		names = fs.readdirSync(dir)
+	} catch {
+		return null
+	}
+	const out = new Set<string>()
+	for (const n of names) {
+		if (n.startsWith('.') || !n.endsWith('.lock')) continue
+		out.add(n.slice(0, -'.lock'.length))
+	}
+	return out
+}
 
 /**
  * How much of the end of the file to read.
@@ -208,10 +244,20 @@ function firstSentence(s: string): string {
  * hands them out by index, so Codex ids have to be appended after the Claude ones
  * rather than sorted in among them.
  */
-export function codexSessions(now = Date.now(), dir = CODEX_DIR): Session[] {
+export function codexSessions(now = Date.now(), dir = CODEX_DIR, lockDir = LOCK_DIR): Session[] {
+	const live = liveThreads(lockDir)
 	const out: Session[] = []
 	for (const f of files(dir)) {
-		if (now - f.mtime > RECENT_MS) continue
+		// The thread id is in the filename, so liveness is decided before the file is
+		// opened — which is what keeps this to a readdir and a stat for the many
+		// finished threads sitting in the directory.
+		const id = /-([0-9a-f]{8}-[0-9a-f-]+)\.jsonl$/.exec(path.basename(f.file))?.[1]
+		if (live) {
+			if (!id || !live.has(id)) continue
+		} else if (now - f.mtime > RECENT_MS) {
+			// No lock directory: fall back to the age guess.
+			continue
+		}
 		const hit = cache.get(f.file)
 		let r: Rollout | null
 		if (hit && hit.size === f.size) {

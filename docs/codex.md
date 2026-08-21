@@ -179,63 +179,78 @@ Each phase is separately revertable, and none of them is required by the next.
    password like every other write path, and it is the one phase that can do damage,
    so it does not ride along with a read-only feature.
 
-## Phase 3, attempted: what the protocol actually does
+## Phase 3: liveness, and the answer being somewhere else entirely
 
-Verified by driving it, not by reading about it.
+**`~/.codex/thread-writer-locks/<thread-id>.lock` exists while the process writing
+that thread is alive.** That is Codex's live registry, and it had been there the whole
+time.
 
-**The framing is newline-delimited JSON**, and `codex app-server` runs on stdio as an
-ordinary child process — no daemon needed for that part. `initialize` takes
-`{clientInfo: {name, version}}` and answers with `{userAgent, codexHome,
-platformFamily, platformOs}`.
+Observed against a running session rather than reasoned about:
 
-`thread/list` works against such a child and returns `{data, nextCursor,
-backwardsCursor}`. Two details the schema did not make obvious and a guess would have
-got wrong:
+| | lock | last record | rollout age |
+|---|---|---|---|
+| the live session | present | `task_complete` | 46s, then 50s, then 54s |
+| two threads from that morning | absent | `task_complete` | ~5 hours |
 
-- `sortKey` is snake_case — `created_at`, `updated_at`, `recency_at`,
-  `section_position`. `recency` is rejected outright.
-- `turns` is an ARRAY, not the count the field name suggests.
+The lock stayed put across three samples while the session sat idle at a prompt with
+its turn already finished — so the lock means **the process is alive**, not "a turn is
+running". That is exactly the split guildhall already works in: the lock is the
+registry, the rollout tail is the activity. It maps onto
+`~/.claude/sessions/<pid>.json` plus a transcript, which is the shape the whole
+program is built around.
 
-**But `status` is per-instance, not global.** A freshly spawned app-server reports
-`{"type":"notLoaded"}` for every thread, because the status describes what THAT
-process has in memory. So spawning our own child cannot answer "is this session
-running" — it can only enrich metadata (`name`, `preview`, `turns`, `gitInfo`,
-`recencyAt`), and it costs a process to do it.
+It also removes the guess. The six-hour window was there because nothing could answer
+"is this running"; now a locked thread is shown however long ago it last wrote, and an
+unlocked one is not shown however recently it did. Measured against the real
+directory: 4 sessions under the age guess, **1** under the locks — the one that was
+actually running.
 
-**Real status needs the shared daemon, and that transport is not solved.** The daemon
-starts and stops cleanly — `codex app-server daemon start` / `stop`, 66MB RSS, and
-`daemon version` returns JSON including `status: running`, which is a cheap health
-check. Its socket appears at `~/.codex/app-server-control/app-server-control.sock`.
-But it does not answer plain newline-delimited JSON-RPC: connecting directly returned
-nothing, and `codex app-server proxy` — whose whole description is proxying stdio to
-that socket — also returned nothing, with an empty stderr and no exit, both with and
-without `--sock`. Three attempts, no response.
+The window survives only as a fallback for an older Codex with no lock directory.
 
-So **phase 3 as planned is blocked**, and the honest position is that the file path
-from phase 1 remains the only working source of liveness. What would unblock it:
-reading `codex-rs/app-server`'s own client to see what the control socket expects
-before the first request, or watching a live Codex session to learn whether `status`
-ever becomes `active` for a thread another process owns.
+### What the app-server turned out to be worth
 
-One thing worth knowing either way: a live Codex session was never observed during
-any of this. Every thread on this machine was finished, so `notLoaded` is consistent
-both with "the instance has not loaded it" and with "it genuinely is not running", and
-nothing here distinguishes those two.
+Not this. Worth writing down so nobody spends the day again.
+
+The protocol itself is fine and was verified by driving it: newline-delimited JSON,
+`codex app-server` runs on stdio as an ordinary child, `initialize` takes
+`{clientInfo: {name, version}}`, and `thread/list` answers with `{data, nextCursor,
+backwardsCursor}`. Two details a guess gets wrong — `sortKey` is snake_case and
+rejects `recency` outright, and `turns` is an ARRAY, not the count its name suggests.
+
+But **`status` is per-instance.** A freshly spawned app-server reports
+`{"type":"notLoaded"}` for every thread, because status describes what THAT process
+holds in memory. So our own child can never answer the liveness question, whatever the
+schema implies. It can only enrich metadata — `name`, `preview`, `gitInfo` — at the
+cost of a 66MB process.
+
+And the shared daemon, which does know, could not be reached: it starts and stops
+cleanly and `daemon version` returns usable JSON, but its control socket does not
+answer plain newline-delimited JSON-RPC. Connecting directly returned nothing, and
+`codex app-server proxy` — whose entire description is proxying stdio to that socket —
+also returned nothing, empty stderr, no exit, with and without `--sock`.
+
+None of which matters any more, which is the point. The expensive part was assuming
+the answer had to be in the protocol because that was where the impressive-looking
+API was. One `readdir` of a directory with two files in it was the answer.
 
 ## Still open
 
-- **The initialize handshake.** `codex app-server proxy` gives a stdio JSON-RPC pipe,
-  which avoids hand-rolling socket framing; the exact opening call needs confirming
-  against a running daemon. `ClientRequest.json` lists methods as enums rather than
-  consts, so the method list did not fall out of the schema the way the rest did.
-- **Whether guildhall should ever start the daemon.** It is a background process on
-  somebody's machine. That is a setting, not a side effect, and the default is no.
-- **Whether `thread-writer-locks/` is a liveness signal.** It is empty with nothing
-  running, which is consistent but not evidence. Watching it during a live session
-  would settle it, and would give the file path a liveness source better than mtime.
+- **A turn in progress, told apart from a prompt waiting.** The lock says the process
+  is alive; the rollout's last record says what it was doing when it last wrote. A
+  session idle at a prompt and one mid-turn that has not written for ten seconds are
+  currently both read the same way. `turn/started` and `turn/completed` would settle
+  it, which is the one thing the app-server would still be good for.
+- **`waitingOnApproval`.** Codex has the state and guildhall has `needs`, and the file
+  path cannot see it — an approval prompt is a question the process is holding in
+  memory, not a record it has written. This is the gap most worth closing, because
+  "something is blocked on you" is the thing the room exists to show.
 - **Subagents.** `agentRole`, `parentThreadId` and `forkedFromId` look like they map
   onto what `agents.ts` already models for Claude. Worth checking rather than
   assuming.
+- **Whether the lock is durable.** It is undocumented and internal. It is also a
+  file whose name is a thread id in a directory called `thread-writer-locks`, which
+  is about as legible as an internal detail gets — and the fallback below it is the
+  age guess, so losing it degrades rather than breaks.
 
 ## Sources
 
