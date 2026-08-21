@@ -53,7 +53,7 @@ export type ServiceResult = { ok: true; note: string } | { ok: false; why: strin
  * pid, not by whether something replies.
  */
 /** Is this pid another guildhall? Then the port is not a conflict, it is a handover. */
-function isGuildhall(pid: string): boolean {
+export function isGuildhall(pid: string): boolean {
 	try {
 		const out = execFileSync('/bin/ps', ['-o', 'command=', '-p', pid], { encoding: 'utf8' })
 		return /main\.mjs|guildhall/.test(out)

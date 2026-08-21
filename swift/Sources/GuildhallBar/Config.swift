@@ -179,6 +179,34 @@ struct Config {
 		return out.sorted { $0.port < $1.port }
 	}
 
+	/// Can the service bind that port, and if not, who has it?
+	///
+	/// Asked BEFORE a new port is saved. Apply used to validate the range and nothing
+	/// else, so setting the port to one already held wrote the config, restarted the
+	/// service, and left launchd retrying a bind that could not succeed — visible only in
+	/// a log file. That is the error state this exists to prevent.
+	///
+	/// `guildhall` in the result distinguishes the two outcomes that matter. Another
+	/// guildhall holding the port is a HANDOVER: the browser view works, and the service
+	/// binds as soon as the other one lets go. Anything else — a collector, a database,
+	/// somebody's dev server — will never let go, and saving that port is choosing a
+	/// service that can never start.
+	static func portStatus(_ port: Int) async -> (free: Bool, holder: String?, guildhall: Bool) {
+		guard let out = try? await guildhallOutput(["--port-free", String(port)]),
+			let data = out.data(using: .utf8),
+			let o = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+		else {
+			// Unknown is not the same as taken: refusing to save because the check itself
+			// failed would be worse than letting the person try.
+			return (true, nil, false)
+		}
+		if o["free"] as? Bool == true { return (true, nil, false) }
+		let pid = o["pid"] as? Int
+		let cmd = o["cmd"] as? String
+		let who = [cmd, pid.map { "pid \($0)" }].compactMap { $0 }.joined(separator: ", ")
+		return (false, who.isEmpty ? nil : who, o["guildhall"] as? Bool ?? false)
+	}
+
 	/// Stop one of the servers in the registry, and return what guildhall said about it.
 	///
 	/// The pid is all this sends. Deciding WHAT to signal is deliberately on the other

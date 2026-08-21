@@ -239,24 +239,26 @@ struct Panel: View {
 			//
 			// Read from the registry directory, which is a readdir and a kill(0) per entry,
 			// so it costs nothing to check each time the panel appears. See src/servers.ts.
-			if !otherServers.isEmpty {
-				let which = otherServers.map { ":\($0.port)" }.joined(separator: ", ")
-				// Same distinction the Settings page makes: a stray on the configured port
-				// means the service cannot start at all, which is a different sentence from
-				// two servers both working.
-				let clashes = otherServers.contains { $0.port == Config.load().port }
-				HStack(spacing: 6) {
-					Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
-					Text(
-						clashes
-							? "Another guildhall holds \(which) — the service cannot start. Settings can kill it"
-							: "Another guildhall is serving on \(which) — Settings can kill it"
-					)
-					.font(.system(size: 11))
-					.fixedSize(horizontal: false, vertical: true)
+			do {
+				// Only servers on OTHER ports are reported here.
+				//
+				// One on the configured port is a handover, not a fault: something is serving
+				// the browser view and it works. service.ts settled that already — "a port
+				// held by another guildhall is not a conflict and must not be reported as
+				// one" — and this row broke the rule, alarming about the only server that was
+				// actually working. Settings states that case quietly instead.
+				let elsewhere = otherServers.filter { $0.port != Config.load().port }
+				if !elsewhere.isEmpty {
+					let which = elsewhere.map { ":\($0.port)" }.joined(separator: ", ")
+					HStack(spacing: 6) {
+						Image(systemName: "exclamationmark.triangle.fill").font(.system(size: 10))
+						Text("Another guildhall is also serving on \(which) — Settings can kill it")
+							.font(.system(size: 11))
+							.fixedSize(horizontal: false, vertical: true)
+					}
+					.foregroundStyle(.orange)
+					.padding(.horizontal, 12).padding(.vertical, 4)
 				}
-				.foregroundStyle(.orange)
-				.padding(.horizontal, 12).padding(.vertical, 4)
 			}
 			MenuItem(title: model.daemon == .stopped ? "Start the service" : "Stop the service", enabled: model.daemon != .notInstalled) {
 				let starting = model.daemon == .stopped

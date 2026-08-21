@@ -169,27 +169,46 @@ struct SettingsView: View {
 			if !alsoServing.isEmpty {
 				VStack(alignment: .leading, spacing: 6) {
 					/**
-					 * Two different situations, and calling them both "another guildhall is
-					 * also serving" was wrong for the second one.
+					 * A guildhall on the CONFIGURED port is a handover, not a fault.
 					 *
-					 * If the stray is on a DIFFERENT port, there really are two servers and
-					 * both work — twice the cost, two doors.
+					 * service.ts already settled this and I broke the rule in a new place:
+					 * "A port held by ANOTHER GUILDHALL is not a conflict and must not be
+					 * reported as one… The first version refused here and told the person to
+					 * quit their own room. That is not an answer."
 					 *
-					 * If it is on the CONFIGURED port, there is exactly one server and it is
-					 * not the service: the service starts, cannot bind, exits 1, and launchd
-					 * retries it forever. Observed with three failed binds logged and the job
-					 * sitting in `spawn scheduled`, while the panel said the service was
-					 * serving and something else was serving too. Both halves were false.
+					 * This panel did precisely that. It showed one entry — the server that
+					 * was actually serving, on the port the person had chosen — under the
+					 * heading "another guildhall" with a Kill it button beside it. The only
+					 * working server on the machine, offered up for killing, because it was
+					 * not the one launchd started.
+					 *
+					 * So the port being served by something else is stated, not warned about.
+					 * What IS worth flagging is the consequence nobody can see: the service
+					 * cannot bind, and launchd retries it every ten seconds forever. The
+					 * remedy for that is to stop the SERVICE — the redundant half — which is
+					 * a button the main panel already has.
+					 *
+					 * Servers on other ports are a different thing and keep the warning:
+					 * those are genuinely two doors and twice the cost.
 					 */
-					let clashes = alsoServing.contains { $0.port == config.port }
-					Label(
-						clashes
-							? "Another guildhall is holding port \(String(config.port)), so the service above cannot start — it is retrying and failing. Kill the other one, or give the service a different port."
-							: "Another guildhall is serving as well as the service above. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
-						systemImage: "exclamationmark.triangle.fill"
-					)
-					.font(.caption).foregroundStyle(.orange)
-					.fixedSize(horizontal: false, vertical: true)
+					let handover = alsoServing.first { $0.port == config.port }
+					let elsewhere = alsoServing.filter { $0.port != config.port }
+					if let h = handover {
+						Label(
+							"Port \(String(config.port)) is being served by another guildhall (pid \(String(h.pid))), not by this service — the browser view works. The service cannot bind, so launchd keeps restarting it; stop the service if you do not need it.",
+							systemImage: "info.circle"
+						)
+						.font(.caption).foregroundStyle(.secondary)
+						.fixedSize(horizontal: false, vertical: true)
+					}
+					if !elsewhere.isEmpty {
+						Label(
+							"Another guildhall is also serving on a different port. Each costs about 1% of a core, both are reachable on your network, and they can be running different builds.",
+							systemImage: "exclamationmark.triangle.fill"
+						)
+						.font(.caption).foregroundStyle(.orange)
+						.fixedSize(horizontal: false, vertical: true)
+					}
 					// A button per server, because naming the problem and leaving you to
 					// find `kill` is only half an answer — the same objection this file
 					// already records about the control password and the serve toggle.
@@ -496,6 +515,21 @@ struct SettingsView: View {
 				note = "A port is 1024 to 65535."
 				failed = true
 				return
+			}
+			// Can the service actually have this port? Asked before saving, because the old
+			// order — save, restart, hope — left launchd retrying a bind that could never
+			// succeed, with nothing on screen to say so.
+			//
+			// Another guildhall holding it is allowed through: that is a handover, the
+			// browser view works, and the service takes over when the other one stops.
+			// Anything else is refused, because it will not let go.
+			if portChanged {
+				let status = await Config.portStatus(config.port)
+				if !status.free && !status.guildhall {
+					note = "Port \(String(config.port)) is held by \(status.holder ?? "another program"), which is not guildhall. The service could never start on it — try Random."
+					failed = true
+					return
+				}
 			}
 			try config.save()
 			// The page is only clean once the write succeeded, so a refused port leaves the

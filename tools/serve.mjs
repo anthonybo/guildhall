@@ -29,10 +29,49 @@ const SETTLE_MS = 400
 const args = process.argv.slice(2)
 const passThrough = args.includes('--') ? args.slice(args.indexOf('--') + 1) : []
 const portArg = args.indexOf('--port')
-const port = portArg > -1 ? args[portArg + 1] : null
+let port = portArg > -1 ? args[portArg + 1] : null
 
 const stamp = () => new Date().toLocaleString('sv-SE').slice(0, 19)
 const say = (msg) => console.log(`${stamp()}  ${msg}`)
+
+/**
+ * Move off a port something else already has, rather than fighting over it.
+ *
+ * This watcher and the installed service are both guildhall, and they used to be able to
+ * want the same port: the service takes it from the config, and this takes it from
+ * `--port` or, with no flag, the same config. So running both meant one of them looping
+ * on a bind that could not succeed — and that got MORE likely, not less, when the
+ * default became the port this was habitually started on.
+ *
+ * A dev watcher is the right half to give way. It is the disposable one, nothing is
+ * bookmarked against it, and it has no business taking the port the service is
+ * configured for. So it asks, and if the port is busy it takes a free one and says which
+ * — loudly, because a tool that silently moves is worse than one that refuses.
+ *
+ * Synchronous and before anything is spawned: the whole point is that the child is never
+ * launched into a port it cannot have.
+ */
+function freePort(want) {
+	const held = (p) => {
+		const r = spawnSync(process.execPath, ['dist/main.mjs', '--port-free', String(p)], { cwd: ROOT, encoding: 'utf8' })
+		try {
+			return JSON.parse(r.stdout).free !== true
+		} catch {
+			// The check could not run — say so and carry on rather than refusing to start a
+			// dev tool over a failed probe.
+			return false
+		}
+	}
+	if (want && !held(want)) return want
+	const r = spawnSync(process.execPath, ['dist/main.mjs', '--pick-port'], { cwd: ROOT, encoding: 'utf8' })
+	const picked = Number((r.stdout || '').trim())
+	if (!Number.isInteger(picked) || picked <= 0) {
+		say(`port ${want ?? '(from config)'} looks busy and no free port could be found — starting anyway`)
+		return want
+	}
+	say(`port ${want ?? '(from config)'} is already served — using ${picked} instead, so the installed service keeps its own port`)
+	return String(picked)
+}
 
 let child = null
 let timer = null
@@ -52,7 +91,15 @@ function build() {
 	return true
 }
 
+// Resolved once, before the first launch. `dist/` has to exist for the check to run, so
+// this happens after the initial build below rather than at import time.
+let resolved = false
+
 function launch() {
+	if (!resolved) {
+		resolved = true
+		port = freePort(port)
+	}
 	const flags = ['dist/main.mjs', '--headless', ...(port ? ['--port', port] : []), ...passThrough]
 	const proc = spawn(process.execPath, flags, { cwd: ROOT, stdio: ['ignore', 'inherit', 'inherit'] })
 	child = proc

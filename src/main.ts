@@ -46,14 +46,16 @@ import * as H from './help.ts'
 import * as awake from './awake.ts'
 import { BUILD, build } from './version.ts'
 import * as cfgStore from './config.ts'
+import { okPort } from './port.ts'
 import { addresses, createServer } from './serve.ts'
+import { isGuildhall, portHolder } from './service.ts'
 import { choose, plate } from './nameplate.ts'
 import { PLATE_COLS, PLATE_ROWS } from './office/model.ts'
 import { passcode, setPasscode } from './auth.ts'
 import { hasControlPass, setControlPass } from './controlauth.ts'
 import * as update from './update.ts'
 import { CMUX } from './data/cmux-bin.ts'
-import { pickPort } from './port.ts'
+import { pickPort, portFree } from './port.ts'
 import { announce, others, othersNote, stop as stopServer, supervisor, withdraw } from './servers.ts'
 
 // the tier/needs colours a badge takes, passed in so screens.ts stays theme-free
@@ -162,7 +164,7 @@ if (process.argv.includes('--set-passcode')) {
  * exit.
  */
 {
-	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port|servers|stop-server)$|^-[vh]$/
+	const known = /^--(once|bench|guard|headless|demo|serve|no-serve|no-awake|port|version|help|usage|sessions|config|set-serve|codex|no-codex|upgrade|set-control-password|set-passcode|pick-port|servers|stop-server|port-free)$|^-[vh]$/
 	const stray = process.argv.slice(2).filter((a) => a.startsWith('-') && !known.test(a))
 	if (stray.length) {
 		console.error(`guildhall: unknown option ${stray[0]} — see guildhall --help`)
@@ -188,6 +190,43 @@ if (process.argv.includes('--set-passcode')) {
  * dev-watcher child comes straight back, so the button has to say it will stop the
  * watcher rather than silently doing something else.
  */
+/**
+ * Can we bind that port, and if not, who has it?
+ *
+ * So a caller can refuse BEFORE committing to a port, instead of saving it and leaving
+ * launchd to retry a bind that cannot succeed. That is the hole this closes: the port
+ * was validated for range and nothing else, so setting it to one already held started a
+ * restart loop that only the log could see.
+ */
+{
+	const i = process.argv.indexOf('--port-free')
+	if (i > 0) {
+		const port = Number(process.argv[i + 1])
+		if (!okPort(port)) {
+			console.log(JSON.stringify({ free: false, why: 'a port is 1024 to 65535' }))
+			process.exit(0)
+		}
+		const { host } = cfgStore.load()
+		const free = await portFree(port, host)
+		if (free) {
+			console.log(JSON.stringify({ free: true }))
+			process.exit(0)
+		}
+		// Name the holder, and say whether it is one of ours: another guildhall is a
+		// handover and recoverable, anything else means this port will never work.
+		const { portHolder, isGuildhall } = await import('./service.ts')
+		const holder = portHolder(port)
+		console.log(
+			JSON.stringify({
+				free: false,
+				pid: holder ? Number(holder.pid) : null,
+				cmd: holder?.cmd ?? null,
+				guildhall: holder ? isGuildhall(holder.pid) : false,
+			}),
+		)
+		process.exit(0)
+	}
+}
 if (process.argv.includes('--servers')) {
 	console.log(JSON.stringify(others().map((s) => ({ ...s, supervisor: supervisor(s.pid) }))))
 	process.exit(0)
@@ -415,7 +454,24 @@ function syncServe() {
 			// Do not name a culprit that may not be the culprit. This said "the daemon has
 			// it", and the thing holding the port is just as often an interactive room —
 			// which is what made a real conflict read like a daemon problem.
-			serveError = e.code === 'EADDRINUSE' ? `port ${cfg.port} is already served by another process` : (e.code ?? 'failed')
+			/**
+			 * Name the holder, and say whether waiting will help.
+			 *
+			 * It said only "already served by another process", which under launchd becomes
+			 * an identical line every ten seconds forever with nothing to act on. The two
+			 * cases need different responses and the log could not tell them apart: another
+			 * guildhall WILL let go, so retrying is right; anything else will not, so
+			 * retrying is a loop that cannot end.
+			 */
+			if (e.code === 'EADDRINUSE') {
+				const holder = portHolder(cfg.port)
+				const mine = holder ? isGuildhall(holder.pid) : false
+				serveError = holder
+					? mine
+						? `port ${cfg.port} is held by another guildhall (pid ${holder.pid}) — waiting for it to let go`
+						: `port ${cfg.port} is held by ${holder.cmd} (pid ${holder.pid}), which is not guildhall — this will not clear on its own; change the port`
+					: `port ${cfg.port} is already served by another process`
+			} else serveError = e.code ?? 'failed'
 			server = null
 			cfg.serve = false
 		})

@@ -744,3 +744,62 @@ dev-watcher child comes back "within a second". It does not — the watcher wait
 `server exited (0) — restarting in 2s`, then rebuilds, and the replacement bound about
 **9 seconds** later. A check at +8s reported the port free and the kill successful, which
 is precisely how this would have shipped as working.
+
+### And then the warning told somebody to kill the only server that worked
+
+**The rule was already written down in this repo, and I broke it in a new file.**
+`service.ts` says: "A port held by ANOTHER GUILDHALL is not a conflict and must not be
+reported as one… The first version refused here and told the person to quit their own
+room. That is not an answer."
+
+The Settings page did exactly that. With the port set to one a dev watcher already held,
+it showed a single entry — the server that was actually serving, on the port the person
+had chosen — under "Another guildhall is holding port 4319… Kill the other one", with a
+Kill it button beside it. The one working server on the machine, offered up for killing,
+because launchd had not been the thing to start it.
+
+The report was "did you not fix anything.. I still see it showing multiple but I only
+see one running", and both halves of that were fair: the list held one row, and the row
+was their own server.
+
+**A guildhall on the configured port is a handover.** It is now stated rather than
+warned about, in the secondary text color, because the browser view genuinely works.
+What is worth surfacing is the part nobody can see: the service cannot bind, so launchd
+restarts it every ten seconds forever — and the remedy for that is to stop the SERVICE,
+the redundant half, not the server doing the work.
+
+Servers on OTHER ports keep the warning. Those are two doors and twice the cost, which
+is the situation this whole feature was built for.
+
+**Watch for this shape.** Three messages in a row were wrong about the same facts —
+"another guildhall is also serving" when the service was not serving, then "the service
+cannot start" as an alarm about a working handover. Each was more accurate than the last
+and still pointed the person at the wrong process. When a warning names something the
+user deliberately set up, the warning is probably the thing that is wrong.
+
+### Guards added afterwards, and the scenarios still open
+
+The three wrong messages above were all reporting; none of them stopped the state
+happening. Asked directly whether guards had been added, the honest answer was no. These
+are the guards, and the scenarios that produced them:
+
+| how the service ends up unable to bind | guarded now |
+|---|---|
+| another guildhall holds the port (dev watcher, or a room with sharing on) | the watcher gives way: it checks the port before spawning and takes a free one, saying which. It is the disposable half and has no business holding the port the service is configured for |
+| a non-guildhall program holds it (a collector, a database, somebody's dev server) | Apply refuses before saving, naming the holder — that port can never work, so committing to it is the mistake |
+| the port is changed while the service is running | Apply pre-flights it; the old order was save, restart, hope |
+| a port below 1024 | already refused by the range check |
+| boot order — a room takes the port first | left alone deliberately. That is a handover: the service retries and wins when the room stops, which is the behavior service.ts already argues for |
+
+**Still open, and both need a hand-edited config to reach.** A `host` that no longer
+exists on the machine gives EADDRNOTAVAIL and the same silent retry; the UI only offers
+loopback and every-interface, so this needs somebody editing the file. And a port typed
+by hand above 32768 can be taken by an outgoing connection later — the pre-flight only
+knows whether the port is free *now*, which is why the default and the randomize band
+both sit below the ephemeral floor.
+
+**The retry itself is still unbounded** when the holder will never let go. It is now
+diagnosable rather than opaque — the log names the holder and says whether waiting will
+help — but launchd will still respawn every ten seconds forever. Capping it was
+considered and not done: the retry is what makes the legitimate handover recover on its
+own, and breaking that to tidy up a case the pre-flight now prevents is the wrong trade.
