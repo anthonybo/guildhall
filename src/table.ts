@@ -103,7 +103,7 @@ export function rows(list: Session[], total: number, selected?: string, colourOf
 			: `${fg(C.faint)}${padR('', W_CTX)}${R}`
 		const cells = [
 			gutter,
-			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : '·'}`, W_TAB)}${R}`,
+			`${fg(C.faint)}${padL(`${open?.has(s.id) ? '⌄' : ''}${s.tab ? `⌘${s.tab}` : s.agent === 'codex' ? 'cx' : '·'}`, W_TAB)}${R}`,
 			// level is identity, so it sits beside the tab rather than with the status
 			`${bg(tierOf(s.level).color)}${fg(C.night)}${padL(levelGlyph(s.level), W_LVL)}${R}`,
 			// the project's own colour from the room, and bold — this is the column you

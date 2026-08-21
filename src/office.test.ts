@@ -349,3 +349,44 @@ test('a fresh room does not open with everyone at their computer', () => {
 	// the desks stay owned either way: a desk is the project's identity, not a chair
 	assert.equal([...office.spots.values()].filter((s) => s.kind === 'desk' && s.taken).length, list.length)
 })
+
+/** The label a single session gets, read off the rendered canvas. */
+const labelFor = (s: ReturnType<typeof session>) => {
+	// One session per room: labels need a free cell beside the character, and two
+	// characters in a small room contend for the same space — which is how the first
+	// version of this test "proved" a Codex label was missing when it had simply lost
+	// the race for somewhere to sit.
+	const list = [s]
+	const { cv, office } = room(list, 120, 78)
+	office.overlay(cv, office.draw(cv, list))
+	return cv.render().join('\n').replace(/\x1b\[[0-9;]*m/g, '')
+}
+
+test('a Codex worker is named in its room label, where a tab number would go', () => {
+	// Only on a label that is ALREADY being drawn. The room draws words solely for
+	// what is actionable — urgent or selected — and argues the case at length: colour
+	// and shape carry status, text carries identity. So this adds nothing to a merely
+	// working session, and the list is where a harness stays visible at rest.
+	//
+	// Read off the rendered canvas rather than the helper, because the claim is about
+	// what somebody sees. It covers the browser too: web/room.ts draws through this
+	// same Office.
+	// `tab: undefined` explicitly: the shared fixture sets `tab: 1`, so without this
+	// the ⌘ branch wins and the test proves nothing about the Codex one.
+	const codex = { ...session('cx1', 'orchard', 'needs'), tab: undefined, agent: 'codex' as const }
+	assert.match(labelFor(codex), /cx /, 'a Codex worker is indistinguishable from a Claude one')
+	assert.doesNotMatch(labelFor(codex), /⌘/, 'offered a terminal tab for something with no pane')
+})
+
+test('a tab number is still what a cmux session gets', () => {
+	const tabbed = { ...session('cl1', 'willow', 'needs'), tab: 4 }
+	assert.match(labelFor(tabbed), /⌘4/, 'the cmux tab stopped being offered')
+	assert.doesNotMatch(labelFor(tabbed), /cx /, 'labelled a Claude session as a second harness')
+})
+
+test('a label for a session with no tab and no harness gets no prefix', () => {
+	// The gutter rule applied to labels: a marker on every row is noise.
+	const screen = labelFor({ ...session('p1', 'orchard', 'needs'), tab: undefined })
+	assert.doesNotMatch(screen, /cx /, 'labelled a Claude session as a second harness')
+	assert.doesNotMatch(screen, /⌘/, 'offered a tab that does not exist')
+})

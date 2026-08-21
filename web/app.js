@@ -328,6 +328,7 @@ function paintList(list) {
 			<span class="[grid-area:proj] flex min-w-0 items-baseline gap-1.5 after:inline-block after:text-faint after:transition-transform after:duration-150 after:content-['\u203A'] group-[.open]:after:rotate-90">
 				<span class="proj truncate font-bold text-(--proj)"></span>
 				<span class="away hidden shrink-0 text-[0.78rem] font-normal text-muted"></span>
+				<span class="harness hidden shrink-0 rounded px-1 text-[0.7rem] font-semibold uppercase tracking-wide text-muted ring-1 ring-inset ring-white/15"></span>
 			</span>
 			<span class="[grid-area:meta] flex items-center gap-2.5 text-[0.78rem] whitespace-nowrap text-(--dim)">
 				<span class="text-(--ink)">${look.glyph} ${look.label}</span>
@@ -336,6 +337,12 @@ function paintList(list) {
 			</span>
 			<span class="doing [grid-area:doing] truncate text-[0.86rem] ${attn ? "text-label" : "text-(--soft)"}"></span>`;
     li.querySelector(".proj").textContent = s.proj;
+    const harness = li.querySelector(".harness");
+    if (s.agent) {
+      harness.textContent = s.agent;
+      harness.title = `Run by ${s.agent}, not Claude Code \u2014 there is no terminal tab to open`;
+      harness.classList.remove("hidden");
+    }
     const away = li.querySelector(".away");
     if (s.away) {
       away.textContent = `\u2192 ${s.away}`;
@@ -1948,7 +1955,7 @@ var Office = class extends SimBase {
       const free = spots.filter(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
       if (!free.length) continue;
       const body = s.short || (s.state === "working" || s.state === "shell" ? s.doing : s.title) || s.title;
-      const prefix = s.tab ? `\u2318${s.tab} ` : "";
+      const prefix = s.tab ? `\u2318${s.tab} ` : s.agent === "codex" ? "cx " : "";
       const want = prefix.length + 27;
       const least = prefix.length + 6;
       const room = ([r, c]) => {

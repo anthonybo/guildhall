@@ -68,3 +68,29 @@ test('every row is exactly the requested width', () => {
 		}
 	}
 })
+
+test('a Codex session is named in the tab column, and nothing else moves', () => {
+	// The column says how to reach a session: `⌘3` for a cmux pane, `·` for one with
+	// no pane. A Codex session has no pane to jump to, so the same slot names the
+	// harness. Only rows carrying `agent` change, which today is none of them.
+	const claudeWithTab = { ...session('orchard'), tab: 3 } as Session
+	const claudeNoTab = session('willow')
+	const codex = { ...session('kestrel'), agent: 'codex' } as Session
+
+	const line = (s: Session) => strip(rows([s], 120)[0]!.line)
+	assert.match(line(claudeWithTab), /⌘3/, 'a cmux tab stopped being offered')
+	assert.match(line(claudeNoTab), /·/, 'a session with no tab changed appearance')
+	assert.match(line(codex), /\bcx\b/, 'a Codex session is indistinguishable from any other')
+	assert.doesNotMatch(line(codex), /⌘/, 'offered a terminal tab for something with no pane')
+})
+
+test('the tab column stays inside its width for every case', () => {
+	// A marker that overflows would shift every column after it, on every row.
+	const cases: Session[] = [
+		{ ...session('a'), tab: 9 } as Session,
+		session('b'),
+		{ ...session('c'), agent: 'codex' } as Session,
+	]
+	const widths = new Set(cases.map((s) => strip(rows([s], 120)[0]!.line).length))
+	assert.equal(widths.size, 1, `rows came out different lengths: ${[...widths].join(', ')}`)
+})

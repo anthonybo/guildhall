@@ -351,7 +351,11 @@ export class Office extends SimBase {
 			if (!free.length) continue
 
 			const body = s.short || (s.state === 'working' || s.state === 'shell' ? s.doing : s.title) || s.title
-			const prefix = s.tab ? `⌘${s.tab} ` : ''
+			// The slot that says how to reach this worker. A cmux tab gives `⌘3`; a Codex
+			// session has no pane to jump to, so the same slot names the harness instead
+			// of sitting empty. Only sessions carrying `agent` are affected, and nothing
+			// carries it today — so no existing label moves by a single column.
+			const prefix = s.tab ? `⌘${s.tab} ` : s.agent === 'codex' ? 'cx ' : ''
 			const want = prefix.length + 27 // 26 characters of body, plus a trailing space
 			// below this the body is an ellipsis and one word, which the badge already
 			// outperforms — so it is the line between "shorten it" and "drop it"

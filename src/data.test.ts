@@ -217,13 +217,22 @@ test('a session with no agent record still gets its tab, by terminal device', as
 	assert.equal(pairByTty(rows)[0]!.workspace, 'REAL')
 })
 
-test('a second harness is off by default, and adds nothing when off', () => {
-	// The containment claim, checked rather than asserted in a comment: `collect()`
-	// with no argument must be byte-identical to what it produced before Codex
-	// existed. If this ever fails, the additive feature stopped being additive.
-	const strip = (list: ReturnType<typeof collect>) => JSON.stringify(list.map((s) => ({ ...s, stale: 0 })))
-	assert.equal(strip(collect()), strip(collect(false)), 'the default is not "off"')
+test('a second harness is off by default, and never labels an existing session', () => {
+	// The containment claim, checked rather than asserted in a comment.
+	//
+	// It does NOT compare two `collect()` calls to each other, which is what the first
+	// version did and was racy by construction: both read live sessions, and a real
+	// session's `doing` and `state` change between two calls milliseconds apart. That
+	// produced an intermittent failure — the kind of test that is worse than none,
+	// because the next person to see it red will assume it is weather.
+	//
+	// What holds whatever is running: with the flag off, nothing may come back wearing
+	// a harness label. `codexSessions()` returning nothing for an empty directory is
+	// covered deterministically in data/codex.test.ts.
 	for (const s of collect()) {
 		assert.equal(s.agent, undefined, 'a Claude Code session was labelled with a harness')
+	}
+	for (const s of collect(false)) {
+		assert.equal(s.agent, undefined, 'passing the flag explicitly off still added a harness')
 	}
 })
