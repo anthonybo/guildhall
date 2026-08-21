@@ -475,3 +475,41 @@ proves the bundle on disk is that build. To check that a control *renders*, rend
 **Still not solved:** there is no cheap scripted way to assert that a SwiftUI row
 appears in the shipped menu bar panel. The Settings switch added alongside this note
 was verified only as "compiles, and the bundle on disk is this build".
+
+## The harness mark was drawn in the browser and never in the terminal
+
+**Not a legibility problem — the mark was absent.** `monitor()` takes five
+positional arguments and had three call sites: the terminal's half-block path
+(`main.ts:789`), the terminal's kitty-image path (`main.ts:921`), and the compositor
+the browser and the docs share (`render.ts:186`). When `agent` was added, only the
+compositor got it. The mug held the harness color and no terminal ever drew it.
+
+**How the wrong verification happened, because it is the same mistake twice.** I
+rendered the desks through `renderRoom` and looked at the mug: teal for Codex, coral
+for Claude, exactly as designed. `renderRoom` is the compositor — the one path that
+worked. This file already records `--bench` forcing images off and so measuring a
+renderer nobody runs; the note there says a benchmark that measures the wrong path
+is worse than none, because it is trusted. Rendering through the wrong one of three
+renderers is that, again.
+
+The report — "there is no logo at the desks anywhere" — was correct while every
+check I ran said otherwise.
+
+**The second hole in the same bug.** The image path built its cache key by hand from
+the same five values and also omitted `agent`. So fixing the draw call alone would
+have left two desks differing only by harness hashing to one key, and the second
+served the first's cached picture. One bug, two independent places, both from
+re-listing the same arguments. `monitorFor()` and `monitorKey()` now take one `Desk`
+descriptor, so a new field reaches the picture and the key together or not at all.
+
+**And the mug was not findable even once it drew.** Ten pixels at the edge of the
+worktop with a bright level badge immediately beside it. Measured by rendering at a
+real terminal's 12x24 cell rather than at 8x, where it had looked obvious. It now
+also gets a cable and a bezel tinted toward the harness color — the bezel because
+it is the largest thing on a desk, with hue carrying the harness and brightness
+still carrying lit-ness so neither fact is lost.
+
+**Worth keeping:** four separate tests each confirmed failing when the thing it
+guards was removed. None of them would have caught the original bug, because
+nothing covers `main.ts`'s draw path — that gap is still open. What closed it was
+routing all three callers through one descriptor, not a test.
