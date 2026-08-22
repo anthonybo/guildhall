@@ -101,6 +101,23 @@ enum Daemon {
 		let task = Process()
 		task.executableURL = URL(fileURLWithPath: path)
 		task.arguments = args
+		/**
+		 * NODE_OPTIONS is dropped from the child's environment.
+		 *
+		 * It is a general-purpose "run this before my program" hook, and whatever launched
+		 * this app decides its value. A terminal that wraps node — cmux does, to restore
+		 * its own options — exports a `--require` pointing at a file in a temp directory.
+		 * Launch the app from that terminal, let the temp file be cleaned up, and every
+		 * `guildhall --sessions` this app runs exits 1 before reaching guildhall at all.
+		 *
+		 * Measured exactly that way: the app held a NODE_OPTIONS naming a file that no
+		 * longer existed, so every poll failed and the panel showed an hours-old snapshot.
+		 *
+		 * Nothing here needs it. The child is guildhall's own bundle, run to print JSON.
+		 */
+		var env = ProcessInfo.processInfo.environment
+		env.removeValue(forKey: "NODE_OPTIONS")
+		task.environment = env
 		let pipe = Pipe()
 		task.standardOutput = pipe
 		task.standardError = pipe

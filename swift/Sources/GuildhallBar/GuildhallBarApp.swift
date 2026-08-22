@@ -126,20 +126,32 @@ final class Model: ObservableObject {
 			if fetched != sessions { sessions = fetched }
 			if !reachable { reachable = true }
 			if Daemon.installed, daemon != .running { set(daemon: .running) }
+			// Reset HERE, on success, and nowhere else.
+			//
+			// It used to be reset after the do/catch under `if reachable`, which runs on a
+			// failure too — and `reachable` only goes false at three failures. So the count
+			// was zeroed after every failure and could never reach three: the branch below
+			// was unreachable, and the panel kept showing its last good snapshot for as
+			// long as the fetches kept failing. Hours, in the case that found this, with
+			// nothing on screen suggesting the numbers were old.
+			//
+			// The same shape as the "push only when something changed" guard already
+			// recorded in MISTAKES.md, which compared a payload containing an age in
+			// milliseconds and so never matched once.
+			failures = 0
 			log("ok: \(sessions.count) sessions, \(needsYou.count) need you, \(working.count) working")
 		} catch {
 			// One dropped request is not "nothing is running". The list is kept and only
 			// cleared after a few consecutive failures, so the label does not flash to a
 			// dash during the second-long window of a restart this app itself triggered.
 			failures += 1
-            if failures >= 3 {
+			if failures >= 3 {
 				if reachable { reachable = false }
 				if !sessions.isEmpty { sessions = [] }
 				if Daemon.installed { set(daemon: await Daemon.state()) }
 			}
 			log("failed (\(failures)): \(error)")
 		}
-		if reachable { failures = 0 }
 		// Off the main actor. Wrapping this in `await timed(…)` did NOT move it — the
 		// closure is non-Sendable so it inherits @MainActor and runs inline — and it
 		// re-read and re-decoded a file that changes every five minutes, on every poll.
