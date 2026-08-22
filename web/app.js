@@ -1962,6 +1962,8 @@ var RoomBase = class {
     if (sig === this.signature) return;
     this.signature = sig;
     this.plan(cols, rows, projects);
+    for (const ch of this.chars.values()) ch.seatId = null;
+    for (const spot of this.spots.values()) spot.taken = null;
     this.relocate();
   }
   /** After a re-plan, put everybody somewhere legal or they are stranded forever. */

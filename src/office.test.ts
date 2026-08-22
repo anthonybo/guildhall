@@ -491,3 +491,50 @@ test('a session waiting on you keeps its placard, and still shows its harness', 
 	assert.equal(office.badges[0]!.y, pod.deskRow * TILE, 'the placard is not in the level badge slot')
 	assert.equal(office.badges[0]!.x, office.logos[0]!.x, 'the placard and the sign are not in the same column')
 })
+
+test('a session never sits at a desk labelled with another project', () => {
+	// The bug this pins mislabelled EVERY desk at once, and was reported as "it shows you
+	// working on headroom instead of guildhall".
+	//
+	// Desk spots are numbered in layout order — d0, d1, d2 — and pods are laid out by
+	// seat count first, then name. A project gaining or losing a session reorders the
+	// pods, so `d4` starts meaning a different desk. Seat claims are deliberately sticky,
+	// so every character kept its id and was relocated onto somebody else's desk while
+	// the nameplates moved. One project having two sessions and then one was enough: the
+	// order fell from seat-count to alphabetical and all ten pods shifted by a place.
+	const two = [
+		session('a', 'alpha', 'working'),
+		session('b', 'alpha', 'done'),
+		session('c', 'beta', 'done'),
+		session('d', 'gamma', 'done'),
+	]
+	const { cv, office } = room(two)
+	office.fit(cv.w, cv.h, two)
+	office.assign(two)
+	office.settle(two)
+	office.draw(cv, two)
+
+	// one of alpha's two sessions ends, so alpha drops to one seat and the pod order
+	// changes from seat-count to alphabetical — exactly the shift that caused this
+	const one = two.filter((s) => s.id !== 'b')
+	office.fit(cv.w, cv.h, one)
+	office.assign(one)
+	office.draw(cv, one)
+
+	const byId = new Map(one.map((s) => [s.id, s]))
+	for (const pod of office.pods) {
+		for (let c = pod.c0; c <= pod.c1; c += 2) {
+			const seat = [...office.spots.values()].find((sp) => sp.kind === 'desk' && sp.col === c && sp.row === pod.seatRow)
+			if (!seat?.taken) continue
+			const s = byId.get(seat.taken)
+			if (!s) continue
+			assert.equal(s.proj, pod.proj, `a ${s.proj} session is sitting under a nameplate that says ${pod.proj}`)
+		}
+	}
+	// and everyone still has a desk — dropping the claims must not leave anybody standing
+	assert.equal(
+		[...office.spots.values()].filter((sp) => sp.kind === 'desk' && sp.taken).length,
+		one.length,
+		'a session lost its desk when the layout changed',
+	)
+})

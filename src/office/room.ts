@@ -172,6 +172,29 @@ export class RoomBase {
 		if (sig === this.signature) return
 		this.signature = sig
 		this.plan(cols, rows, projects)
+		/**
+		 * Every seat claim is void, because the ids just changed meaning.
+		 *
+		 * Desk spots are numbered in layout order — `d0`, `d1`, `d2` — and pods are laid
+		 * out by seat count first, then name. So a project gaining or losing a session
+		 * reorders the pods, and `d4` becomes a desk belonging to somebody else. A
+		 * character still holding `d4` is then walked to that desk by `relocate()`, and
+		 * the nameplate above it names a project that is not theirs.
+		 *
+		 * That shipped, and it mislabelled EVERY desk at once. A Codex session gave one
+		 * project two seats, so it sorted first; when the session went away every project
+		 * had one seat, the order fell back to alphabetical, and all ten pods shifted by a
+		 * place while all ten claims stayed put. The room then showed "guildhall" working
+		 * at the desk labelled "headroom" — reported exactly that way.
+		 *
+		 * The stickiness this removes is deliberate elsewhere and stays: re-deriving seats
+		 * on every poll put ~48% of seated frames in someone else's chair. This is not
+		 * every poll. `fit()` returns above unless the SIGNATURE changed, so claims are
+		 * dropped only when the layout genuinely moved underneath them — and `assign()`,
+		 * which the caller runs next, re-seats everyone into their own project's pod.
+		 */
+		for (const ch of this.chars.values()) ch.seatId = null
+		for (const spot of this.spots.values()) spot.taken = null
 		this.relocate()
 	}
 

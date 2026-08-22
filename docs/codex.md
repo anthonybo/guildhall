@@ -328,3 +328,37 @@ API was. One `readdir` of a directory with two files in it was the answer.
 - <https://ccusage.com/guide/codex/> — token and cost accounting from rollouts
 - <https://allaboutcoding.ghinda.com/where-ai-coding-clis-store-session-logs/> — where
   six agent CLIs keep their logs, and the absence of live registries
+
+## Not built: starting a Codex session from the browser
+
+The `+ session` button always runs Claude Code. `spawn()` in control.ts hardcodes
+`cmux workspace create … --command claude`, and nothing in the Codex work changed it.
+Reading Codex sessions, their cost, and sending into an existing thread are all
+supported; creating one is not.
+
+**This is not a one-line change, and the reason is worth stating before anyone tries.**
+
+The spawn flow's safety rests on one thing: `spawn()` returns the cmux workspace UUID and
+the browser waits for the row carrying *that workspace*. That exists because the obvious
+alternative — matching the new session by its directory — is what once opened an
+unrelated session's terminal, mid-conversation, one keystroke from receiving a message
+meant for somebody else. Seven sessions here share `~/projects`.
+
+A Codex session has no cmux workspace. That is deliberate and recorded in data/codex.ts:
+"No tab and no workspace: a Codex session is not a cmux pane." So the correlation the
+Claude path depends on does not exist for Codex, and the safety argument does not
+transfer.
+
+Starting `codex` inside a cmux workspace would produce a workspace UUID, but guildhall
+would still build the Codex row from `~/.codex` rollouts, which carry no reference to it.
+Linking the two needs a handle, and the candidates are:
+
+- **cwd plus a narrow time window** — the newest rollout in that exact directory created
+  after the spawn. Tighter than the Claude failure (which picked "whichever was busiest"
+  in a shared directory), but still inference, and it is wrong if somebody starts a Codex
+  session by hand at the same moment in the same place.
+- **An exact id from the CLI.** `codex --help` shows no flag to pin or print a thread id
+  at start. `codex agents` lists sessions on the app-server daemon and may expose one —
+  unverified, and the app-server route has its own open questions recorded above.
+
+Until one of those is settled, this stays unbuilt rather than built on inference.
