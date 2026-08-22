@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -34,16 +35,28 @@ const lockDir = () => process.env.GUILDHALL_CODEX_LOCKS || path.join(HOME, '.cod
 const RECENT_MS = 6 * 60 * 60 * 1000
 
 /**
- * How long a LOCKED thread may go unwritten before the lock is treated as stale.
+ * A lock is a live session, full stop — no age cutoff.
  *
- * A lock is an open file descriptor, so a clean exit removes it — but macOS does not
- * unlink on close, so a SIGKILL leaves the file behind, and without a bound one
- * crashed session is a worker that sits in the room forever. The Claude path has
- * `isAlive(pid)` for this; a rollout names no process, so a generous age is what there
- * is. A day: long enough that a session left open overnight is still a session, short
- * enough that a crash clears by the next morning.
+ * There was one, and it was wrong in the worst direction: a rollout whose file had not
+ * been written for 24 hours was treated as a crashed process and dropped. That measures
+ * how long the session has been QUIET, not whether it exists. A Codex session left open
+ * overnight and not typed into simply vanished from the room and the table, while the
+ * user was still sitting in it. Reported as exactly that.
+ *
+ * Three things were measured that the original reasoning got wrong:
+ *
+ *  - **Codex removes the lock when a session ends.** 45 rollouts on this machine, one
+ *    lock. So the file's EXISTENCE is a real signal, not a hint.
+ *  - **The lock is never refreshed.** Its mtime is when the session started: lock at
+ *    21:23, rollout still growing at 21:51. Nothing about it is a heartbeat.
+ *  - **The lock names a process after all.** The old comment said "a rollout names no
+ *    process, so a generous age is what there is". It does not have to: the lock is a
+ *    real advisory flock, held open by the `codex` process that owns the thread, and
+ *    `lsof` reports which. A non-blocking flock attempt blocks while the owner lives.
+ *
+ * So liveness is the lock existing, and the only thing left to guard is a lock orphaned
+ * by SIGKILL or a power cut. That is what `sweepGhosts` below is for.
  */
-const STALE_LOCK_MS = 24 * 60 * 60 * 1000
 
 /** Nothing written for this long, with no turn marker to go on, is not working. */
 const IDLE_MS = 10 * 60 * 1000
@@ -160,6 +173,66 @@ type Rollout = {
  * so nothing is live, because widening the set of remotely-writable sessions on a
  * permissions error is the wrong direction to fail in.
  */
+/**
+ * Threads whose lock is orphaned — the owning process is gone but the file remains.
+ *
+ * Populated by `sweepGhosts`, never by the poll. Empty until something sweeps, and empty
+ * is the safe default: showing a session that has ended is a much smaller wrong than
+ * hiding one that has not, which is the bug this whole area exists to fix.
+ */
+const ghosts = new Set<string>()
+
+/** Testing only: forget what the last sweep decided. */
+export const resetCodexGhosts = () => ghosts.clear()
+
+/**
+ * Find locks no live `codex` process holds, and remember them as dead.
+ *
+ * NOT called from the poll, and that is the whole design. One `lsof -c codex` costs
+ * about **50 cpu-ms** measured, against a 3 cpu-ms budget for the entire Codex poll — so
+ * it runs on a slow timer from the caller instead, where 50ms a minute is 0.08% of a
+ * core. Putting it in the poll would be the shape of the cache that once cost a third of
+ * a core here: a per-tick subprocess nobody priced.
+ *
+ * `lsof -c codex` lists every file open by every codex process in one call, so the cost
+ * does not grow with the number of sessions.
+ *
+ * On any failure it clears the ghost set rather than guessing. A sweep that cannot run
+ * must not be able to hide a live session — that is the failure being fixed, and it is
+ * worse than leaving a dead desk on screen until the next sweep succeeds.
+ */
+export function sweepGhosts(at = lockDir()): void {
+	let names: string[]
+	try {
+		names = fs.readdirSync(at).filter((n) => !n.startsWith('.') && n.endsWith('.lock'))
+	} catch {
+		ghosts.clear()
+		return
+	}
+	if (!names.length) {
+		ghosts.clear()
+		return
+	}
+	let held: string
+	try {
+		held = execFileSync('/usr/sbin/lsof', ['-c', 'codex', '-Fn'], { encoding: 'utf8', timeout: 5000, maxBuffer: 4 << 20 })
+	} catch (e) {
+		// lsof exits non-zero when it finds nothing, which is a real answer: no codex
+		// process has anything open, so every lock is orphaned. Anything else is a
+		// failure to ask, and must not condemn a session.
+		const out = (e as { stdout?: string }).stdout
+		if (typeof out !== 'string') {
+			ghosts.clear()
+			return
+		}
+		held = out
+	}
+	ghosts.clear()
+	for (const n of names) {
+		if (!held.includes(n)) ghosts.add(n.slice(0, -'.lock'.length).toLowerCase())
+	}
+}
+
 function liveThreads(at: string): Set<string> | null {
 	let names: string[]
 	try {
@@ -172,7 +245,10 @@ function liveThreads(at: string): Set<string> | null {
 	for (const n of names) {
 		// `.coordination.lock` lives here and is not a thread.
 		if (n.startsWith('.') || !n.endsWith('.lock')) continue
-		out.add(n.slice(0, -'.lock'.length).toLowerCase())
+		const id = n.slice(0, -'.lock'.length).toLowerCase()
+		// A lock the last sweep found nobody holding. Free to check: a Set lookup.
+		if (ghosts.has(id)) continue
+		out.add(id)
 	}
 	return out
 }
@@ -430,8 +506,7 @@ export function codexSessions(now = Date.now(), at = dir(), locks = lockDir()): 
 	const keep = new Set<string>()
 	for (const f of discover(at, live, now)) {
 		if (live) {
-			// A lock with nothing written for a day is a crashed process, not a session.
-			if (now - f.mtime > STALE_LOCK_MS) continue
+			// Locked means live. Age says nothing: see the note on ghosts above.
 		} else if (now - f.mtime > RECENT_MS) {
 			continue
 		}

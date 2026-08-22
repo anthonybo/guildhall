@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 
-import { codexSessions, resetCodexCache } from './codex.ts'
+import { codexSessions, resetCodexCache, resetCodexGhosts, sweepGhosts } from './codex.ts'
 
 /**
  * Fixtures are written here, never copied from `~/.codex`.
@@ -80,17 +80,6 @@ test('a locked thread is live; an unlocked one is gone, however recent', () => {
 	rollout(ID.a, [meta(ID.a, '/x/projects/orchard'), started, done], { live: true })
 	rollout(ID.b, [meta(ID.b, '/x/projects/willow'), started, done])
 	assert.deepEqual(read().map((s) => s.proj), ['orchard'])
-})
-
-test('a lock with nothing written for a day is a crash, not a session', () => {
-	// A lock is an open fd, so a clean exit removes it — but a SIGKILL leaves the file,
-	// and macOS does not unlink on close. Unbounded, one crash is a worker that sits in
-	// the room forever. The Claude path checks `isAlive(pid)`; a rollout names no
-	// process, so age is the bound.
-	reset()
-	rollout(ID.a, [meta(ID.a, '/x/projects/orchard'), started, done], { live: true, ageMs: 20 * 60 * 60 * 1000 })
-	rollout(ID.b, [meta(ID.b, '/x/projects/willow'), started, done], { live: true, ageMs: 30 * 24 * 60 * 60 * 1000 })
-	assert.deepEqual(read().map((s) => s.proj), ['orchard'], 'a month-old lock was still believed')
 })
 
 test('an UNREADABLE lock directory refuses rather than widening', () => {
@@ -337,4 +326,52 @@ test('a file with no newline at all is skipped, not hung on', () => {
 	fs.writeFileSync(path.join(at, `rollout-2026-08-20T10-00-00-${ID.b}.jsonl`), 'x'.repeat(300_000))
 	fs.writeFileSync(path.join(locks, `${ID.b}.lock`), '')
 	assert.deepEqual(read(), [])
+})
+
+test('a session left open overnight is still a session', () => {
+	// The bug: a rollout not written for 24 hours was treated as a crashed process and
+	// dropped, so a Codex session idle since yesterday vanished from the room and the
+	// table while somebody was sitting in it. That cutoff measured how long the session
+	// had been QUIET, not whether it existed.
+	//
+	// Measured facts that make the cutoff wrong: codex REMOVES the lock when a session
+	// ends (45 rollouts on the reporting machine, one lock), and it never refreshes the
+	// lock while running — the mtime is when the session started, not a heartbeat.
+	reset()
+	rollout(ID.a, [meta(ID.a, '/x/alpha'), tokens(1000, 200_000)], { live: true, ageMs: 3 * 24 * 60 * 60 * 1000 })
+	const out = read()
+	assert.equal(out.length, 1, 'a locked thread idle for three days was dropped')
+	assert.equal(out[0]!.proj, 'alpha')
+})
+
+test('a lock nobody holds is culled, but only once a sweep has said so', () => {
+	// The other half. Codex cannot clean up after SIGKILL or a power cut, so an orphaned
+	// lock would otherwise be a desk that never leaves.
+	//
+	// Until a sweep runs, the thread is shown. That default is deliberate: showing a
+	// session that has ended is a much smaller wrong than hiding one that has not, which
+	// is the failure this whole area exists to fix.
+	reset()
+	resetCodexGhosts()
+	rollout(ID.b, [meta(ID.b, '/x/beta'), tokens(1000, 200_000)], { live: true, ageMs: 60_000 })
+	assert.equal(read().length, 1, 'a locked thread was hidden before any sweep')
+
+	// No codex process holds this fixture lock, so a sweep must condemn it.
+	sweepGhosts(locks)
+	assert.equal(read().length, 0, 'an orphaned lock survived a sweep')
+
+	// and the verdict is forgotten on demand, so a restarted session is not stuck dead
+	resetCodexGhosts()
+	assert.equal(read().length, 1, 'the ghost verdict outlived a reset')
+})
+
+test('a sweep that cannot run condemns nothing', () => {
+	// A sweep is an optimisation for a rare case. If it fails — lsof missing, the lock
+	// directory unreadable — it must not be able to hide a live session, because that is
+	// the exact bug it sits next to.
+	reset()
+	resetCodexGhosts()
+	rollout(ID.c, [meta(ID.c, '/x/gamma'), tokens(1000, 200_000)], { live: true, ageMs: 60_000 })
+	sweepGhosts('/nonexistent-directory-for-this-test')
+	assert.equal(read().length, 1, 'a failed sweep hid a live session')
 })

@@ -32,6 +32,7 @@ import {
 	upscale,
 } from './kitty.ts'
 import { collect as collectReal, mixedHarness, needsAttention, order, type Session } from './data.ts'
+import { sweepGhosts as sweepCodexGhosts } from './data/codex.ts'
 import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
 import { CHAR_H, CHAR_W, MON_COLS, MON_ROWS, Office, TILE, type Placed } from './office.ts'
@@ -1424,6 +1425,19 @@ function start() {
 			draw()
 		}, 2000),
 	)
+	/**
+	 * Cull Codex locks nobody holds, on a slow timer and never in the poll.
+	 *
+	 * One `lsof` costs about 50 cpu-ms against a 3 cpu-ms budget for the whole Codex
+	 * poll, so it cannot go per tick. A minute apart is 0.08% of a core, and the thing it
+	 * catches — a lock orphaned by SIGKILL or a power cut — does not appear on a schedule
+	 * that needs watching any closer.
+	 */
+	timers.push(
+		setInterval(() => {
+			if (cfg.codex) sweepCodexGhosts()
+		}, 60_000),
+	)
 }
 
 /**
@@ -1490,6 +1504,12 @@ function headless() {
 	}
 	tick()
 	timers.push(setInterval(tick, 2000))
+	// see the note on the interactive timer: too expensive per poll, cheap per minute
+	timers.push(
+		setInterval(() => {
+			if (cfg.codex) sweepCodexGhosts()
+		}, 60_000),
+	)
 	const stop = () => {
 		for (const t of timers) clearInterval(t)
 		awake.configure(false)

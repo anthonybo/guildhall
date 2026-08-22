@@ -842,3 +842,38 @@ whether it lands. `cmux send` with an empty or unmatched target falls back to wh
 surface is FOCUSED — this repo has typed into a live session twice that way. `cmux
 capabilities` answers from local state, needs no socket, and reports `access_mode`, which
 is the fact that decides the question.
+
+## A Codex session left open overnight vanished from the room
+
+**Shipped, and it hid a session somebody was sitting in.** A locked Codex thread whose
+rollout file had not been written for 24 hours was treated as a crashed process and
+dropped — from the room, the table and the browser alike. That cutoff measures how long
+a session has been QUIET, not whether it exists, and a session you are not currently
+typing into is the normal state of a session.
+
+The reasoning in the code was explicit about its own weakness and still got it wrong:
+"a rollout names no process, so a generous age is what there is". Three measurements
+undo it:
+
+- **Codex removes the lock when a session ends.** 45 rollouts on the reporting machine,
+  one lock. Existence is a real signal, not a hint.
+- **The lock is never refreshed.** Its mtime is when the session started — lock at 21:23,
+  rollout still growing at 21:51. Nothing about it is a heartbeat, so aging it measures
+  session lifetime.
+- **The lock does name a process.** It is a real advisory flock held open by the owning
+  `codex`. A non-blocking flock attempt BLOCKS while the owner lives, and one
+  `lsof -c codex` lists every lock every codex process holds.
+
+**Why the check is not in the poll.** `lsof -c codex` costs about **50 cpu-ms** measured,
+against a 3 cpu-ms budget for the entire Codex poll. Per tick that is the shape of the
+cache that once cost a third of a core here. It runs on a 60-second timer from the
+caller instead — 0.08% of a core — and the poll only consults a Set the sweep fills.
+
+**Unswept means shown, deliberately.** Until a sweep has said otherwise a locked thread
+is live. Showing a session that has ended is a much smaller wrong than hiding one that
+has not, and a sweep that cannot run — lsof missing, directory unreadable — clears its
+verdicts rather than guessing.
+
+**And the test that guarded the old behavior was deleted, not adapted.** It asserted the
+cutoff was correct, in a file that now proves it is not. A test defending a disproved
+premise is worse than no test: it makes the next person think the question was settled.
