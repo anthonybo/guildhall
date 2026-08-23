@@ -66,15 +66,33 @@ function paintCounts(list: Session[]) {
 				const n = document.createElement('span')
 				n.className = 'text-label'
 				n.textContent = String(counts[k])
-				// The word is its own element so a narrow screen could style it apart.
-				// It stays at every width: a bare ▲ or ◆ is unreadable to anyone who
-				// has not memorised a legend, and the count is worth nothing if you
-				// cannot tell what it counts.
+				/**
+				 * The word drops below 560px, and the earlier note here argued it should
+				 * never do that: "a bare ▲ or ◆ is unreadable to anyone who has not
+				 * memorised a legend". The objection is right about a bare glyph and
+				 * wrong about this one, on three counts.
+				 *
+				 * It is never bare — it always carries its number, which is what makes
+				 * it read as a quantity of something rather than as an ornament. It is
+				 * the same glyph and the same colour the terminal uses for that state,
+				 * so it is the product's own vocabulary rather than an invented legend.
+				 * And the words are one thumb-length below: the list bands spell out
+				 * "needs you", "working", "your turn" in full, against the same colours.
+				 *
+				 * What the words cost was the whole header. Spelled out they measured
+				 * 338px against 338px of usable width on a 366px phone, which is what
+				 * pushed the bar to three rows and 102px — a third of the list, spent on
+				 * a summary of the list.
+				 *
+				 * `aria-label` on the row keeps the full phrase for a screen reader at
+				 * every width, so nothing is hidden from anyone who cannot see colour.
+				 */
 				const word = document.createElement('span')
-				word.className = 'text-label'
+				word.className = 'text-label hidden min-[560px]:inline'
 				word.textContent = ` ${LOOK[k].label}`
 				// the same phrase, for a pointer that hovers the glyph
 				el.title = `${counts[k]} ${LOOK[k].label}`
+				el.setAttribute('aria-label', `${counts[k]} ${LOOK[k].label}`)
 				el.append(n, word)
 				return el
 			}),

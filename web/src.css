@@ -201,3 +201,22 @@ body.stale .sweep::after {
 		background: var(--state);
 	}
 }
+
+/**
+ * Two classes app.ts has always set and nothing has ever styled.
+ *
+ * `.newer` is toggled whenever the server reports a newer release, and
+ * `--color-newer` was defined for it — but no rule ever read either, so the version
+ * never changed colour and the token sat unused. `.build` carries the commit hash and
+ * its comment says "the commit is its own element so a phone can drop it"; nothing
+ * dropped it, and it was 120px of a 338px phone header.
+ */
+#ver.newer {
+	color: var(--color-newer);
+}
+
+@media (width < 560px) {
+	#ver .build {
+		display: none;
+	}
+}

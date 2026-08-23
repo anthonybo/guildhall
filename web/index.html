@@ -37,14 +37,25 @@
 		     three ragged rows. -->
 		<header
 			id="bar"
-			class="sticky top-0 z-[2] flex flex-wrap items-center gap-2 border-b border-line bg-bg/92 px-3.5 py-2.5 backdrop-blur-[8px] min-[560px]:flex-nowrap min-[560px]:gap-3"
+			class="sticky top-0 z-[2] flex flex-nowrap items-center gap-2 border-b border-line bg-bg/92 px-3.5 py-2 backdrop-blur-[8px] min-[560px]:gap-3 min-[560px]:py-2.5"
 		>
 			<span class="font-bold tracking-[0.06em] text-gold">GUILDHALL</span>
 			<!-- version sits with the name, as it does in the terminal, so a tab left
 			     open for a week is as obviously stale here as it is there -->
-			<span id="ver" class="text-[0.78rem] whitespace-nowrap text-faint"></span>
+			<span id="ver" class="hidden text-[0.78rem] whitespace-nowrap text-faint min-[420px]:inline"></span>
 			<!-- order-3/basis-full below 560px is what gives the counts their own row -->
-			<span id="counts" class="order-3 flex min-w-0 basis-full flex-wrap gap-x-3.5 gap-y-1 text-[0.8rem] text-muted min-[560px]:order-none min-[560px]:basis-auto min-[560px]:gap-3 min-[560px]:text-[0.82rem]"></span>
+			<!--
+			  The counts are the reason the header exists on a phone: the one question it
+			  answers is whether anything needs you. They used to be given a row of their
+			  own below 560px (`order-3 basis-full`), which is what made the bar three
+			  ragged lines and 102px tall on a 366px screen — a third of the visible list.
+
+			  Now they stay inline and shrink instead. `min-w-0` lets them, and the
+			  overflow scrolls rather than wrapping: with seven states at once no
+			  arrangement fits one line, and a bar that silently changes height is worse
+			  than one you can nudge sideways in the rare case.
+			-->
+			<span id="counts" class="flex min-w-0 items-center gap-x-2.5 overflow-x-auto text-[0.8rem] text-muted [scrollbar-width:none] [&::-webkit-scrollbar]:hidden min-[560px]:gap-3 min-[560px]:overflow-visible min-[560px]:text-[0.82rem]"></span>
 			<span id="link" class="ml-auto flex items-center gap-1.5 text-xs whitespace-nowrap text-faint" title="connection"></span>
 			<!-- The panel is built from the spec in settings.ts rather than written
 			     out here, so adding an option never means editing two files. -->
@@ -52,33 +63,45 @@
 			     other thing you might want that is not a session. Called "pressroom"
 			     rather than anything cleverer: it is the same tool you already run in a
 			     terminal, and a second name for one thing is only friction. -->
+			<!--
+			  Label below the icon's breakpoint, icon above it. `aria-label` carries the
+			  name at BOTH widths, so hiding the text never hides the meaning from a
+			  screen reader — and the marks are drawn on the same 16-unit crisp-edge grid
+			  as the CRT sprite in list.ts, because this app already has an icon language
+			  and a stray Unicode character is not part of it.
+			-->
 			<button
 				id="newbtn"
-				class="cursor-pointer rounded border border-line bg-transparent px-2 py-0.5 text-[0.74rem] whitespace-nowrap text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold"
+				class="cursor-pointer rounded border border-line bg-transparent text-[0.74rem] whitespace-nowrap text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold inline-flex items-center justify-center gap-1.5 min-h-8 min-w-8 px-1.5 min-[560px]:px-2 min-[560px]:py-0.5"
 				type="button"
+				aria-label="Start a new Claude Code session"
 				title="Start a new Claude Code session"
 			>
-				+ session
+				<svg viewBox="0 0 16 16" width="13" height="13" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor"><rect x="7" y="3" width="2" height="10"/><rect x="3" y="7" width="10" height="2"/></svg><span class="hidden min-[560px]:inline">session</span>
 			</button>
 			<button
 				id="pressbtn"
-				class="cursor-pointer rounded border border-line bg-transparent px-2 py-0.5 text-[0.74rem] whitespace-nowrap text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:border-gold aria-expanded:text-gold"
+				class="cursor-pointer rounded border border-line bg-transparent text-[0.74rem] whitespace-nowrap text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold inline-flex items-center justify-center gap-1.5 min-h-8 min-w-8 px-1.5 min-[560px]:px-2 min-[560px]:py-0.5 aria-expanded:border-gold aria-expanded:text-gold"
 				type="button"
 				aria-expanded="false"
 				aria-controls="press"
+				aria-label="Pressroom — commits and deploys across your projects"
 				title="Commits and deploys across your projects"
 			>
-				pressroom
+				<svg viewBox="0 0 16 16" width="13" height="13" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor"><rect x="2" y="2" width="12" height="1"/><rect x="2" y="13" width="12" height="1"/><rect x="2" y="2" width="1" height="12"/><rect x="13" y="2" width="1" height="12"/><rect x="4" y="5" width="8" height="1"/><rect x="4" y="8" width="8" height="1"/><rect x="4" y="11" width="5" height="1"/></svg><span class="hidden min-[560px]:inline">pressroom</span>
 			</button>
+			<!-- Was the character ⚙, which is a different weight and baseline in every
+			     font it lands in. Drawn to match the other two. -->
 			<button
 				id="gear"
-				class="cursor-pointer rounded border-0 bg-transparent px-0.5 py-px text-base/none text-faint hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:text-gold"
+				class="cursor-pointer inline-flex min-h-8 min-w-8 items-center justify-center rounded border-0 bg-transparent text-faint hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold aria-expanded:text-gold"
 				type="button"
 				aria-expanded="false"
 				aria-controls="settings"
+				aria-label="Settings"
 				title="Settings"
 			>
-				⚙
+				<svg viewBox="0 0 16 16" width="13" height="13" shape-rendering="crispEdges" aria-hidden="true" fill="currentColor"><rect x="2" y="4" width="12" height="1"/><rect x="5" y="2" width="2" height="5"/><rect x="2" y="11" width="12" height="1"/><rect x="9" y="9" width="2" height="5"/></svg>
 			</button>
 			<div
 				id="settings"

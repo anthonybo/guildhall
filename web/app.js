@@ -3925,9 +3925,10 @@ function paintCounts(list) {
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
-      word2.className = "text-label";
+      word2.className = "text-label hidden min-[560px]:inline";
       word2.textContent = ` ${LOOK[k].label}`;
       el4.title = `${counts[k]} ${LOOK[k].label}`;
+      el4.setAttribute("aria-label", `${counts[k]} ${LOOK[k].label}`);
       el4.append(n, word2);
       return el4;
     })
