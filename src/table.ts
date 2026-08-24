@@ -189,7 +189,7 @@ export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolea
  * which buries a real appearance change in noise — the picture should move when
  * the app looks different, not when anything at all happens.
  */
-export type Share = { on: boolean; port: number; error?: string }
+export type Share = { on: boolean; port: number; error?: string; handover?: boolean }
 
 /**
  * Sharing is only ever shown when it is ON, or when it failed to start.
@@ -200,13 +200,21 @@ export type Share = { on: boolean; port: number; error?: string }
  * frame would train the eye to ignore the place the warning appears.
  */
 function shareBadge(share?: Share, compact = false) {
-	// A busy port is not a failure any more, it is the arrangement: the headless
-	// service takes the port at login, so a room opened afterwards cannot have it
-	// and does not need it — the browser view is up, served by the thing that took
-	// it. The header is where this is read and it truncates, so the SHORT label has
-	// to carry the meaning; appending the detail after "share failed" left it saying
-	// "⚠ share fa" on a normal width, which is alarming and wrong.
-	if (share?.error?.includes('already served')) return `  ${fg(C.screenAgent)}◉ :${share.port} by daemon${R}`
+	/**
+	 * A busy port is not a failure, it is the arrangement: the headless service takes
+	 * the port at login, so a room opened afterwards cannot have it and does not need
+	 * it — the browser view is up, served by the thing that took it. The header is
+	 * where this is read and it truncates, so the SHORT label carries the meaning;
+	 * appending the detail after "share failed" left it saying "⚠ share fa" at a normal
+	 * width, which is alarming and wrong.
+	 *
+	 * Read from `handover`, NOT by searching the message for "already served". That
+	 * string match is how this broke: a later commit improved the message to name the
+	 * holder and its pid, the words stopped matching, and every handover started
+	 * reporting "share failed" while the browser view worked perfectly. A user-visible
+	 * state must not depend on the wording of a sentence somebody is free to improve.
+	 */
+	if (share?.handover) return `  ${fg(C.screenAgent)}◉ :${share.port} by daemon${R}`
 	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${compact ? '' : `${fg(C.muted)} · ${share.error}`}${R}`
 	if (!share?.on) return ''
 	if (compact) return `  ${fg(C.screenAgent)}◉ :${share.port}${R}`

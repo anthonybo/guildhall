@@ -90,3 +90,29 @@ test('the help panel explains what sharing exposes', () => {
 	assert.match(t, /read session titles|filenames being edited/, 'does not say what is exposed')
 	assert.match(t, /never|public internet/, 'does not bound where it is reachable')
 })
+
+test('a port held by another guildhall reads as the arrangement, not as a failure', () => {
+	// The bug this pins shipped and was reported from another machine: the terminal said
+	// "⚠ share failed" across the top while the browser view was working perfectly,
+	// served by the daemon that had taken the port at login.
+	//
+	// The footer decided which of the two messages to show by searching the error text
+	// for "already served". A later commit improved that message to name the holder and
+	// its pid — strictly better prose — and the words stopped matching, so every handover
+	// started reporting a failure. Nothing tested the coupling because both sides were
+	// individually correct.
+	const s = demoSessions()
+	const held = strip(summary(s, 150, { armed: true, holding: false }, '', { on: false, port: 4319, handover: true, error: 'port 4319 is held by another guildhall — waiting for it to let go' }))
+	assert.doesNotMatch(held, /share failed/, 'a handover was reported as a failure')
+	assert.match(held, /4319/, 'the handover message does not say which port is serving')
+
+	// The wording of `error` must not decide anything. The same text with the flag off is
+	// a real failure, and the same flag with different text is still a handover.
+	const reworded = strip(summary(s, 150, { armed: true, holding: false }, '', { on: false, port: 4319, handover: true, error: 'any wording at all' }))
+	assert.doesNotMatch(reworded, /share failed/, 'the footer still depends on the message text')
+
+	// And something that is NOT guildhall holding the port is a genuine failure, because
+	// it will not let go — that distinction is the whole reason the flag exists.
+	const stolen = strip(summary(s, 150, { armed: true, holding: false }, '', { on: false, port: 4319, error: 'port 4319 is held by something that is not guildhall' }))
+	assert.match(stolen, /share failed/, 'a port held by something else was not reported as a failure')
+})

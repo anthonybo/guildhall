@@ -877,3 +877,39 @@ verdicts rather than guessing.
 **And the test that guarded the old behavior was deleted, not adapted.** It asserted the
 cutoff was correct, in a file that now proves it is not. A test defending a disproved
 premise is worse than no test: it makes the next person think the question was settled.
+
+## "share failed" while the browser view was working
+
+**Shipped, and reported from another machine after an upgrade.** The terminal showed
+`⚠ share failed` across the top while the browser view was serving perfectly. The
+person had changed the port from the menu bar, which is the easier place to do it,
+and the room went on complaining.
+
+Three faults, and the first is the interesting one.
+
+**A user-visible state was decided by searching an error message for a phrase.** The
+footer chose between "the daemon has the port, the view is up" and "share failed"
+with `share.error.includes('already served')`. A later commit improved that message
+to name the holder and its pid — better text by every measure — and the words stopped
+matching, so every handover began reporting a failure. Both sides were individually
+correct and nothing tested the coupling. It is now a boolean, which cannot be
+reworded.
+
+**A running room never re-read the port.** `adoptDiskSettings` deliberately excluded
+`port` and `host`, on the grounds that "port and host cannot change under a bound
+listener". True, and the wrong conclusion: they cannot change under one, so the
+listener has to be REPLACED. Excluding them meant the menu bar's change reached the
+service and never reached the room, which kept reporting the old port and kept
+failing to bind it.
+
+**And the room gave up permanently.** A failed bind set `cfg.serve = false`, so when
+the other guildhall stopped — or the port moved — nothing was left to notice. The
+intent to serve now survives a handover and the poll retries, but only for a
+handover: something that is not guildhall will not let go, and retrying that is a
+loop that cannot end.
+
+**The pattern to watch.** This is the second guard in this file that never matched.
+The first compared a payload containing an age in milliseconds, so it fired every
+tick; this one compared prose that another commit was free to rewrite. Both were
+invisible to tests because each half was right on its own. When a decision depends on
+a string somebody else produces, it is not a decision, it is a coincidence.

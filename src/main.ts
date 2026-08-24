@@ -421,9 +421,24 @@ if (process.argv.includes('--no-codex')) cfg.codex = false
 const CODEX_PINNED = process.argv.includes('--codex') || process.argv.includes('--no-codex')
 const portArg = process.argv.indexOf('--port')
 if (portArg > 0) cfg.port = Number(process.argv[portArg + 1]) || cfg.port
+/** Given on the command line, so the file must not take it back mid-run. */
+const PORT_PINNED = portArg > 0
 
 let server: import('node:http').Server | null = null
 let serveError = ''
+/**
+ * Whether the port is held by ANOTHER GUILDHALL, as a fact rather than as prose.
+ *
+ * The footer used to work this out by searching the error message for the words
+ * "already served". That made a user-visible state depend on the wording of a
+ * sentence, and the next commit to improve the wording — naming the holder and its
+ * pid, which is strictly better text — silently flipped every handover from "the
+ * browser view is up, served by the daemon" to "share failed". The view was working
+ * the whole time.
+ *
+ * A boolean cannot be reworded.
+ */
+let serveHandover = false
 /**
  * What a remote device has typed into this machine, newest first.
  *
@@ -484,6 +499,7 @@ function syncServe() {
 			if (e.code === 'EADDRINUSE') {
 				const holder = portHolder(cfg.port)
 				const mine = holder ? isGuildhall(holder.pid) : false
+				serveHandover = mine
 				serveError = holder
 					? mine
 						? `port ${cfg.port} is held by another guildhall (pid ${holder.pid}) — waiting for it to let go`
@@ -491,7 +507,11 @@ function syncServe() {
 					: `port ${cfg.port} is already served by another process`
 			} else serveError = e.code ?? 'failed'
 			server = null
-			cfg.serve = false
+			// The INTENT to serve survives a handover. Clearing it meant the room gave up
+			// permanently: the daemon holding the port at login is the normal arrangement,
+			// and when it stops — or the port is changed from the menu bar — nothing was
+			// left to notice. The poll retries while this is true; see `retryServe`.
+			if (!serveHandover) cfg.serve = false
 		})
 		// Announced once the bind SUCCEEDS, not before: a failed listen must not leave a
 		// file claiming this process is serving, or the next room would warn about a
@@ -499,6 +519,7 @@ function syncServe() {
 		server.on('listening', () => announce(cfg.port, cfg.host))
 		server.listen(cfg.port, cfg.host)
 		serveError = ''
+		serveHandover = false
 	} catch {
 		server = null
 		cfg.serve = false
@@ -714,6 +735,35 @@ function toggleLabels() {
  */
 function adoptDiskSettings() {
 	const disk = cfgStore.load()
+	/**
+	 * The port and host, which used to be excluded from here on the grounds that
+	 * "port and host cannot change under a bound listener". True, and the wrong
+	 * conclusion: they cannot change under one, so the listener has to be REPLACED —
+	 * and doing nothing meant changing the port in the menu bar reached the service
+	 * and never reached a room that was already open. The room went on reporting the
+	 * old port, and on failing to bind it.
+	 */
+	/**
+	 * Only when the file is actually there.
+	 *
+	 * `load()` cannot distinguish "no config" from "config unreadable" — it catches and
+	 * returns the defaults either way. Both writers are atomic, so a torn read is not
+	 * possible; a MISSING file is, and without this guard that would silently move a
+	 * running room to the default port and rebind it, which is a strange thing to have
+	 * happen because a file went away.
+	 */
+	const present = fs.existsSync(cfgStore.configPath())
+	if (present && !PORT_PINNED && (disk.port !== cfg.port || disk.host !== cfg.host)) {
+		cfg.port = disk.port
+		cfg.host = disk.host
+		if (server) {
+			server.close()
+			server = null
+		}
+		serveError = ''
+		serveHandover = false
+		syncServe()
+	}
 	// A one-run flag outranks the file for the whole run. Without this the first poll
 	// two seconds in silently undid `--no-codex`, which is the flag somebody reaches
 	// for precisely because something looks wrong.
@@ -962,7 +1012,7 @@ function draw() {
 	if (remote) body.pop()
 	while (body.length < rows) body.push('')
 	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
-	const shareState = { on: !!server, port: cfg.port, error: serveError }
+	const shareState = { on: !!server, port: cfg.port, error: serveError, handover: serveHandover }
 	paint(
 		[
 			// build(), not the default frozen BUILD: this process is often left running
@@ -1424,6 +1474,17 @@ function start() {
 		setInterval(() => {
 			// so the menu bar's switches reach a room that is already open
 			adoptDiskSettings()
+			/**
+			 * Retry a bind that lost to another guildhall.
+			 *
+			 * Only in that case: something which is not guildhall will not let go, so
+			 * retrying it is a loop that cannot end, and the message already says to
+			 * change the port. A guildhall will — when the daemon is stopped, or the port
+			 * moves — and without this the room stayed dark until it was restarted.
+			 *
+			 * A failed bind costs microseconds, so once per poll is free.
+			 */
+			if (cfg.serve && !server && serveHandover) syncServe()
 			sessions = collect()
 			// hold the machine open while anyone is mid-task, and let go when they stop
 			awake.sync(sessions)
