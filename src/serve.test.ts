@@ -12,7 +12,7 @@ process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildh
 
 
 import { load } from './config.ts'
-import { summary } from './table.ts'
+import { rows, summary } from './table.ts'
 import { width } from './theme.ts'
 import { panel } from './help.ts'
 import { demoSessions } from './demo.ts'
@@ -150,5 +150,22 @@ test('a handover still says which port, even when it has been shortened', () => 
 		const line = strip(summary(s, w, { armed: true, holding: false }, '', { on: false, port: 4208, handover: true }))
 		assert.match(line, /4208/, `lost the port at ${w} columns`)
 		assert.doesNotMatch(line, /share failed/, `a handover read as a failure at ${w} columns`)
+	}
+})
+
+test('nothing is ever drawn wider than the terminal it is drawn into', () => {
+	// A pane narrower than the old 46-column floor got 46-column lines and wrapped every
+	// one of them — the header's last badge on a second row, reported from a smaller
+	// screen. The floor bought nothing: every renderer here already narrows.
+	//
+	// This asserts the invariant rather than the floor, so the next person to add a
+	// minimum has to break a test that says why.
+	const list = demoSessions()
+	for (const cols of [120, 84, 64, 52, 46, 44, 40, 34, 28, 22, 20]) {
+		const head = strip(summary(list, cols, { armed: true, holding: true }, '0.10.3', { on: false, port: 4208, handover: true }))
+		assert.ok(width(head) <= cols, `the header was ${width(head)} columns wide at ${cols}`)
+		for (const r of rows(list, cols)) {
+			assert.ok(width(strip(r.line)) <= cols, `a table row was ${width(strip(r.line))} columns wide at ${cols}`)
+		}
 	}
 })

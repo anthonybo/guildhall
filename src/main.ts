@@ -905,7 +905,24 @@ const sizeOf = (tty: number | undefined, env: string | undefined, fallback: numb
 
 /** Recompute geometry and re-place creatures. Safe to call as often as you like. */
 function layout() {
-	const cols = Math.max(46, sizeOf(OUT.columns, process.env.COLUMNS, 90) - 1)
+	/**
+	 * Never wider than the terminal actually is.
+	 *
+	 * The floor here was 46, which meant a pane narrower than that got 46-column lines
+	 * drawn into it and every one of them wrapped — the header's last badge landing on
+	 * a second row, the table rows folding, the whole thing reading as a rendering
+	 * fault rather than as a small window. Reported from a laptop with a smaller
+	 * screen, and reproduced at 36 columns, where the header overflowed by 4.
+	 *
+	 * The floor was also unnecessary. Every renderer here already narrows: the table
+	 * drops its context gauge and shortens project names, the room packs desks into
+	 * more rows, and the header's badge ladder sheds badges. Measured at 44, 40, 34,
+	 * 28, 22 and 20 columns, nothing throws and no line exceeds the width it was given.
+	 *
+	 * 20 is kept as a floor only to stop the arithmetic going degenerate; a terminal
+	 * that narrow has bigger problems than this program.
+	 */
+	const cols = Math.max(20, sizeOf(OUT.columns, process.env.COLUMNS, 90) - 1)
 	const rows = Math.max(14, sizeOf(OUT.rows, process.env.LINES, 44) - 2)
 	const list = visible()
 	if (!selectedId || !list.some((s) => s.id === selectedId)) selectedId = order(list)[0]?.id ?? null
