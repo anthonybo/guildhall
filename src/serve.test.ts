@@ -13,6 +13,7 @@ process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildh
 
 import { load } from './config.ts'
 import { summary } from './table.ts'
+import { width } from './theme.ts'
 import { panel } from './help.ts'
 import { demoSessions } from './demo.ts'
 
@@ -115,4 +116,39 @@ test('a port held by another guildhall reads as the arrangement, not as a failur
 	// it will not let go — that distinction is the whole reason the flag exists.
 	const stolen = strip(summary(s, 150, { armed: true, holding: false }, '', { on: false, port: 4319, error: 'port 4319 is held by something that is not guildhall' }))
 	assert.match(stolen, /share failed/, 'a port held by something else was not reported as a failure')
+})
+
+test('the header never exceeds its width, whatever badge it is carrying', () => {
+	// Reported from a smaller screen: "by daemon" wrapped onto a second line. A header
+	// that wraps is worse than one missing a badge, because it moves everything below it.
+	//
+	// Two causes, and the ladder in `summary` hid the first. It shrinks the right-hand
+	// side by asking each badge for its compact form — so a badge that returns the same
+	// string either way makes the ladder a no-op. The handover badge did exactly that.
+	// Then `right` was appended AFTER the clip, so the width everything was measured
+	// against bounded only the left-hand side.
+	const s = demoSessions()
+	const shares = [
+		{ on: false, port: 4208, handover: true, error: 'held by another guildhall' },
+		{ on: true, port: 4208 },
+		{ on: false, port: 4208, error: 'port 4208 is held by something that is not guildhall' },
+		{ on: false, port: 4208 },
+	]
+	for (const share of shares) {
+		for (const w of [150, 120, 100, 84, 76, 64, 52, 44, 36, 28, 20]) {
+			const line = summary(s, w, { armed: true, holding: true }, '0.10.2', share)
+			assert.ok(width(strip(line)) <= w, `at ${w} columns the header was ${width(strip(line))} wide — it will wrap (${JSON.stringify(share)})`)
+		}
+	}
+})
+
+test('a handover still says which port, even when it has been shortened', () => {
+	// Shrinking must not cost the fact. ":4208" alone is enough to say the view is up
+	// and where — dropping the port would leave a mark that means nothing.
+	const s = demoSessions()
+	for (const w of [150, 100, 76, 52, 44]) {
+		const line = strip(summary(s, w, { armed: true, holding: false }, '', { on: false, port: 4208, handover: true }))
+		assert.match(line, /4208/, `lost the port at ${w} columns`)
+		assert.doesNotMatch(line, /share failed/, `a handover read as a failure at ${w} columns`)
+	}
 })

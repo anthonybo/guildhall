@@ -214,7 +214,12 @@ function shareBadge(share?: Share, compact = false) {
 	 * reporting "share failed" while the browser view worked perfectly. A user-visible
 	 * state must not depend on the wording of a sentence somebody is free to improve.
 	 */
-	if (share?.handover) return `  ${fg(C.screenAgent)}◉ :${share.port} by daemon${R}`
+	// `compact` matters here, and ignoring it is what pushed the header onto a second
+	// line on a small screen. The ladder in `summary` shrinks the right-hand side by
+	// asking each badge for its compact form; a badge that returns the same string
+	// either way makes that ladder a no-op, and the line then overflows the width it
+	// was measured against. ":4208" alone still says which port and that it is up.
+	if (share?.handover) return compact ? `  ${fg(C.screenAgent)}◉ :${share.port}${R}` : `  ${fg(C.screenAgent)}◉ :${share.port} by daemon${R}`
 	if (share?.error) return `  ${fg(C.fillHot)}⚠ share failed${compact ? '' : `${fg(C.muted)} · ${share.error}`}${R}`
 	if (!share?.on) return ''
 	if (compact) return `  ${fg(C.screenAgent)}◉ :${share.port}${R}`
@@ -272,7 +277,16 @@ export function summary(list: Session[], total: number, awake: { armed: boolean;
 		kept.push(p)
 		used = next
 	}
-	return `${clip(head + (kept.length ? '  ' + kept.join('  ') : ''), room)}  ${right}`
+	/**
+	 * Clipped as a WHOLE, not just the left-hand side.
+	 *
+	 * `right` used to be appended after the clip, so the width `room` was measured
+	 * against bounded only the head and the pills. Any badge wider than the ladder
+	 * expected — one that ignores `compact`, as the handover badge did — overflowed the
+	 * terminal and wrapped onto a second line. A header that wraps is worse than one
+	 * that is missing a badge, because it moves everything below it.
+	 */
+	return clip(`${clip(head + (kept.length ? '  ' + kept.join('  ') : ''), room)}  ${right}`, total)
 }
 
 export function footer(

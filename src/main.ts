@@ -516,10 +516,22 @@ function syncServe() {
 		// Announced once the bind SUCCEEDS, not before: a failed listen must not leave a
 		// file claiming this process is serving, or the next room would warn about a
 		// server that never started.
-		server.on('listening', () => announce(cfg.port, cfg.host))
+		/**
+		 * State is cleared when the bind SUCCEEDS, never before it is attempted.
+		 *
+		 * It used to be cleared synchronously after `.listen()`, which is asynchronous.
+		 * With a once-a-poll retry behind it that produced a visible flash: for one frame
+		 * `server` was non-null and the error was cleared, so the header read "◉ sharing",
+		 * then the EADDRINUSE handler fired and it read "◉ :4208 by daemon" again. Twice a
+		 * second, forever, on a machine where the daemon legitimately holds the port.
+		 */
+		server.on('listening', () => {
+			serveError = ''
+			serveHandover = false
+			announce(cfg.port, cfg.host)
+			draw()
+		})
 		server.listen(cfg.port, cfg.host)
-		serveError = ''
-		serveHandover = false
 	} catch {
 		server = null
 		cfg.serve = false
@@ -1012,7 +1024,9 @@ function draw() {
 	if (remote) body.pop()
 	while (body.length < rows) body.push('')
 	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
-	const shareState = { on: !!server, port: cfg.port, error: serveError, handover: serveHandover }
+	// `server.listening`, not `!!server`: a socket that exists but has not bound yet is
+	// not sharing, and reporting it as such is the other half of the flash above.
+	const shareState = { on: !!server?.listening, port: cfg.port, error: serveError, handover: serveHandover }
 	paint(
 		[
 			// build(), not the default frozen BUILD: this process is often left running
