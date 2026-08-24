@@ -357,11 +357,17 @@ alongside the room
   guildhall --upgrade      pull the latest and set it all up again
   guildhall --version      print the version and exit
 
-keys   ? help · in it: click a value to change it · h explanations · y copy address · ⏎ jump to tab · f faults · l labels · a awake · tab view · r redraw · q quit
+ports and servers
+  guildhall --pick-port    print a port nothing is listening on
+  guildhall --servers      which guildhalls are serving right now, as JSON
+  guildhall --stop-server <pid>  stop one of them, by the pid --servers printed
+
+keys   ? help · in it: click a value to change it · h explanations · y copy address · ⏎ jump to tab · f faults · l labels · a awake · x codex · tab view · r redraw · q quit
 env    GUILDHALL_CMUX       path to the cmux binary
        GUILDHALL_CONFIG_DIR  settings elsewhere (default ~/.config/guildhall)
        GUILDHALL_NO_IMAGES   force half-block rendering
 files  ~/.config/guildhall/config.json   port, host, and what is switched on
+       ~/.config/guildhall/cmux-password  cmux socket password, if the service needs one
 
 Run it from anywhere by linking it once, from the project: npm link
 Start the browser view at login: see contrib/dev.guildhall.headless.plist`)

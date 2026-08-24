@@ -116,6 +116,7 @@ already writes, which is why it sees sessions you started anywhere.
 | **[The browser view](#seeing-it-from-another-machine)** | The same room and list on your phone or another computer, behind a passcode. Off by default — `s`. |
 | **[The live terminal](#typing-into-a-session-from-somewhere-else)** | Open a session's real terminal from the browser, read it, and type into it. Off by default, and behind a second password. |
 | **[pressroom](#commits-and-deploys)** | What has been committed, pushed, built and deployed, across every repo. |
+| **[Codex sessions](#codex)** | OpenAI's Codex alongside Claude Code, read the same way and shown in the same room. Off by default — `x`. |
 | **[Keeping the machine awake](#keeping-the-machine-awake)** | Hold off sleep while sessions are working, so a long job survives you walking away. |
 
 ## Keys
@@ -127,6 +128,7 @@ already writes, which is why it sees sessions you started anywhere.
 | `f` | show only sessions that need you |
 | `l` | all labels, or only the ones that need you |
 | `a` | keep the machine awake, or let it sleep |
+| `x` | show Codex sessions too, or only Claude Code |
 | `tab` | cycle room / split / table |
 | `?` | what everything on screen means |
 | `r` | force a redraw |
@@ -147,12 +149,14 @@ not promise, what a level counts, and how to read the room. Any key closes it.
 
 ## What it reads
 
-Nothing is installed and no session is instrumented. Three sources, all already
-on disk:
+Nothing is installed and no session is instrumented. Everything is already on
+disk:
 
 - `~/.claude/sessions/<pid>.json` — one registry entry per running process
 - `~/.claude/projects/<slug>/<sessionId>.jsonl` — the session transcript
 - cmux's window layout, for the tab to jump to
+- `~/.codex/sessions/**/rollout-*.jsonl` — Codex transcripts, when Codex is on
+- `~/.codex/thread-writer-locks/` — which Codex threads are open, when Codex is on
 
 None of those three are documented interfaces, so all of them may change. The
 registry has a supported replacement — `claude agents --json` — and guildhall
@@ -180,6 +184,52 @@ but cannot be the base — if you gate commits behind approval, your busiest
 sessions will have none. The curve is anchored to a measured accumulation rate
 (~572 XP/day for the heaviest session observed), which puts a month of hard work
 at level 37 and a year at 85. See `src/data/score.ts`.
+
+## Codex
+
+OpenAI's Codex sessions appear in the same room and the same table as Claude Code
+ones. **Off by default** — press `x`, flip *Show Codex sessions too* in the menu
+bar, or set `"codex": true` in the config. `--codex` and `--no-codex` override it
+for one run.
+
+Nothing is installed on the Codex side either. It reads the same two things Codex
+already writes:
+
+- `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` — the transcript
+- `~/.codex/thread-writer-locks/<id>.lock` — one file per open thread
+
+**Liveness comes from the lock, not from the transcript's age.** Codex removes
+the lock when a session ends and holds it open while the session lives, so the
+file existing *is* the answer. Age is not: the lock's timestamp is when the
+session started and is never refreshed, so a thread quiet since yesterday is
+still a thread. Guildhall used to drop those after 24 hours, which meant a Codex
+session left open overnight vanished from the room while somebody was sitting in
+it. A lock nobody holds — SIGKILL, a power cut — is culled by a sweep once a
+minute, which is off the poll path because it costs about 50 cpu-ms against a
+3 cpu-ms budget for the whole Codex read.
+
+**Which harness a desk belongs to** is drawn on it: a coral burst for Claude
+Code, a teal knot for Codex, in the gap column beside each desk. The table and
+the browser list show the same two marks in the same two colors. They are drawn
+here rather than copied, they identify those vendors' own products, and guildhall
+claims no affiliation with either — see `NOTICE`.
+
+### What works, and what does not
+
+| | |
+| --- | --- |
+| Reading sessions, state, context, level | yes |
+| Today's spend, counted alongside Claude's | yes |
+| Sending a message from the browser | yes — `codex queue`, since a Codex session has no cmux tab to type into |
+| Starting a Codex session from the browser | **no.** `+ session` always runs Claude Code |
+| Seeing that a Codex session is waiting on an approval | **no.** Nothing in the files says so |
+
+The two gaps are deliberate rather than forgotten, and `docs/codex.md` records
+why. Starting one is not a small change: the browser waits for the row carrying
+the *cmux workspace* it just created, which is what stops it opening an unrelated
+session's terminal — and a Codex session has no workspace, so that correlation
+does not exist. The alternatives are inference, and inference is what once opened
+someone else's terminal mid-conversation.
 
 ## Keeping the machine awake
 
@@ -261,6 +311,26 @@ Underneath it, the same list the terminal shows, grouped by who needs you first.
 
 *Both are `--demo`: every project name and sentence above is invented, so the
 images never carry anyone's real work.*
+
+### The port, and more than one server
+
+The default is **4319**, and the reason is worth a line: it was 4318, which is
+OpenTelemetry's OTLP/HTTP port by convention, so any machine running a trace
+collector already held it. If 4319 collides on your machine, *Random* in the menu
+bar settings or `r` at the terminal's port prompt takes a free one. Both use the
+same picker — the menu bar through `guildhall --pick-port`, the terminal in
+process — and it bind-tests every candidate and stays below 32768, because macOS
+hands out ephemeral ports above that and a listener up there works until the day
+it does not.
+
+Nothing stops two guildhalls serving at once — the installed service and a
+`tools/serve.mjs` watcher, say — and on different ports they never collide, so
+nothing used to notice. Each costs about 1% of a core, both are reachable, and
+they can be running different builds. So each server announces itself in
+`~/.config/guildhall/servers/<pid>.json`, `guildhall --servers` lists them, and
+`guildhall --stop-server <pid>` stops one. The menu bar shows the same thing with
+a button, and stopping a watcher's child means stopping the watcher — otherwise it
+restarts it about nine seconds later.
 
 Serving binds `127.0.0.1` unless you change it, so by default only a browser on
 this machine can reach it. Choosing "the network" in the menu bar settings — or
@@ -361,11 +431,18 @@ that terminal to the front. Underneath, the plan's five-hour and weekly quota an
 what today has cost, read from Anthropic's usage endpoint and `ccusage` and cached
 so the numbers cost nothing to look at.
 
-Settings changes the port, the passcode, whether the browser may type into
-sessions, the screen hold and the label placement, and can start, stop or restart
+Settings changes the port — with *Random* for one nothing is listening on —
+the passcode, whether the browser may type into sessions, whether Codex sessions
+are shown, the screen hold and the label placement, and can start, stop or restart
 the service — everything the terminal's `?` panel can do. It sets the control
 password too, by handing it to guildhall on stdin rather than hashing it itself,
 so there is one implementation of storing that credential.
+
+It also reports two things you cannot otherwise see: another guildhall serving,
+with a button to stop it, and whether the process actually doing the serving is
+able to type into cmux sessions at all. Both are read from what each server writes
+about itself, because this app is not the process doing the serving and would
+otherwise be answering a different question.
 
 It needs Xcode to build, is not code-signed, and therefore runs on the machine
 that built it — which is why the installer builds it rather than shipping a binary.
@@ -428,6 +505,9 @@ wrangler, so they are fetched only when you ask — the toggle is remembered.
   Set `GUILDHALL_CMUX` if your cmux binary is not in the usual place.
 - A terminal implementing the kitty graphics protocol — Ghostty, kitty, or
   WezTerm — for the sprites. Anything else falls back to half-block rendering.
+- The `codex` CLI, only if you switch Codex sessions on. Reading them needs
+  nothing but the files it already writes; sending a message to one shells out to
+  `codex queue`.
 - Xcode, only for the menu bar app, because it is built on the machine that runs
   it rather than shipped as a binary — it is not code-signed, so a build from
   somewhere else would not run. `npm run install:mac` skips it with a message when
@@ -440,19 +520,30 @@ src/
   main.ts          driver: frame loop, input, image transport
   data.ts          joins registry + transcripts + cmux into Sessions
   data/            paths · registry · agents · transcript · digest · state · score · describe · cmux
+  data/codex.ts    Codex sessions, from rollouts and the lock directory
   office.ts        Office — drawing and labels
   office/          model · plan (pure layout) · room (seats, paths) · sim (behavior)
   canvas.ts        half-block pixel canvas
   kitty.ts         graphics protocol, terminal reply demultiplexer
   characters.ts    sprite sheets
   screens.ts       generated monitors and level badges
+  logos.ts         the harness marks, one definition for every surface
   props.ts         generated furniture
   table.ts         the detail table
   theme.ts         palette, tiers
+  port.ts          which port to use, and how a free one is found
+  servers.ts       which guildhalls are serving, and stopping one
+  cmuxreach.ts     whether this process may drive cmux, and why not
 ```
 
-`npm test` runs the suite; `npm run check` adds the type check. `npm run dev`
-runs from source without the build step.
+`npm test` runs the suite; `npm run check` adds the type check and the rest of the
+gates. `npm run dev` runs from source without the build step.
+
+The type check covers `src`, `web` and `tools`. It used to cover only `src`, which
+is how the browser client shipped a call that could not work: it built the
+compositor's scene without a field the type required, `tsc` had nothing to say
+because the directory was not in the program, and the page rendered a working
+header over an empty room.
 
 ## Documentation images
 
@@ -537,7 +628,39 @@ repository you have open, which reaches editing files and running commands. So:
 - **Every send is printed** above the footer on the machine's own screen. Acting
   here remotely is possible; doing it unseen is not.
 
-The session must be in a cmux tab. Without one there is no terminal to address,
-and guildhall refuses rather than guessing — a wrong guess types into another
-project. Addressing is by cmux's workspace UUID, never its position: `workspace:2`
-and the second tab are different things.
+A **Claude Code** session must be in a cmux tab. Without one there is no terminal
+to address, and guildhall refuses rather than guessing — a wrong guess types into
+another project. Addressing is by cmux's workspace UUID, never its position:
+`workspace:2` and the second tab are different things.
+
+A **Codex** session has no cmux tab by design, so it is reached a different way:
+the message goes to `codex queue` for that thread. Every guard above still
+applies — the same password, the same throttle, the same loopback-or-tailnet rule,
+the same line printed on this machine's screen.
+
+### cmux only accepts control from processes it started
+
+This one is worth knowing before you turn control on, because the symptom is
+confusing: the browser shows every session perfectly and typing into one fails
+with *"only processes started inside cmux can connect."*
+
+cmux's socket runs in `access_mode: cmuxOnly`. Processes started inside a cmux
+pane inherit a capability and may drive it; anything else may not — and **launchd
+starts its jobs with almost no environment**, so the installed service is in the
+second group. Reading sessions keeps working either way, because that comes from
+files. Only typing is refused.
+
+Two ways out, and guildhall supports both:
+
+- **Run the server from a cmux pane.** A `tools/serve.mjs` watcher started in a
+  terminal does this, which is why control can work there and not from the
+  service.
+- **Give cmux a socket password** — `cmux --help` under *Socket Auth* — and put
+  it in `~/.config/guildhall/cmux-password`. It reaches cmux through the child's
+  environment, never as an argument, because argv is readable by every process on
+  the machine through `ps`.
+
+Guildhall checks which of those applies and says so rather than passing cmux's
+error along: the panel names the reason and the remedy, and each server records
+its own verdict, since a panel asking on its own behalf would answer a different
+question — the menu bar app is not started inside cmux either.
