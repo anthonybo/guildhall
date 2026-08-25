@@ -195,6 +195,26 @@ export class RoomBase {
 		 */
 		for (const ch of this.chars.values()) ch.seatId = null
 		for (const spot of this.spots.values()) spot.taken = null
+		/**
+		 * Hand the seats back out BEFORE relocating, not after.
+		 *
+		 * Dropping the claims above is correct — desk ids are positional, so `d4` means a
+		 * different desk after a re-plan — but on its own it produced a worse bug than the
+		 * one it fixed. `relocate()` only moves a character that HAS a seat; with every
+		 * seatId just cleared it moved nobody, so ten characters were left standing on the
+		 * open floor. `assign()` then gave them new desks as a claim and nothing more, and
+		 * the simulation had to walk each one back. Where that pathing failed the fallback
+		 * is `ch.state = 'type'` where it stands — so the desk lit up, drew its
+		 * working-light, and had nobody sitting at it. Reported as a ghost desk.
+		 *
+		 * Measured with a 20,000-tick fuzz of state changes and re-plans: 46,720 ghost
+		 * ticks before this line, 0 after.
+		 *
+		 * `fit` already holds the session list, so it can do this itself rather than
+		 * leaving a window in which the room is internally inconsistent. The caller still
+		 * calls `assign` next; doing it twice is cheap and idempotent.
+		 */
+		this.assign(sessions)
 		this.relocate()
 	}
 

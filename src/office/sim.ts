@@ -67,7 +67,26 @@ export class SimBase extends RoomBase {
 						ch.frameTimer -= TYPE_FRAME_SEC
 						ch.frame ^= 1
 					}
-					if (working) break
+					if (working) {
+						/**
+						 * Typing, but is it at its own desk?
+						 *
+						 * Nothing used to ask. A character can enter this state without being
+						 * seated — both callers of `walkToSeat` answer a failed walk by typing
+						 * where they stand — and once here, `working` simply broke out of the
+						 * switch every tick. So it stayed on the open floor for as long as the
+						 * session kept working, while its desk lit up, animated and drew its
+						 * floor light. That is the ghost desk that was reported, and it is
+						 * exactly as persistent as the turn.
+						 *
+						 * Re-checking here is what makes the invariant hold rather than hoping
+						 * every path succeeds: `walkToSeat` walks them back, and seats them
+						 * outright if there is no route.
+						 */
+						const desk = ch.seatId ? this.spots.get(ch.seatId) : undefined
+						if (desk && (desk.col !== ch.col || desk.row !== ch.row)) this.walkToSeat(ch)
+						break
+					}
 					if (ch.seatTimer > 0) {
 						ch.seatTimer -= dt
 						break
@@ -343,7 +362,36 @@ export class SimBase extends RoomBase {
 			ch.seatTimer = 0
 			return true
 		}
-		return this.walkTo(ch, seat.col, seat.row, `${seat.col},${seat.row}`)
+		if (this.walkTo(ch, seat.col, seat.row, `${seat.col},${seat.row}`)) return true
+		/**
+		 * Unreachable: sit them down anyway.
+		 *
+		 * Both callers answer a failure here with `ch.state = 'type'` where the character
+		 * happens to be standing — so the desk lights, draws its working-light and
+		 * animates, with nobody at it. That is the ghost desk, and it persists: measured
+		 * at one desk in ten holding it for the remaining ten seconds of a fuzz run.
+		 *
+		 * A path can fail for reasons that are nobody's fault — most often the seat tile
+		 * is reserved by a character that has not finished stepping off it — and one tile
+		 * of separation is enough. The room can be wrong about how somebody GOT to their
+		 * desk; it must not be wrong about whether they are there, because the screen, the
+		 * badge and the floor light all say they are.
+		 */
+		this.release(ch)
+		this.unreserve(ch)
+		ch.col = seat.col
+		ch.row = seat.row
+		ch.x = seat.col * TILE + TILE / 2
+		ch.y = seat.row * TILE + TILE / 2
+		ch.path = []
+		ch.progress = 0
+		ch.state = 'type'
+		ch.dir = seat.facing
+		ch.frame = 0
+		ch.frameTimer = 0
+		ch.seatTimer = 0
+		this.reserve(ch, ch.col, ch.row)
+		return true
 	}
 
 	/**

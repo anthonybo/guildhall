@@ -913,3 +913,37 @@ The first compared a payload containing an age in milliseconds, so it fired ever
 tick; this one compared prose that another commit was free to rewrite. Both were
 invisible to tests because each half was right on its own. When a decision depends on
 a string somebody else produces, it is not a decision, it is a coincidence.
+
+## The ghost desk, caused by the fix for the mislabelled desks
+
+**A fix two commits old caused a worse bug than the one it solved.** A desk drew a
+lit screen, its floor light and the typing animation, with nobody sitting at it —
+reported from a real room and visible for as long as the session kept working.
+
+Dropping seat claims on a re-plan was right: desk ids are positional, so `d4` means a
+different desk after the pods are re-laid out, and leaving the claims made every
+nameplate name the wrong project. But `relocate()`, which runs immediately after,
+only moves a character that HAS a seat. With every `seatId` just cleared it moved
+nobody, and left ten characters standing on the open floor. `assign()` then handed
+out new desks as a claim and nothing more, so the simulation had to walk each one
+back — and where that walk failed, both callers of `walkToSeat` answer with
+`ch.state = 'type'` where the character is standing. The `type` case then breaks out
+of the switch every tick while working, so nothing ever re-checked.
+
+**The fix that mattered was the invariant, not the ordering.** `fit` now re-seats
+before relocating, which removes the window; but the load-bearing change is that a
+typing character verifies it is at its own desk, and `walkToSeat` seats it outright
+when there is no route. A path can fail for reasons that are nobody's fault — most
+often the seat tile is still reserved by somebody stepping off it — and the room may
+be wrong about how somebody got to their desk, but not about whether they are there,
+because the screen, the badge and the floor light all say they are.
+
+**Four fixed reproductions failed before a fuzz found it.** A fresh room: none. Idle
+characters then one starts working: none. The same with a re-plan in the middle:
+none. A session leaving: none. What found it was 20,000 ticks of random state
+changes, arrivals and departures — which is what a room actually does over hours.
+
+**And the tick count is measured, not chosen.** With the fix removed the first ghost
+lasting longer than a single frame appears at tick **4,201**, so the 4,000-tick
+version of this test passed while the bug was present. It runs 20,000 in about 400ms.
+A fuzz that stops before the bug is a fuzz that certifies it.

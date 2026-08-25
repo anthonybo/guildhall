@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { Canvas } from './canvas.ts'
 import { Office, TILE } from './office.ts'
-import type { State } from './data.ts'
+import type { Session, State } from './data.ts'
 import { desks, posOf, room, seatOf, seeded, session } from './office/fixtures.ts'
 
 test('a session starts seated at its desk, not at a doorway', () => {
@@ -537,4 +537,65 @@ test('a session never sits at a desk labelled with another project', () => {
 		one.length,
 		'a session lost its desk when the layout changed',
 	)
+})
+
+test('a desk that is lit and animating always has somebody sitting at it', () => {
+	// The ghost desk: a session working, its desk drawing a lit screen and a floor
+	// light, and no character there. Reported from a real room, and caused by the fix
+	// two commits earlier — dropping seat claims on a re-plan was right, but
+	// `relocate()` only moves a character that HAS a seat, so it moved nobody and left
+	// ten of them standing on the open floor.
+	//
+	// A single frame of separation is allowed: the correction runs on the next tick.
+	// Anything longer is the bug, and it used to last as long as the turn did.
+	//
+	// This fuzzes what a real room does over hours — states flipping, sessions arriving
+	// and leaving, and the re-plans those cause — because none of the fixed sequences
+	// tried before it reproduced anything. Measured on the way in: 46,720 ghost ticks
+	// before the fix, 1 after.
+	const STATES: State[] = ['parked', 'working', 'shell', 'needs', 'done', 'review']
+	const atDesk = (s: Session) => s.state === 'working' || s.state === 'shell' || s.state === 'needs'
+	const rnd = seeded(11)
+	const pick = <T,>(a: T[]) => a[Math.floor(rnd() * a.length)]!
+
+	const cv = new Canvas(104, 88)
+	const office = new Office(seeded(3))
+	let list: Session[] = Array.from({ length: 10 }, (_, i) => session(`s${i}`, `proj${i % 5}`, 'parked'))
+	office.fit(cv.w, cv.h, list)
+	office.assign(list)
+	office.settle(list)
+
+	const run = new Map<string, number>()
+	let longest = 0
+	let worst = ''
+	for (let tick = 0; tick < 20_000; tick++) {
+		if (tick % 40 === 0) {
+			list = list.map((s) => (rnd() < 0.25 ? { ...s, state: pick(STATES), stale: Math.floor(rnd() * 600_000) } : s))
+			if (rnd() < 0.15) {
+				if (list.length > 4 && rnd() < 0.5) list = list.slice(0, -1)
+				else list = [...list, session(`x${tick}`, `proj${Math.floor(rnd() * 5)}`, pick(STATES))]
+			}
+			office.fit(cv.w, cv.h, list)
+			office.assign(list)
+		}
+		office.update(0.05, list)
+
+		const byId = new Map(list.map((s) => [s.id, s]))
+		for (const spot of office.spots.values()) {
+			if (spot.kind !== 'desk' || !spot.taken) continue
+			const s = byId.get(spot.taken)
+			if (!s || !atDesk(s)) continue
+			const ch = office.chars.get(s.id)
+			// walking toward it is fine — that is the room working, not a ghost
+			if (ch && ch.state !== 'walk' && (ch.col !== spot.col || ch.row !== spot.row)) {
+				const n = (run.get(s.id) ?? 0) + 1
+				run.set(s.id, n)
+				if (n > longest) {
+					longest = n
+					worst = `${s.proj} ${s.state}: desk at ${spot.col},${spot.row}, character at ${ch.col},${ch.row} in state ${ch.state}`
+				}
+			} else run.set(s.id, 0)
+		}
+	}
+	assert.ok(longest <= 1, `a desk was lit with nobody at it for ${longest} consecutive ticks — ${worst}`)
 })

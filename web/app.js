@@ -1964,6 +1964,7 @@ var RoomBase = class {
     this.plan(cols, rows, projects);
     for (const ch of this.chars.values()) ch.seatId = null;
     for (const spot of this.spots.values()) spot.taken = null;
+    this.assign(sessions3);
     this.relocate();
   }
   /** After a re-plan, put everybody somewhere legal or they are stranded forever. */
@@ -2177,7 +2178,11 @@ var SimBase = class extends RoomBase {
             ch.frameTimer -= TYPE_FRAME_SEC;
             ch.frame ^= 1;
           }
-          if (working) break;
+          if (working) {
+            const desk = ch.seatId ? this.spots.get(ch.seatId) : void 0;
+            if (desk && (desk.col !== ch.col || desk.row !== ch.row)) this.walkToSeat(ch);
+            break;
+          }
           if (ch.seatTimer > 0) {
             ch.seatTimer -= dt;
             break;
@@ -2416,7 +2421,22 @@ var SimBase = class extends RoomBase {
       ch.seatTimer = 0;
       return true;
     }
-    return this.walkTo(ch, seat.col, seat.row, `${seat.col},${seat.row}`);
+    if (this.walkTo(ch, seat.col, seat.row, `${seat.col},${seat.row}`)) return true;
+    this.release(ch);
+    this.unreserve(ch);
+    ch.col = seat.col;
+    ch.row = seat.row;
+    ch.x = seat.col * TILE + TILE / 2;
+    ch.y = seat.row * TILE + TILE / 2;
+    ch.path = [];
+    ch.progress = 0;
+    ch.state = "type";
+    ch.dir = seat.facing;
+    ch.frame = 0;
+    ch.frameTimer = 0;
+    ch.seatTimer = 0;
+    this.reserve(ch, ch.col, ch.row);
+    return true;
   }
   /**
    * Reserve a destination tile. Two characters may pass through each other while
