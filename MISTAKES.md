@@ -1031,3 +1031,56 @@ not take a populated payload as evidence that cmux is reachable.
 **cmux's own settings are the lever**, not guildhall: `automation.socketControlMode`
 in `~/.config/cmux/cmux.json` is `cmuxOnly` by default and also accepts `allowAll`,
 followed by `cmux reload-config`.
+
+---
+
+## Rebuilding a scrollback from the screens guildhall already polls
+
+**Status: abandoned, and the reason is upstream.** The browser terminal shows one
+screenful and will not show more. Reported as "in the browser version for the terminal
+I can only scroll up a little".
+
+**The cause is not in guildhall and cannot be fixed here.** Claude Code draws on the
+terminal's ALTERNATE screen, and Ghostty — which cmux embeds — hardcodes
+`scrollback-limit = 0` there. The lines are discarded by the emulator before cmux, let
+alone guildhall, could see them. It is cmux issue #2334, it is open, and the same
+request is open against waveterm (#2837) and xterm.js (#802, #3607).
+
+### Measured, so do not re-measure
+
+- Every Claude and Codex pane on this machine reports `scrollback_rows: 0`. A plain
+  shell pane on the `primary` screen reports **115**. Same call, same machine.
+- No parameter changes it. `scrollback`, `include_scrollback`, `scrollback_rows`,
+  `max_scrollback_rows` and `history_rows` on `terminal.replay` all returned
+  byte-identical payloads. `mobile.terminal.replay` returns the same grid.
+- cmux exposes no deep link and no per-client viewport into history.
+
+### The idea that was tried, and why it fails
+
+guildhall polls the whole 60-row grid every 2s, so lines that leave the viewport pass
+through it. The idea was to keep them. Two live sessions were recorded at 500ms for
+five minutes — 454 and 431 deduped frames — deliberately faster than the real 2s poll
+so that what a 2s poll MISSES could be measured rather than guessed.
+
+| what was tested | result |
+|---|---|
+| Does the screen scroll, so lines can be followed off the top? | **No.** 267 of 271 transitions align at `k = 0` — redrawn in place. Over 137s exactly **2** rows fell off. There is no shift to stitch |
+| Is the content there at all? | **Yes.** 783 settled distinct rows against 57 on the fullest screen — **13.7×** a screenful, and only 8 of 791 rows were streaming fragments |
+| Can it be put back in order? | **No.** Ordering by first-seen time puts a frame's own rows in the right order in **1 of 404** frames (0.2%), with **7.2%** and **10.1%** of adjacent pairs inverted |
+| Can a row's text identify it? | **No.** A single frame contains **749** (and in the other session **1052**) duplicate identical rows — borders, indentation, repeated markers |
+
+So the data is genuinely there and cannot be reassembled. A reconstruction would be a
+heap of real lines with about one in ten misplaced and duplicates collapsed, which for
+code and diffs is worse than nothing **because it would look plausible while being
+wrong**.
+
+**The first analyzer said "zero scrolls" for the wrong reason** and nearly ended the
+investigation early: it required the shift to explain every row down to row 59, so the
+status bar and input box — which repaint every frame — vetoed every candidate offset.
+Measuring the best alignment instead of testing a fixed hypothesis is what produced the
+numbers above. If this is ever revisited, exclude the churning rows first.
+
+**What was built instead:** `/api/transcript` and `web/transcript.ts` read the history
+from the JSONL on disk, which has had all of it the whole time. Not a replacement for
+the terminal view — a transcript cannot show a status bar or answer a prompt, and both
+were reasons this was nearly built as the wrong thing.
