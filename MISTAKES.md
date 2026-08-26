@@ -947,3 +947,87 @@ changes, arrivals and departures — which is what a room actually does over hou
 lasting longer than a single frame appears at tick **4,201**, so the 4,000-tick
 version of this test passed while the bug was present. It runs 20,000 in about 400ms.
 A fuzz that stops before the bug is a fuzz that certifies it.
+
+---
+
+## Clicking a session row did nothing, and the first fix was believed to be the whole cause
+
+**Status: partly solved.** Clicking now brings cmux to the front. It still cannot
+switch to the right tab on this machine, because cmux refuses control from processes
+it did not start — see the third attempt below.
+
+The symptom: clicking a session in the menu bar panel does not bring that terminal to
+the front. Reported as "is there a reason why I cannot click an agent/session and it
+bring me to that terminal?" — the README had been promising it for some time.
+
+### Tried and did not fix it
+
+| # | Change | Why it seemed right | What actually happened |
+|---|---|---|---|
+| 1 | Point `Cmux.binary()` at `Resources/bin/cmux` instead of `Resources/cmux` / `MacOS/cmux` | `MacOS/cmux` really is cmux's **GUI** executable (`plutil -extract CFBundleExecutable`), so `focus()` was running the app binary with CLI arguments. Both streams went to `/dev/null`, so nothing was reported | A real bug, correctly diagnosed and genuinely fixed — and clicking still did nothing. The commit's comment claimed "that is why clicking a session row did nothing", which was wrong |
+| 2 | Add a LaunchServices raise after `select-workspace` | `select-workspace` only changes which tab is current; it never touches window ordering, so nothing came forward. Verified with a compiled probe that drove the real `Cmux.focus` | Correct, necessary, and still not enough — **the probe passed for the wrong reason** (see below). On the real machine cmux refuses the select outright, so there was never a tab change to reveal |
+| 3 | Send `CMUX_SOCKET_PASSWORD` from the stored password file | cmux documents it under "Socket Auth", and `src/cmuxreach.ts` already uses that file for the server | **Did not get past `cmuxOnly`.** A launchd child supplying a password was refused with the identical "only processes started inside cmux can connect" error. Note that no password was configured in cmux itself, so this disproves the remedy as stated, not the mechanism |
+
+The second half was never there: **`select-workspace` switches which tab is current
+inside cmux and does not touch window ordering.** From the room that is invisible,
+because the room runs in a cmux pane and cmux is already frontmost. The menu bar app
+is never frontmost, so the tab silently changed behind whatever the person was
+looking at.
+
+### Measured, so do not re-measure
+
+With Chrome deliberately activated first, then the frontmost app read back from
+`lsappinfo front`:
+
+| command | exit | frontmost afterwards |
+|---|---|---|
+| `select-workspace --workspace <uuid>` | 0 | Google Chrome — **did not raise** |
+| `focus-window --window window:1` | 0, prints `OK` | Google Chrome — **did not raise** |
+| `open -a /Applications/cmux.app` | 0 | cmux |
+
+**`focus-window` is the trap.** Its help says "Focus (bring to front) the specified
+window", it reports `OK`, and it does nothing visible: macOS does not let a background
+process reorder another app's windows. Do not reach for it again. LaunchServices is
+the route that is allowed to, which is `open -a` from the shell and
+`NSWorkspace.openApplication(at:configuration:)` with `activates = true` in the app —
+verified from a process with only the environment launchd actually gives this app
+(`HOME`, `PATH`, `TMPDIR`, `USER`, `LOGNAME`, `SHELL`, `SSH_AUTH_SOCK`, and the two
+`XPC_` variables).
+
+**Checking the binary's date would have proved nothing**, and checking its strings is
+what settled it: the installed bundle was built *after* attempt 1 landed and already
+contained `Resources/bin/cmux`, so the path fix was demonstrably shipped and the click
+was demonstrably still broken. That is what ruled attempt 1 out as the cause rather
+than assuming a stale build.
+
+### The verification that passed for the wrong reason
+
+Attempt 2 was checked by compiling the real `Cmux.swift` into a probe, stripping the
+environment with `env -i`, running it, and watching cmux come to the front. It passed.
+It was still wrong, because **cmux does not decide by the environment variable alone —
+a descendant of a cmux pane is accepted without one.** The probe was launched from a
+shell inside cmux, so it inherited the ancestry that the menu bar app can never have.
+
+Stripping the environment looked like the careful version of the test and reproduced
+the wrong half of the condition. What separated them was running the same binary as a
+true launchd child:
+
+| context | ppid | capability | `select-workspace` |
+|---|---|---|---|
+| shell in a cmux pane | the shell | present | exit 0, `OK workspace:2` |
+| `env -i` from that shell | the shell | absent | **accepted** — ancestry alone was enough |
+| launchd job (what the app is) | 1 | absent | exit 1, `Access denied - only processes started inside cmux can connect` |
+
+**To test anything about how this app reaches cmux, run it as a launchd job.** A plist
+with `RunAtLoad` and `StandardOutPath`, bootstrapped into `gui/$(id -u)`, takes about
+a minute to set up and is the only context that tells the truth. Reads are refused as
+well as writes, so `workspace list` is a safe probe for it.
+
+**Where the tab numbers come from, since cmux refuses this app:** not the socket.
+`main.mjs --sessions` returns `tab` and `workspace` for every session when run as a
+launchd child, which is why the panel can show "tab 9" for a row it cannot open. Do
+not take a populated payload as evidence that cmux is reachable.
+
+**cmux's own settings are the lever**, not guildhall: `automation.socketControlMode`
+in `~/.config/cmux/cmux.json` is `cmuxOnly` by default and also accepts `allowAll`,
+followed by `cmux reload-config`.

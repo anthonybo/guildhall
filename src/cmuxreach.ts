@@ -103,7 +103,11 @@ export function reach(): Reach {
 			ok: false,
 			// Said from the reader's side: what is broken, not what the flag is called.
 			why: 'this server was not started inside cmux, and cmux is set to accept control only from processes that were',
-			fix: 'Either run the server from a cmux pane, or set a socket password in cmux and save it in ~/.config/guildhall/cmux-password.',
+			// The password is listed second on purpose. Measured from a launchd child with
+			// no password configured in cmux: supplying CMUX_SOCKET_PASSWORD was refused
+			// with the SAME "only processes started inside cmux" error, so it is not a
+			// demonstrated way out of this mode. Changing the mode is.
+			fix: 'Either run the server from a cmux pane, or set automation.socketControlMode to "allowAll" in ~/.config/cmux/cmux.json and run `cmux reload-config`. A socket password saved in ~/.config/guildhall/cmux-password is read too, but was not enough on its own here.',
 		}
 	}
 	// Any other mode: cmux is not restricting to its own children, so let it decide.
