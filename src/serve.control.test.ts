@@ -222,3 +222,50 @@ test('a screen with no prompt rules yields no input box rather than guessing', (
 	// sitting unsent — that would send it a second time.
 	assert.equal(inputBox('just some output\nand more'), '')
 })
+
+/**
+ * The transcript endpoint carries MORE than the screen does — a screen is what a
+ * session shows now, this is everything it has ever said — so it sits behind the same
+ * control token, and every refusal here is checked for the same reasons.
+ */
+test('the transcript is behind control, and its two failures are told apart', async () => {
+	const { hit, srv, set } = await boot(true)
+	resetControlThrottle()
+
+	// off means off, token or not
+	set(false)
+	const off = await hit('/api/transcript?id=tidepool', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(off.status, 403, `readable with control off: ${off.text}`)
+	set(true)
+	resetControlThrottle()
+
+	// the view passcode alone does not open it
+	const noToken = await hit('/api/transcript?id=tidepool')
+	assert.equal(noToken.status, 401, `a view-only session read a transcript: ${noToken.text}`)
+	resetControlThrottle()
+
+	// a session this machine has never heard of, and a real session with nothing on
+	// disk, are DIFFERENT answers — the view says different things about them, and a
+	// single "not found" would make a missing transcript look like a bad link
+	const unknown = await hit('/api/transcript?id=no-such-session', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(unknown.status, 404)
+	assert.match(unknown.text, /no such session/)
+
+	const noFile = await hit('/api/transcript?id=tidepool', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(noFile.status, 404, `a demo session found a transcript: ${noFile.text}`)
+	assert.match(noFile.text, /no transcript on disk/)
+
+	srv.close()
+})
+
+test('a junk cursor is refused rather than read as "from the end"', async () => {
+	// This matters more than it looks. `Number('nonsense')` is NaN, and an undefined
+	// cursor means "start at the newest" — so a junk value would quietly restart the
+	// paging and hand back the same page forever while the reader scrolled up.
+	const { hit, srv } = await boot(true)
+	resetControlThrottle()
+	const r = await hit('/api/transcript?id=tidepool&before=nonsense', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(r.status, 400, `a junk cursor was accepted: ${r.text}`)
+	assert.match(r.text, /bad cursor/)
+	srv.close()
+})

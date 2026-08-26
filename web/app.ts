@@ -14,6 +14,7 @@ import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
 import { busy as terminalBusy, mountTerminal, show as showTerminal } from './terminal.ts'
+import { transcriptOpen } from './transcript.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
 import { isOpen as newOpen, mountNewSession, show as showNewSession } from './newsession.ts'
@@ -122,7 +123,10 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 	// also blocked the build which fixed closing it.
 	if (data.client) {
 		if (clientStamp === null) clientStamp = data.client
-		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen() && !newOpen()) return void location.reload()
+		// The transcript is on this list for the same reason as the others: reloading
+		// while somebody is reading back through a conversation throws away every page
+		// they scrolled up to fetch, and drops them at the newest end again.
+		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen() && !newOpen() && !transcriptOpen()) return void location.reload()
 	}
 	sessions = data.sessions
 	setRoomSessions(sessions)

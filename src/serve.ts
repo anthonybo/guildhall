@@ -28,6 +28,7 @@ import { loginPage } from './login.ts'
 import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
+import { historyPage } from './data/history.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
 import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
 import { reach } from './cmuxreach.ts'
@@ -530,6 +531,37 @@ export function createServer(opts: ServeOptions) {
 			}
 			res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag }).end(out.text)
 			return
+		}
+
+		/**
+		 * A session's conversation, older than `before`, newest last.
+		 *
+		 * The terminal view can never show this. Claude Code draws on the alternate
+		 * screen and Ghostty hardcodes `scrollback-limit = 0` there, so the lines are
+		 * gone before cmux sees them — every Claude pane here reports
+		 * `scrollback_rows: 0` against 115 for a plain shell. Rebuilding it from polled
+		 * screens was tried and measured, and does not work; see MISTAKES.md.
+		 *
+		 * Behind the control token, exactly like `/api/screen` and for a stronger
+		 * version of the same reason: a screen is what a session is showing now, and
+		 * this is everything it has ever said.
+		 */
+		if (url.pathname === '/api/transcript') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			const waitT = controlLockedFor(addr)
+			if (waitT > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitT / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			const id = url.searchParams.get('id') ?? ''
+			if (!sessions().some((s) => s.id === id)) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+			const raw = url.searchParams.get('before')
+			// A junk cursor must not become `NaN` and read as "from the end" — that would
+			// silently restart the paging and loop the same page forever.
+			const before = raw === null ? undefined : Number(raw)
+			if (before !== undefined && !Number.isInteger(before)) return send(res, 400, MIME['.json'], '{"error":"bad cursor"}')
+			const page = historyPage(id, before)
+			if (!page) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
+			return send(res, 200, MIME['.json'], JSON.stringify(page))
 		}
 
 		/** Directories a session can be started in. Behind the control token because

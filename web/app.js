@@ -120,21 +120,21 @@ var ago = (ms) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 };
-function tap(el4, run) {
+function tap(el5, run) {
   let actedAt = 0;
   const GESTURE_MS = 700;
   const fire = () => {
     actedAt = Date.now();
     run();
   };
-  el4.addEventListener("pointerdown", (e) => {
+  el5.addEventListener("pointerdown", (e) => {
     const pe = e;
     if (pe.pointerType !== "touch") return;
     pe.preventDefault();
     eatNextClick();
     fire();
   });
-  el4.addEventListener("click", () => {
+  el5.addEventListener("click", () => {
     if (Date.now() - actedAt < GESTURE_MS) return;
     fire();
   });
@@ -276,10 +276,10 @@ function step() {
   if (stable >= STEADY || performance.now() > until) return;
   raf = requestAnimationFrame(step);
 }
-function watch(el4, open3) {
-  host = el4;
+function watch(el5, open3) {
+  host = el5;
   showing = open3;
-  el4.addEventListener("pointerdown", measure, { passive: true });
+  el5.addEventListener("pointerdown", measure, { passive: true });
   window.visualViewport?.addEventListener("resize", settle);
   window.visualViewport?.addEventListener("scroll", measure);
 }
@@ -383,6 +383,153 @@ function paint(pre, g, panel, wrap2) {
   return cramped;
 }
 
+// web/transcript.ts
+var el = null;
+var body = null;
+var cursor = null;
+var openId = null;
+var loading = false;
+var exhausted = false;
+function withLinks(text) {
+  const frag = document.createDocumentFragment();
+  for (const part of linkParts(text)) {
+    if (!part.href) {
+      frag.append(document.createTextNode(part.text));
+      continue;
+    }
+    const a = document.createElement("a");
+    a.href = part.href;
+    a.textContent = part.text;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "text-newer underline decoration-dotted underline-offset-2";
+    frag.append(a);
+  }
+  return frag;
+}
+function render(e) {
+  const row = document.createElement("div");
+  row.className = "whitespace-pre-wrap break-words";
+  const mark = document.createElement("span");
+  if (e.kind === "text" && e.role === "user") {
+    row.className += " mt-3 text-gold";
+    mark.textContent = "\u276F ";
+  } else if (e.kind === "tool") {
+    row.className += " mt-2 text-ok";
+    mark.textContent = "\u23FA ";
+  } else if (e.kind === "result") {
+    row.className += " text-muted";
+    mark.textContent = "  \u23BF  ";
+  } else if (e.kind === "thinking") {
+    row.className += " mt-2 text-faint italic";
+    mark.textContent = "\u273B ";
+  } else {
+    row.className += " mt-2 text-label";
+    mark.textContent = "";
+  }
+  if (mark.textContent) row.append(mark);
+  const text = e.kind === "tool" ? `${e.tool}(${e.text})` : e.text;
+  row.append(withLinks(text));
+  return row;
+}
+async function load(token3, older) {
+  if (!body || !openId || loading || older && exhausted) return;
+  loading = true;
+  const note = older ? topNote("reading older\u2026") : null;
+  try {
+    const q = older && cursor !== null ? `&before=${cursor}` : "";
+    const res = await fetch(`/api/transcript?id=${encodeURIComponent(openId)}${q}`, {
+      signal: AbortSignal.timeout(2e4),
+      headers: { "x-guildhall-control": token3 }
+    });
+    const data = await res.json().catch(() => ({ error: "unreadable reply" }));
+    note?.remove();
+    if (!res.ok || data.error) {
+      body.prepend(topNote(data.error ?? `the server said ${res.status}`));
+      return;
+    }
+    const before = body.scrollHeight;
+    const frag = document.createDocumentFragment();
+    for (const e of data.entries) frag.append(render(e));
+    if (older) {
+      body.prepend(frag);
+      body.scrollTop += body.scrollHeight - before;
+    } else {
+      body.append(frag);
+      body.scrollTop = body.scrollHeight;
+    }
+    cursor = data.cursor;
+    if (data.cursor === null) {
+      exhausted = true;
+      body.prepend(topNote("the beginning of this conversation"));
+    }
+  } catch {
+    note?.remove();
+    body.prepend(topNote("could not reach guildhall"));
+  } finally {
+    loading = false;
+  }
+}
+function topNote(text) {
+  const n = document.createElement("div");
+  n.className = "py-2 text-center text-[0.72rem] text-muted";
+  n.textContent = text;
+  return n;
+}
+function openTranscript(id, name, token3) {
+  openId = id;
+  cursor = null;
+  exhausted = false;
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "transcript";
+    document.body.append(el);
+  }
+  el.className = `fixed inset-0 z-50 flex flex-col border-line bg-panel text-label ${fullScreen() ? "" : "sm:inset-8 sm:rounded-lg sm:border"}`;
+  el.hidden = false;
+  el.replaceChildren();
+  lockPage("transcript");
+  const bar3 = document.createElement("div");
+  bar3.className = "flex items-center gap-2 border-b border-line px-3 py-2";
+  const title = document.createElement("div");
+  title.className = "truncate text-[0.8rem] font-bold";
+  title.textContent = `${name} \xB7 transcript`;
+  const why = document.createElement("div");
+  why.className = "hidden text-[0.68rem] text-muted sm:block";
+  why.textContent = "read from the log \u2014 the terminal keeps no scrollback";
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Back to the terminal (Esc)";
+  x.className = "ml-auto flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg";
+  tap(x, closeTranscript);
+  bar3.append(title, why, x);
+  body = document.createElement("div");
+  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.45]";
+  body.textContent = "reading\u2026";
+  body.addEventListener("scroll", () => {
+    if (body && body.scrollTop < 240) void load(token3, true);
+  });
+  el.append(bar3, body);
+  body.replaceChildren();
+  void load(token3, false);
+  document.addEventListener("keydown", onKey);
+}
+function onKey(e) {
+  if (e.key === "Escape") closeTranscript();
+}
+function closeTranscript() {
+  document.removeEventListener("keydown", onKey);
+  openId = null;
+  body = null;
+  if (el) {
+    el.hidden = true;
+    el.replaceChildren();
+  }
+  unlockPage("transcript");
+}
+var transcriptOpen = () => openId !== null;
+
 // web/terminal.ts
 var KEY = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
@@ -394,10 +541,10 @@ function repaintSoon() {
   lastSig = "";
   lastTag = "";
 }
-var openId = null;
+var openId2 = null;
 var openName = "";
 var timer;
-var el;
+var el2;
 var onClose = () => {
 };
 function holdPage() {
@@ -411,8 +558,8 @@ async function api(path, init = {}) {
     const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
     if (res.status === 304) return { status: 304 };
     lastTag = res.headers.get("etag") ?? lastTag;
-    const body = await res.json().catch(() => ({ error: "unreadable reply" }));
-    return { status: res.status, ...body };
+    const body2 = await res.json().catch(() => ({ error: "unreadable reply" }));
+    return { status: res.status, ...body2 };
   } catch (e) {
     const timedOut = e instanceof DOMException && e.name === "TimeoutError";
     return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
@@ -421,10 +568,10 @@ async function api(path, init = {}) {
 function askForToken(why) {
   clearInterval(timer);
   timer = void 0;
-  el.innerHTML = "";
-  el.style.maxWidth = "";
-  el.style.marginInline = "";
-  el.append(titleBar(openName, "password needed"));
+  el2.innerHTML = "";
+  el2.style.maxWidth = "";
+  el2.style.marginInline = "";
+  el2.append(titleBar(openName, "password needed"));
   const wrap2 = document.createElement("div");
   wrap2.className = "p-4";
   const h = document.createElement("p");
@@ -445,12 +592,12 @@ function askForToken(why) {
   go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
   const submit = () => {
     sessionStorage.setItem(KEY, input.value.trim());
-    if (openId) show(openId, openName);
+    if (openId2) show(openId2, openName);
   };
   go.addEventListener("click", submit);
   input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
   wrap2.append(h, p, input, go);
-  el.append(wrap2);
+  el2.append(wrap2);
   input.focus();
 }
 function titleBar(name, subtitle) {
@@ -472,15 +619,15 @@ function titleBar(name, subtitle) {
   return bar3;
 }
 function chrome(name) {
-  el.innerHTML = "";
+  el2.innerHTML = "";
   const bar3 = document.createElement("div");
   bar3.id = "screenbar";
   bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
   const title = document.createElement("span");
-  title.className = "font-bold text-label";
+  title.className = "min-w-0 flex-1 truncate font-bold text-label";
   title.textContent = name;
   const live2 = document.createElement("span");
-  live2.className = "text-[0.72rem] text-faint";
+  live2.className = "hidden shrink-0 text-[0.72rem] text-faint min-[480px]:inline";
   live2.textContent = "live terminal";
   const mode = document.createElement("button");
   mode.type = "button";
@@ -501,9 +648,15 @@ function chrome(name) {
   });
   const x = document.createElement("button");
   x.type = "button";
-  x.textContent = "\u2715 Close";
+  const xMark = document.createElement("span");
+  xMark.textContent = "\u2715";
+  const xWord = document.createElement("span");
+  xWord.className = "hidden min-[400px]:inline";
+  xWord.textContent = "Close";
+  x.append(xMark, xWord);
+  x.setAttribute("aria-label", "Close the terminal");
   x.title = "Close the terminal (Esc)";
-  x.className = "flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  x.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   tap(x, close);
   const keysBtn = document.createElement("button");
   keysBtn.type = "button";
@@ -521,9 +674,19 @@ function chrome(name) {
     const row = document.getElementById("promptkeys");
     if (row) row.hidden = !keypad;
   });
+  const logBtn = document.createElement("button");
+  logBtn.type = "button";
+  logBtn.id = "transcripttoggle";
+  logBtn.textContent = "\u2630";
+  logBtn.title = "Read the conversation history \u2014 the terminal itself keeps no scrollback";
+  logBtn.setAttribute("aria-label", "Read the conversation history");
+  logBtn.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-line bg-transparent px-2 text-[0.95rem] text-muted";
+  tap(logBtn, () => {
+    if (openId2) openTranscript(openId2, openName, token());
+  });
   const tail = document.createElement("div");
-  tail.className = "ml-auto flex items-center gap-2";
-  tail.append(mode, keysBtn, x);
+  tail.className = "ml-auto flex shrink-0 items-center gap-2";
+  tail.append(mode, logBtn, keysBtn, x);
   bar3.append(title, live2, tail);
   const pre = document.createElement("pre");
   pre.id = "screen";
@@ -578,7 +741,7 @@ function chrome(name) {
     });
     keys.append(b);
   }
-  el.append(keys);
+  el2.append(keys);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
@@ -589,7 +752,7 @@ function chrome(name) {
     send.textContent = "Sending\u2026";
     let r;
     try {
-      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId, text }) });
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text }) });
     } finally {
       sending = false;
       send.disabled = false;
@@ -605,14 +768,14 @@ ${pre.textContent}`;
     note.hidden = !r.note;
     refresh();
   });
-  el.append(bar3, pre, note, form);
+  el2.append(bar3, pre, note, form);
   return { pre, input };
 }
 var polling = false;
 var sending = false;
 async function sendKey(key, pre) {
-  if (!openId) return;
-  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId, key }) });
+  if (!openId2) return;
+  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId2, key }) });
   if (r.error) {
     pre.textContent = `${r.error}
 
@@ -624,7 +787,7 @@ ${pre.textContent}`;
   refresh();
 }
 async function refresh() {
-  if (!openId || polling || sending) return;
+  if (!openId2 || polling || sending) return;
   polling = true;
   try {
     await poll();
@@ -633,8 +796,8 @@ async function refresh() {
   }
 }
 async function poll() {
-  if (!openId) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  if (!openId2) return;
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
   if (r.status === 304) return;
   if (r.status === 401) return askForToken("That password was not accepted.");
   if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
@@ -647,13 +810,13 @@ async function poll() {
   if (sig === lastSig && pre.childElementCount) return;
   lastSig = sig;
   const btn = document.getElementById("screenmode");
-  const cramped = paint(pre, r.render_grid, el, wrap);
+  const cramped = paint(pre, r.render_grid, el2, wrap);
   if (btn) btn.hidden = !cramped;
 }
 function show(id, name) {
-  openId = id;
+  openId2 = id;
   openName = name;
-  el.hidden = false;
+  el2.hidden = false;
   holdPage();
   measure();
   if (!token()) return askForToken("This is behind a separate password from the passcode.");
@@ -664,31 +827,31 @@ function show(id, name) {
   if (!fullScreen()) input.focus();
 }
 function close() {
-  openId = null;
+  openId2 = null;
   lastTag = "";
   clearInterval(timer);
   timer = void 0;
-  el.hidden = true;
-  el.innerHTML = "";
-  el.style.maxWidth = "";
-  el.style.marginInline = "";
-  el.style.height = "";
-  el.style.top = "";
-  el.style.bottom = "";
-  el.style.transform = "";
+  el2.hidden = true;
+  el2.innerHTML = "";
+  el2.style.maxWidth = "";
+  el2.style.marginInline = "";
+  el2.style.height = "";
+  el2.style.top = "";
+  el2.style.bottom = "";
+  el2.style.transform = "";
   unlockPage("terminal");
   onClose();
 }
 function mountTerminal(host2, closed) {
-  el = host2;
+  el2 = host2;
   onClose = closed;
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && openId) close();
+    if (e.key === "Escape" && openId2) close();
   });
   watch(host2, isOpen);
   let t;
   addEventListener("resize", () => {
-    if (!openId) return;
+    if (!openId2) return;
     holdPage();
     settle();
     clearTimeout(t);
@@ -707,9 +870,9 @@ async function sendTo(id, text) {
     body: JSON.stringify({ id, text })
   });
 }
-var isOpen = () => openId !== null;
+var isOpen = () => openId2 !== null;
 var busy = () => {
-  if (!openId) return false;
+  if (!openId2) return false;
   if (sending) return true;
   return !!document.getElementById("ask")?.value.trim();
 };
@@ -1073,11 +1236,11 @@ function sendBox(s) {
       pass.value = "";
       draw();
     }
-    const body = text.value.trim();
-    if (!body) return;
+    const body2 = text.value.trim();
+    if (!body2) return;
     go.disabled = true;
     try {
-      const r = await sendTo(s.id, body);
+      const r = await sendTo(s.id, body2);
       if (r.ok) {
         text.value = "";
         say2.textContent = r.note ? `Queued. ${r.note}` : "Queued.";
@@ -1094,9 +1257,9 @@ function sendBox(s) {
     e.stopPropagation();
     void submit();
   });
-  for (const el4 of [text, pass]) {
-    el4.addEventListener("click", (e) => e.stopPropagation());
-    el4.addEventListener("keydown", (e) => {
+  for (const el5 of [text, pass]) {
+    el5.addEventListener("click", (e) => e.stopPropagation());
+    el5.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") void submit();
     });
@@ -2697,7 +2860,7 @@ var Office = class extends SimBase {
       for (const r of rows) spots.push([r, p.x + CHAR_W], [r, p.x - 1]);
       const free = spots.filter(([r, c]) => r >= 0 && r < cv2.rows && c >= 0 && c < cv2.w && !this.blocked(r, c, 1, taken));
       if (!free.length) continue;
-      const body = s.short || (s.state === "working" || s.state === "shell" ? s.doing : s.title) || s.title;
+      const body2 = s.short || (s.state === "working" || s.state === "shell" ? s.doing : s.title) || s.title;
       const prefix = s.tab ? `\u2318${s.tab} ` : s.agent === "codex" ? "cx " : "";
       const want = prefix.length + 27;
       const least = prefix.length + 6;
@@ -2720,7 +2883,7 @@ var Office = class extends SimBase {
       if (!showAll && !urgent && !sel) continue;
       const n = room(at);
       if (n < least) continue;
-      const text = `${prefix}${cut(body, n - prefix.length - 1)} `;
+      const text = `${prefix}${cut(body2, n - prefix.length - 1)} `;
       const fits = badgeCol < p.x ? badgeCol - text.length : badgeCol + 1;
       cv2.text(fits, badgeRow, text, C.ink, urgent ? look.color : C.paper);
       const used = taken.get(badgeRow) ?? [];
@@ -3259,7 +3422,7 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY2, JSON.stringify(settings));
         } catch {
         }
-        for (const el4 of choices.querySelectorAll("[role=radio]")) el4.setAttribute("aria-checked", "false");
+        for (const el5 of choices.querySelectorAll("[role=radio]")) el5.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
@@ -3429,9 +3592,9 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-function mountRoom(room, el4) {
+function mountRoom(room, el5) {
   roomEl = room;
-  canvas = el4;
+  canvas = el5;
   ctx2d = canvas.getContext("2d");
   buffer2 = document.createElement("canvas");
   bufferCtx = buffer2.getContext("2d");
@@ -3445,7 +3608,7 @@ function mountRoom(room, el4) {
 var DEPLOYS = "guildhall.press.deploys";
 var LOCAL_WAIT = 2e4;
 var FULL_WAIT = 1e5;
-var el2;
+var el3;
 var timer2;
 var open = false;
 var settled2 = false;
@@ -3580,16 +3743,16 @@ function heading(text, count) {
   h.append(label, rule);
   return h;
 }
-function render(snap) {
+function render2(snap) {
   const sig = JSON.stringify([snap.items, snap.repos, snap.local, snap.error, snap.stale, snap.githubError, snap.cloudflareError, !!snap.loading, deploys]);
-  if (sig === lastRender && el2.childElementCount) {
-    const meta2 = el2.querySelector(".press-meta");
+  if (sig === lastRender && el3.childElementCount) {
+    const meta2 = el3.querySelector(".press-meta");
     if (meta2) meta2.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;
     return;
   }
   lastRender = sig;
-  const priorScroll = el2.querySelector(".press-body")?.scrollTop ?? 0;
-  const priorOpen = el2.querySelector("details")?.open ?? false;
+  const priorScroll = el3.querySelector(".press-body")?.scrollTop ?? 0;
+  const priorOpen = el3.querySelector("details")?.open ?? false;
   const wrap2 = document.createElement("div");
   wrap2.className = "flex h-full min-h-0 flex-col";
   const bar3 = document.createElement("div");
@@ -3618,39 +3781,39 @@ function render(snap) {
   x.addEventListener("click", close2);
   bar3.append(title, meta, toggle, x);
   wrap2.append(bar3);
-  const body = document.createElement("div");
-  body.className = "press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
+  const body2 = document.createElement("div");
+  body2.className = "press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
   if (snap.error) {
     const p = document.createElement("p");
     p.className = "m-0 px-2.5 py-8 text-center text-muted";
     p.textContent = snap.error;
-    body.append(p);
+    body2.append(p);
   } else if (!snap.repos.length && !snap.items.length) {
     const p = document.createElement("p");
     p.className = "m-0 px-2.5 py-8 text-center text-faint";
     p.textContent = snap.loading ? deploys ? "Reading \u2014 deploys take about 17 seconds." : "Reading\u2026" : "Nothing to show.";
-    body.append(p);
+    body2.append(p);
   } else {
     if (snap.stale) {
       const note = document.createElement("p");
       note.className = "m-0 border-b border-gold/40 bg-gold/10 px-2.5 py-1.5 text-[0.72rem] text-gold";
       note.textContent = snap.stale;
-      body.append(note);
+      body2.append(note);
     }
     const busy2 = snap.stale ? [] : snap.repos.filter((r) => r.ahead || r.changed || r.untracked || r.error);
     const quiet = snap.stale ? [] : snap.repos.filter((r) => !(r.ahead || r.changed || r.untracked || r.error));
     if (!snap.stale) {
-      body.append(heading("unpushed & dirty", busy2.length));
+      body2.append(heading("unpushed & dirty", busy2.length));
       if (busy2.length) {
         const ul = document.createElement("ul");
         ul.className = "m-0 list-none p-0";
         for (const r of busy2) ul.append(repoRow(r));
-        body.append(ul);
+        body2.append(ul);
       } else {
         const p = document.createElement("p");
         p.className = "m-0 px-2.5 py-2 text-faint";
         p.textContent = "Everything is pushed and clean.";
-        body.append(p);
+        body2.append(p);
       }
     }
     if (quiet.length) {
@@ -3662,31 +3825,31 @@ function render(snap) {
       ul.className = "m-0 list-none p-0";
       for (const r of quiet) ul.append(repoRow(r));
       details3.append(sum, ul);
-      body.append(details3);
+      body2.append(details3);
     }
-    body.append(heading("feed", snap.items.length));
+    body2.append(heading("feed", snap.items.length));
     if (snap.local) {
       const note = document.createElement("p");
       note.className = "m-0 px-2.5 py-1 text-[0.72rem] text-faint";
       note.textContent = "Commits and pushes only \u2014 deploys were not read.";
-      body.append(note);
+      body2.append(note);
     }
     for (const err of [snap.githubError, snap.cloudflareError]) {
       if (!err) continue;
       const p = document.createElement("p");
       p.className = "m-0 px-2.5 py-1 text-[0.72rem] text-hot";
       p.textContent = err;
-      body.append(p);
+      body2.append(p);
     }
     const feed2 = document.createElement("ul");
     feed2.className = "m-0 list-none p-0";
     for (const i of snap.items) feed2.append(feedRow(i));
-    body.append(feed2);
+    body2.append(feed2);
   }
-  wrap2.append(body);
-  el2.replaceChildren(wrap2);
-  body.scrollTop = priorScroll;
-  const details2 = el2.querySelector("details");
+  wrap2.append(body2);
+  el3.replaceChildren(wrap2);
+  body2.scrollTop = priorScroll;
+  const details2 = el3.querySelector("details");
   if (details2) details2.open = priorOpen;
 }
 function normalise(snap) {
@@ -3710,17 +3873,17 @@ async function refresh2() {
   let snap;
   try {
     const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`, { signal: AbortSignal.timeout(deploys ? FULL_WAIT : LOCAL_WAIT) });
-    if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? "The passcode changed \u2014 reload to sign in again." : `the server said ${res.status}` });
+    if (!res.ok) return render2({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? "The passcode changed \u2014 reload to sign in again." : `the server said ${res.status}` });
     snap = await res.json();
   } catch (e) {
     const timedOut = e instanceof DOMException && e.name === "TimeoutError";
-    return render({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? "guildhall did not answer in time \u2014 the machine may be asleep." : "could not reach guildhall" });
+    return render2({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? "guildhall did not answer in time \u2014 the machine may be asleep." : "could not reach guildhall" });
   }
   const shaped = normalise(snap);
   try {
-    render(shaped);
+    render2(shaped);
   } catch (e) {
-    render({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
+    render2({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
   }
   if (shaped.loading) {
     clearInterval(timer2);
@@ -3734,9 +3897,9 @@ async function refresh2() {
 function show2() {
   open = true;
   settled2 = false;
-  el2.hidden = false;
+  el3.hidden = false;
   lockPage("press");
-  render({ at: Date.now(), items: [], repos: [], local: !deploys });
+  render2({ at: Date.now(), items: [], repos: [], local: !deploys });
   refresh2();
   clearInterval(timer2);
   timer2 = setInterval(refresh2, 3e4);
@@ -3745,15 +3908,15 @@ function close2() {
   open = false;
   clearInterval(timer2);
   timer2 = void 0;
-  el2.hidden = true;
-  el2.replaceChildren();
+  el3.hidden = true;
+  el3.replaceChildren();
   lastRender = "";
   unlockPage("press");
   onClose2();
 }
 var isOpen2 = () => open;
 function mountPress(host2, closed) {
-  el2 = host2;
+  el3 = host2;
   onClose2 = closed;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && open) close2();
@@ -3763,19 +3926,19 @@ function mountPress(host2, closed) {
 // web/newsession.ts
 var KEY3 = "guildhall.control";
 var token2 = () => sessionStorage.getItem(KEY3) ?? "";
-var el3;
+var el4;
 var onPick = () => {
 };
 var open2 = false;
 function mountNewSession(host2, picked) {
-  el3 = host2;
+  el4 = host2;
   onPick = picked;
 }
 var isOpen3 = () => open2;
 function close3() {
   open2 = false;
-  el3.hidden = true;
-  el3.replaceChildren();
+  el4.hidden = true;
+  el4.replaceChildren();
   unlockPage("newsession");
 }
 function bar(title) {
@@ -3798,8 +3961,8 @@ function say(host2, text, tone = "text-faint") {
   p.textContent = text;
   host2.append(p);
 }
-function askHere(body) {
-  body.replaceChildren();
+function askHere(body2) {
+  body2.replaceChildren();
   const wrap2 = document.createElement("div");
   wrap2.className = "p-4";
   const h = document.createElement("p");
@@ -3829,36 +3992,36 @@ function askHere(body) {
     if (e.key === "Enter") submit();
   });
   wrap2.append(h, why, input, go);
-  body.append(wrap2);
+  body2.append(wrap2);
   input.focus();
 }
 async function show3() {
   open2 = true;
-  el3.hidden = false;
+  el4.hidden = false;
   lockPage("newsession");
-  el3.replaceChildren(bar("Start a session"));
-  const body = document.createElement("div");
-  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain";
-  el3.append(body);
-  say(body, "Loading projects\u2026");
+  el4.replaceChildren(bar("Start a session"));
+  const body2 = document.createElement("div");
+  body2.className = "min-h-0 flex-1 overflow-auto overscroll-contain";
+  el4.append(body2);
+  say(body2, "Loading projects\u2026");
   let projects = [];
   try {
     const res = await fetch("/api/projects", { headers: { "x-guildhall-control": token2() }, signal: AbortSignal.timeout(15e3) });
     if (res.status === 403) {
-      body.replaceChildren();
-      say(body, "Control is off, or this device is not on the machine or its tailnet.", "text-gold");
+      body2.replaceChildren();
+      say(body2, "Control is off, or this device is not on the machine or its tailnet.", "text-gold");
       return;
     }
-    if (res.status === 401) return askHere(body);
+    if (res.status === 401) return askHere(body2);
     projects = (await res.json()).projects ?? [];
   } catch {
-    body.replaceChildren();
-    say(body, "Could not reach guildhall.", "text-hot");
+    body2.replaceChildren();
+    say(body2, "Could not reach guildhall.", "text-hot");
     return;
   }
-  body.replaceChildren();
-  if (!projects.length) return void say(body, "No projects found to start in.");
-  say(body, "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
+  body2.replaceChildren();
+  if (!projects.length) return void say(body2, "No projects found to start in.");
+  say(body2, "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
   const list = document.createElement("ul");
   list.className = "m-0 list-none p-0";
   for (const p of projects) {
@@ -3876,13 +4039,13 @@ async function show3() {
       t.textContent = "already running";
       b.append(t);
     }
-    b.addEventListener("click", () => start(p, body, b));
+    b.addEventListener("click", () => start(p, body2, b));
     li.append(b);
     list.append(li);
   }
-  body.append(list);
+  body2.append(list);
 }
-async function start(p, body, btn) {
+async function start(p, body2, btn) {
   btn.disabled = true;
   const was = btn.textContent;
   btn.textContent = `Starting in ${p.label}\u2026`;
@@ -3899,12 +4062,12 @@ async function start(p, body, btn) {
     if (out.error) {
       btn.disabled = false;
       btn.textContent = was;
-      body.querySelectorAll("[data-note]").forEach((n2) => n2.remove());
+      body2.querySelectorAll("[data-note]").forEach((n2) => n2.remove());
       const n = document.createElement("p");
       n.dataset.note = "1";
       n.className = "m-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot";
       n.textContent = out.error;
-      body.prepend(n);
+      body2.prepend(n);
       return;
     }
     close3();
@@ -3937,20 +4100,20 @@ function paintCounts(list) {
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
   bar2.counts.replaceChildren(
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
-      const el4 = document.createElement("span");
-      el4.style.color = rgb(LOOK[k].color);
-      el4.className = "whitespace-nowrap";
-      el4.textContent = `${LOOK[k].glyph} `;
+      const el5 = document.createElement("span");
+      el5.style.color = rgb(LOOK[k].color);
+      el5.className = "whitespace-nowrap";
+      el5.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("span");
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
       word2.className = "text-label hidden min-[560px]:inline";
       word2.textContent = ` ${LOOK[k].label}`;
-      el4.title = `${counts[k]} ${LOOK[k].label}`;
-      el4.setAttribute("aria-label", `${counts[k]} ${LOOK[k].label}`);
-      el4.append(n, word2);
-      return el4;
+      el5.title = `${counts[k]} ${LOOK[k].label}`;
+      el5.setAttribute("aria-label", `${counts[k]} ${LOOK[k].label}`);
+      el5.append(n, word2);
+      return el5;
     })
   );
 }
@@ -3958,7 +4121,7 @@ var clientStamp = null;
 function apply(data) {
   if (data.client) {
     if (clientStamp === null) clientStamp = data.client;
-    else if (data.client !== clientStamp && !busy() && !isOpen2() && !isOpen3()) return void location.reload();
+    else if (data.client !== clientStamp && !busy() && !isOpen2() && !isOpen3() && !transcriptOpen()) return void location.reload();
   }
   sessions2 = data.sessions;
   setRoomSessions(sessions2);
