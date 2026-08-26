@@ -11,6 +11,9 @@ import SwiftUI
 /// about to compact and lose the thread.
 struct Panel: View {
 	@ObservedObject var model: Model
+	/// Why the last click on a row did nothing. Observed, not read once — the refusal
+	/// arrives after the click, from a background queue.
+	@ObservedObject private var cmux = Cmux.Status.shared
 	@State private var showSettings = false
 	@State private var collapsed: Set<String> = []
 	/// Other guildhalls serving, refreshed each time the panel appears. A readdir plus a
@@ -99,6 +102,21 @@ struct Panel: View {
 				// and the panel showed a header and some buttons with the sessions
 				// missing entirely — while the app was holding all ten of them.
 				.frame(minHeight: 140, maxHeight: 360)
+			}
+			// Why the last click did not open a tab.
+			//
+			// Clicking a row was silent for two releases: cmux refuses control from a
+			// process it did not start, this app is started by launchd, and the refusal
+			// went to /dev/null. Whatever the reason, it is said here now.
+			if let note = cmux.note {
+				Divider()
+				HStack(alignment: .top, spacing: 6) {
+					Image(systemName: "exclamationmark.triangle.fill")
+						.font(.system(size: 10)).foregroundStyle(.orange)
+					Text(note).font(.system(size: 10)).foregroundStyle(.secondary)
+						.fixedSize(horizontal: false, vertical: true)
+				}
+				.padding(.horizontal, 10).padding(.vertical, 6)
 			}
 			if let u = model.usage, !u.limits.isEmpty || u.cost != nil {
 				Divider()
