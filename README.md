@@ -114,7 +114,7 @@ already writes, which is why it sees sessions you started anywhere.
 | **The room** | Every live session as a character. Working sessions sit at a lit desk; ones waiting on you get a placard; the rest get coffee. |
 | **The table** | What each session is doing, context left, how long it has been ignored. |
 | **[The browser view](#seeing-it-from-another-machine)** | The same room and list on your phone or another computer, behind a passcode. Off by default — `s`. |
-| **[The live terminal](#typing-into-a-session-from-somewhere-else)** | Open a session's real terminal from the browser, read it, and type into it. Off by default, and behind a second password. |
+| **[The live terminal](#typing-into-a-session-from-somewhere-else)** | Open a session's real terminal from the browser, read it, and type into it — and read the conversation back further than the screen goes. Off by default, and behind a second password. |
 | **[pressroom](#commits-and-deploys)** | What has been committed, pushed, built and deployed, across every repo. |
 | **[Codex sessions](#codex)** | OpenAI's Codex alongside Claude Code, read the same way and shown in the same room. Off by default — `x`. |
 | **[Keeping the machine awake](#keeping-the-machine-awake)** | Hold off sleep while sessions are working, so a long job survives you walking away. |
@@ -593,6 +593,24 @@ terminal** — the one already on your screen, not a second copy — read what i
 showing, and type into it. It works through cmux's socket API: `terminal.replay`
 to see the screen as a styled grid, and `terminal.input` to type. Press ⌨ on a row
 to open it.
+
+**Reading further back than the screen goes.** The terminal shows one screenful and
+cannot show more, and that is not guildhall's to fix: Claude Code draws on the
+terminal's *alternate* screen, where Ghostty — which cmux embeds — hardcodes
+`scrollback-limit = 0`, so the lines are discarded by the emulator before cmux sees
+them. Every Claude pane reports `scrollback_rows: 0` against 115 for a plain shell
+pane. It is [cmux #2334](https://github.com/manaflow-ai/cmux/issues/2334), and it is
+open.
+
+So the history is read from the transcript on disk instead. **☰** in the terminal bar
+opens it: the same conversation, styled the same way, links clickable, scrolling up to
+page further back. A separate view rather than a replacement, because a transcript
+cannot draw a status bar and cannot answer a prompt — both of which are the point of
+the live screen. These files reach 119MB, so nothing reads one whole: it seeks to the
+end and walks backwards a chunk at a time, about 19ms for the first page.
+
+Rebuilding a scrollback from the screens guildhall already polls was tried and does
+not work; the measurements are in `MISTAKES.md`.
 
 Text and the Enter that submits it travel in **one** call. They used to be two —
 `send` then `send-key Enter` — and the gap between them was long enough to lose the
