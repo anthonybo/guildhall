@@ -29,6 +29,19 @@ export type Entry = {
 	text: string
 	/** Present on a tool call: the tool's name, for the `⏺ Update(...)` line. */
 	tool?: string
+	/**
+	 * Pairing, so a result can be folded under the call it answers.
+	 *
+	 * By id rather than by position. They do arrive adjacent today — and every
+	 * assistant turn measured here made exactly one call — but "the next entry" is an
+	 * assumption about someone else's file format, and this file already carries the
+	 * ids that say it outright: `tool_use.id` and `tool_result.tool_use_id`.
+	 */
+	id?: string
+	/** On a result: the id of the call it answers. */
+	for?: string
+	/** On a result: the tool reported failure, which is worth seeing without expanding. */
+	error?: true
 }
 
 export type Page = {
@@ -72,19 +85,40 @@ function entriesOf(rec: unknown): Entry[] {
 	if (!Array.isArray(content)) return []
 	const out: Entry[] = []
 	for (const raw of content) {
-		const b = raw as { type?: string; text?: string; thinking?: string; name?: string; input?: unknown; content?: unknown }
+		const b = raw as {
+			type?: string
+			text?: string
+			thinking?: string
+			name?: string
+			input?: unknown
+			content?: unknown
+			id?: string
+			tool_use_id?: string
+			is_error?: boolean
+		}
 		if (b.type === 'text' && b.text?.trim()) out.push({ at, role, kind: 'text', text: clip(b.text.trim(), CAP.text) })
 		else if (b.type === 'thinking' && b.thinking?.trim()) out.push({ at, role, kind: 'thinking', text: clip(b.thinking.trim(), CAP.thinking) })
 		else if (b.type === 'tool_use') {
 			// The one line the terminal draws for a call: the tool and its subject.
 			const input = b.input as Record<string, unknown> | undefined
 			const subject = input ? (input.file_path ?? input.path ?? input.command ?? input.pattern ?? input.url ?? input.description ?? '') : ''
-			out.push({ at, role, kind: 'tool', tool: String(b.name ?? 'tool'), text: clip(String(subject ?? ''), CAP.tool) })
+			out.push({ at, role, kind: 'tool', tool: String(b.name ?? 'tool'), text: clip(String(subject ?? ''), CAP.tool), ...(b.id ? { id: b.id } : {}) })
 		} else if (b.type === 'tool_result') {
 			const c = b.content
 			const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x as { text?: string })?.text ?? '').join('\n') : ''
 			const trimmed = text.trim()
-			if (trimmed) out.push({ at, role, kind: 'result', text: clip(trimmed, CAP.result) })
+			// A failed call is worth a marker even when it printed nothing, so this is
+			// kept when the text is empty and `is_error` is set.
+			if (trimmed || b.is_error) {
+				out.push({
+					at,
+					role,
+					kind: 'result',
+					text: clip(trimmed, CAP.result),
+					...(b.tool_use_id ? { for: b.tool_use_id } : {}),
+					...(b.is_error ? { error: true as const } : {}),
+				})
+			}
 		}
 	}
 	return out

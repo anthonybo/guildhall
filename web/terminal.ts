@@ -76,6 +76,8 @@ function repaintSoon() {
 
 let openId: string | null = null
 let openName = ''
+/** The idempotency key for the message currently in the box, if one has been sent. */
+let msgKey: string | null = null
 // a handle, not an integer — see the note in press.ts
 let timer: ReturnType<typeof setTimeout> | undefined
 let el: HTMLElement
@@ -474,6 +476,22 @@ function chrome(name: string) {
 		e.preventDefault()
 		const text = input.value
 		if (!text.trim() || sending) return
+		/**
+		 * One key per composed message, reused on every retry.
+		 *
+		 * The oldest bug here is "I have to send everything twice", and the cause is not
+		 * in the send: a lost REPLY is indistinguishable from a lost REQUEST, so a send
+		 * that arrived and failed to say so came back as an error, the text was handed
+		 * back to the box, and pressing Send again delivered it a second time. Typically
+		 * the first message after the machine has slept, because that is the request
+		 * that discovers the connection went stale.
+		 *
+		 * The key is generated once for the text in the box and kept until the server
+		 * confirms, so a second attempt is recognised as the same message and typed
+		 * nowhere. See src/once.ts.
+		 */
+		if (!msgKey) msgKey = crypto.randomUUID()
+		const key = msgKey
 		input.value = ''
 		// Say it is working, rather than going quiet.
 		//
@@ -489,15 +507,23 @@ function chrome(name: string) {
 		// rather than a control that has quietly stopped working.
 		let r: Awaited<ReturnType<typeof api>>
 		try {
-			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text }) })
+			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text, key }) })
 		} finally {
 			sending = false
 			send.disabled = false
 			send.textContent = 'Send'
 		}
 		if (r.error) {
-			pre.textContent = `${r.error}\n\n${pre.textContent}`
-			input.value = text // give it back rather than losing what was typed
+			// The text comes back so nothing typed is lost — but a network failure is NOT
+			// evidence the message did not arrive, and saying "failed" was what invited
+			// the second send. The key above makes pressing Send again safe, so the
+			// wording can be honest about not knowing rather than guessing wrong.
+			const unknown = r.status === 0
+			pre.textContent = `${unknown ? `${r.error} — it may still have gone through; sending again is safe, it will not arrive twice` : r.error}\n\n${pre.textContent}`
+			input.value = text
+		} else {
+			// Confirmed. The next message is a new message and gets its own key.
+			msgKey = null
 		}
 		// A send that worked but will sit for a while says so, ONCE, above the screen.
 		//

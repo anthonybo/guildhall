@@ -16,8 +16,9 @@ message. This file is only for the dead ends.
 
 ## Sending a message needs two tries
 
-**Status: not solved.** A verify-and-retry now papers over it; the cause is still
-unknown.
+**Status: believed fixed in v0.11.x by making the send idempotent** — see the entry
+below. The four attempts here all reasoned about the mechanism inside cmux, and the
+mechanism inside cmux was never the problem.
 
 The symptom: a message sent from the browser does not reach the session, so it
 gets typed again. Intermittent — "all the time but not every time".
@@ -1084,3 +1085,50 @@ numbers above. If this is ever revisited, exclude the churning rows first.
 from the JSONL on disk, which has had all of it the whole time. Not a replacement for
 the terminal view — a transcript cannot show a status bar or answer a prompt, and both
 were reasons this was nearly built as the wrong thing.
+
+---
+
+## The double send was never inside cmux
+
+**Status: fixed**, and the interesting part is that four earlier attempts were all
+looking in the wrong place. They are in the entry at the top of this file: an atomic
+`text\r`, refusing folded rows, warning instead of refusing, and a verify-and-retry
+that reads the screen back. Each was reasonable, two shipped, and the report kept
+coming — most recently as "my first message of the day seems to send twice and stay in
+my chat box to send a third time", which arrived in the session three times over while
+it was being read.
+
+**The cause is that a lost REPLY is indistinguishable from a lost REQUEST.** The client
+hands the text back to the box on any failure, and `api()` returns the same
+`could not reach guildhall` for a request that never arrived and for one that arrived,
+was delivered perfectly, and had its response dropped. So a send that WORKED came back
+as an error, the text reappeared in the box, and pressing Send again delivered it a
+second time.
+
+That is why it is the first message of the day. Overnight the machine sleeps and the
+connection goes stale; the first request is the one that discovers it. Every later send
+reuses a warm connection and behaves, which is exactly why nobody could reproduce it on
+demand — 26 trials against a real scratch session all passed, and they were all warm.
+
+**No amount of care inside the send path can fix this**, because both sides are behaving
+correctly and neither can tell what happened. What fixes it is naming the message. The
+client generates a key once per composed message and reuses it on every retry; the
+server records the key before it sends and answers a repeat with the first attempt's
+result, byte for byte. See `src/once.ts`.
+
+**Why this one is different from the four before it:** it does not depend on the
+diagnosis above being right. Whatever drops — a radio, a sleeping laptop, a proxy, a
+double tap, a browser retry — a duplicate cannot reach the session. The previous fixes
+each required their explanation to be correct, and none of them was.
+
+### Measured, so do not re-measure
+
+- Removing the short circuit makes both endpoint tests fail; restoring it makes them
+  pass. The test was checked against the bug rather than assumed to cover it.
+- A demo session **cannot** be used to exercise a real send: it has no cmux workspace,
+  so it is refused before delivery, and refusals deliberately release the key so that
+  fixing the cause and pressing Send again is not answered with a stale refusal
+  forever. The endpoint tests seed a spent key instead.
+- `finish()` must refuse to write back a claim that has already outlived its window, or
+  a send slower than the TTL revives a key nobody holds. Found by a test, not by
+  reasoning — nothing sweeps between a claim and its finish.

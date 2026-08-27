@@ -29,6 +29,7 @@ import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
 import { historyPage } from './data/history.ts'
+import { claim, finish, release } from './once.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
 import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
 import { reach } from './cmuxreach.ts'
@@ -319,14 +320,45 @@ export function createServer(opts: ServeOptions) {
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { id?: string; text?: string }
+			let body: { id?: string; text?: string; key?: string }
 			try {
 				body = JSON.parse(await readBody(req))
 			} catch {
 				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
 			}
+			/**
+			 * At most once, however many times this is asked for.
+			 *
+			 * A lost reply looks exactly like a lost request, so a send that succeeded and
+			 * failed to say so gets typed again by whoever is holding the phone. See
+			 * once.ts, and MISTAKES.md for the five fixes that missed this.
+			 *
+			 * An absent key still sends: an older client must keep working, and it is no
+			 * worse off than it was.
+			 */
+			const key = typeof body.key === 'string' && body.key.length >= 8 && body.key.length <= 128 ? body.key : null
+			if (key) {
+				const already = claim(key)
+				if (already && 'done' in already) {
+					// Byte-identical to what the first attempt returned, so a retry cannot be
+					// told apart from the send that worked.
+					res.writeHead(already.done.status, { 'content-type': MIME['.json'], 'cache-control': 'no-store' }).end(already.done.body)
+					return
+				}
+				if (already) return send(res, 202, MIME['.json'], '{"ok":true,"note":"already sending that message"}')
+			}
+			/** Answer, and remember the answer against the key. */
+			const reply = (status: number, payload: string) => {
+				if (key) finish(key, { status, body: payload })
+				return send(res, status, MIME['.json'], payload)
+			}
+			/** Refused before anything was typed: the key must stay usable. */
+			const refuse = (status: number, payload: string) => {
+				if (key) release(key)
+				return send(res, status, MIME['.json'], payload)
+			}
 			const target = sessions().find((s) => s.id === body.id)
-			if (!target) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+			if (!target) return refuse(404, '{"error":"no such session"}')
 			// The fifth guard, and the one the other four missed.
 			//
 			// control.ts refuses `y`, `n`, `a` and `d` so that no remote caller can
@@ -355,7 +387,7 @@ export function createServer(opts: ServeOptions) {
 			// belongs — after the target is known to be a cmux session.
 			if (target.agent !== 'codex' && cmuxRefusal(res)) return
 			if (target.agent !== 'codex' && !target.workspace) {
-				return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+				return refuse(404, '{"error":"no such session, or it is not in a cmux tab"}')
 			}
 			const out =
 				target.agent === 'codex'
@@ -368,7 +400,10 @@ export function createServer(opts: ServeOptions) {
 			// caveat, because a message that has been queued behind a background job looks
 			// exactly like one that vanished, and looking like it vanished is what made
 			// somebody send everything twice.
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, ...(target.deferred ? { note: target.deferred } : {}) } : { error: out.error }))
+			// Recorded against the key on BOTH outcomes. A failed send that is retried with
+			// the same key must not be attempted a second time either — the whole point is
+			// that one composed message reaches the session at most once.
+			return reply(out.ok ? 200 : 400, JSON.stringify(out.ok ? { ok: true, ...(target.deferred ? { note: target.deferred } : {}) } : { error: out.error }))
 		}
 
 		/**

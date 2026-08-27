@@ -130,3 +130,54 @@ test('a cursor past the end of the file is clamped rather than read off the end'
 	assert.ok(page)
 	assert.ok(page.entries.length > 0, 'an over-large cursor returned nothing')
 })
+
+test('a result carries the id of the call it answers, and says when it failed', () => {
+	// The view folds each result under its call and marks a run that went wrong. Both
+	// need these fields: pairing by POSITION would put a result under the wrong call
+	// the first time this file interleaves them, and a failure with no output would
+	// otherwise vanish entirely.
+	fs.mkdirSync(DIR, { recursive: true })
+	fs.writeFileSync(
+		path.join(DIR, `${ID}.jsonl`),
+		[
+			JSON.stringify({
+				type: 'assistant',
+				timestamp: '2026-08-26T00:00:00.000Z',
+				message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call_a', name: 'Bash', input: { command: 'ls' } }] },
+			}),
+			JSON.stringify({
+				type: 'user',
+				timestamp: '2026-08-26T00:00:01.000Z',
+				message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_a', content: 'one\ntwo' }] },
+			}),
+			JSON.stringify({
+				type: 'assistant',
+				timestamp: '2026-08-26T00:00:02.000Z',
+				message: { role: 'assistant', content: [{ type: 'tool_use', id: 'call_b', name: 'Bash', input: { command: 'nope' } }] },
+			}),
+			// A failure that printed NOTHING. Kept anyway, or the run summary undercounts.
+			JSON.stringify({
+				type: 'user',
+				timestamp: '2026-08-26T00:00:03.000Z',
+				message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'call_b', content: '', is_error: true }] },
+			}),
+		].join('\n') + '\n',
+	)
+	const page = historyPage(ID)
+	assert.ok(page)
+	const calls = page.entries.filter((e) => e.kind === 'tool')
+	const results = page.entries.filter((e) => e.kind === 'result')
+	assert.deepEqual(
+		calls.map((c) => c.id),
+		['call_a', 'call_b'],
+		'a tool call did not carry its id',
+	)
+	assert.deepEqual(
+		results.map((r) => r.for),
+		['call_a', 'call_b'],
+		'a result did not name the call it answers',
+	)
+	assert.equal(results[0]!.error, undefined, 'a successful result was marked as an error')
+	assert.equal(results[1]!.error, true, 'a failed result was not marked')
+	assert.equal(results[1]!.text, '', 'an empty failure should still be an entry, with no text')
+})

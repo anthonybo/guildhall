@@ -14,6 +14,7 @@ process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildh
 import { createServer, screenTag } from './serve.ts'
 import { inputBox } from './control.ts'
 import { resetControlThrottle, setControlPass } from './controlauth.ts'
+import { claim, finish, resetOnce } from './once.ts'
 
 // Named so it can never be mistaken for a real one, and so nobody has to wonder
 // whether a password is in this repository. The old value read like a plausible
@@ -267,5 +268,72 @@ test('a junk cursor is refused rather than read as "from the end"', async () => 
 	const r = await hit('/api/transcript?id=tidepool&before=nonsense', { headers: { 'x-guildhall-control': PASS } })
 	assert.equal(r.status, 400, `a junk cursor was accepted: ${r.text}`)
 	assert.match(r.text, /bad cursor/)
+	srv.close()
+})
+
+/**
+ * The oldest bug here: "I have to send everything twice".
+ *
+ * Five fixes are in MISTAKES.md and none held, because none addressed the actual
+ * failure: a lost REPLY is indistinguishable from a lost REQUEST, so a send that
+ * arrived and could not say so gets retyped by whoever is holding the phone. The fix
+ * is a key, and the property is that a key already spent types nothing and repeats
+ * its first answer.
+ *
+ * The mechanism is covered thoroughly in once.test.ts. What is checked HERE is the
+ * wiring — that this endpoint consults the store at all, before it looks anything up
+ * or sends anything. A demo session has no cmux workspace, so it is refused before
+ * delivery and cannot be used to exercise a real send; seeding the key is what makes
+ * the short circuit observable.
+ */
+test('a key that has already been answered short-circuits the whole send path', async () => {
+	resetControlThrottle()
+	resetOnce()
+	let deliveries = 0
+	const srv = createServer({ port: 0, host: '127.0.0.1', demo: true, control: () => true, onSend: () => void deliveries++ })
+	await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+	after(() => srv.close())
+	const port = (srv.address() as { port: number }).port
+
+	// A key whose send already completed, as it would be after a reply was lost.
+	const KEY = 'aaaaaaaa-1111-2222-3333-444444444444'
+	assert.equal(claim(KEY), null)
+	finish(KEY, { status: 200, body: '{"ok":true,"note":"the first attempt"}' })
+
+	const res = await fetch(`http://127.0.0.1:${port}/api/send`, {
+		method: 'POST',
+		headers: { cookie: `gh_sid=${issue()}`, 'x-guildhall-control': PASS },
+		// A session id that does not exist. If the key were not consulted first this
+		// would 404 — so a 200 proves the short circuit happened before the lookup.
+		body: JSON.stringify({ id: 'no-such-session-at-all', text: 'the first message of the day', key: KEY }),
+	})
+	assert.equal(res.status, 200, 'a spent key was not recognised')
+	assert.match(await res.text(), /the first attempt/, 'the retry did not get the original answer back')
+	assert.equal(deliveries, 0, 'a spent key reached the session again')
+	srv.close()
+})
+
+test('a second attempt while the first is still in flight is not a second send', async () => {
+	resetControlThrottle()
+	resetOnce()
+	let deliveries = 0
+	const srv = createServer({ port: 0, host: '127.0.0.1', demo: true, control: () => true, onSend: () => void deliveries++ })
+	await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+	after(() => srv.close())
+	const port = (srv.address() as { port: number }).port
+
+	// Claimed but not finished: the state during a send that is taking a while, which
+	// is exactly when an impatient second tap arrives.
+	const KEY = 'cccccccc-1111-2222-3333-444444444444'
+	assert.equal(claim(KEY), null)
+
+	const res = await fetch(`http://127.0.0.1:${port}/api/send`, {
+		method: 'POST',
+		headers: { cookie: `gh_sid=${issue()}`, 'x-guildhall-control': PASS },
+		body: JSON.stringify({ id: 'tidepool', text: 'sent while the first is in flight', key: KEY }),
+	})
+	assert.equal(res.status, 202, 'an in-flight duplicate was treated as a new send')
+	assert.match(await res.text(), /already sending/)
+	assert.equal(deliveries, 0, 'an in-flight duplicate reached the session')
 	srv.close()
 })

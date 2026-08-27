@@ -120,12 +120,12 @@ var ago = (ms) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 };
-function tap(el5, run) {
+function tap(el5, run2) {
   let actedAt = 0;
   const GESTURE_MS = 700;
   const fire = () => {
     actedAt = Date.now();
-    run();
+    run2();
   };
   el5.addEventListener("pointerdown", (e) => {
     const pe = e;
@@ -383,500 +383,6 @@ function paint(pre, g, panel, wrap2) {
   return cramped;
 }
 
-// web/transcript.ts
-var el = null;
-var body = null;
-var cursor = null;
-var openId = null;
-var loading = false;
-var exhausted = false;
-function withLinks(text) {
-  const frag = document.createDocumentFragment();
-  for (const part of linkParts(text)) {
-    if (!part.href) {
-      frag.append(document.createTextNode(part.text));
-      continue;
-    }
-    const a = document.createElement("a");
-    a.href = part.href;
-    a.textContent = part.text;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    a.className = "text-newer underline decoration-dotted underline-offset-2";
-    frag.append(a);
-  }
-  return frag;
-}
-function render(e) {
-  const row = document.createElement("div");
-  row.className = "whitespace-pre-wrap break-words";
-  const mark = document.createElement("span");
-  if (e.kind === "text" && e.role === "user") {
-    row.className += " mt-3 text-gold";
-    mark.textContent = "\u276F ";
-  } else if (e.kind === "tool") {
-    row.className += " mt-2 text-ok";
-    mark.textContent = "\u23FA ";
-  } else if (e.kind === "result") {
-    row.className += " text-muted";
-    mark.textContent = "  \u23BF  ";
-  } else if (e.kind === "thinking") {
-    row.className += " mt-2 text-faint italic";
-    mark.textContent = "\u273B ";
-  } else {
-    row.className += " mt-2 text-label";
-    mark.textContent = "";
-  }
-  if (mark.textContent) row.append(mark);
-  const text = e.kind === "tool" ? `${e.tool}(${e.text})` : e.text;
-  row.append(withLinks(text));
-  return row;
-}
-async function load(token3, older) {
-  if (!body || !openId || loading || older && exhausted) return;
-  loading = true;
-  const note = older ? topNote("reading older\u2026") : null;
-  try {
-    const q = older && cursor !== null ? `&before=${cursor}` : "";
-    const res = await fetch(`/api/transcript?id=${encodeURIComponent(openId)}${q}`, {
-      signal: AbortSignal.timeout(2e4),
-      headers: { "x-guildhall-control": token3 }
-    });
-    const data = await res.json().catch(() => ({ error: "unreadable reply" }));
-    note?.remove();
-    if (!res.ok || data.error) {
-      body.prepend(topNote(data.error ?? `the server said ${res.status}`));
-      return;
-    }
-    const before = body.scrollHeight;
-    const frag = document.createDocumentFragment();
-    for (const e of data.entries) frag.append(render(e));
-    if (older) {
-      body.prepend(frag);
-      body.scrollTop += body.scrollHeight - before;
-    } else {
-      body.append(frag);
-      body.scrollTop = body.scrollHeight;
-    }
-    cursor = data.cursor;
-    if (data.cursor === null) {
-      exhausted = true;
-      body.prepend(topNote("the beginning of this conversation"));
-    }
-  } catch {
-    note?.remove();
-    body.prepend(topNote("could not reach guildhall"));
-  } finally {
-    loading = false;
-  }
-}
-function topNote(text) {
-  const n = document.createElement("div");
-  n.className = "py-2 text-center text-[0.72rem] text-muted";
-  n.textContent = text;
-  return n;
-}
-function openTranscript(id, name, token3) {
-  openId = id;
-  cursor = null;
-  exhausted = false;
-  if (!el) {
-    el = document.createElement("div");
-    el.id = "transcript";
-    document.body.append(el);
-  }
-  el.className = `fixed inset-0 z-50 flex flex-col border-line bg-panel text-label ${fullScreen() ? "" : "sm:inset-8 sm:rounded-lg sm:border"}`;
-  el.hidden = false;
-  el.replaceChildren();
-  lockPage("transcript");
-  const bar3 = document.createElement("div");
-  bar3.className = "flex items-center gap-2 border-b border-line px-3 py-2";
-  const title = document.createElement("div");
-  title.className = "truncate text-[0.8rem] font-bold";
-  title.textContent = `${name} \xB7 transcript`;
-  const why = document.createElement("div");
-  why.className = "hidden text-[0.68rem] text-muted sm:block";
-  why.textContent = "read from the log \u2014 the terminal keeps no scrollback";
-  const x = document.createElement("button");
-  x.type = "button";
-  x.textContent = "\u2715 Close";
-  x.title = "Back to the terminal (Esc)";
-  x.className = "ml-auto flex min-h-11 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg";
-  tap(x, closeTranscript);
-  bar3.append(title, why, x);
-  body = document.createElement("div");
-  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.45]";
-  body.textContent = "reading\u2026";
-  body.addEventListener("scroll", () => {
-    if (body && body.scrollTop < 240) void load(token3, true);
-  });
-  el.append(bar3, body);
-  body.replaceChildren();
-  void load(token3, false);
-  document.addEventListener("keydown", onKey);
-}
-function onKey(e) {
-  if (e.key === "Escape") closeTranscript();
-}
-function closeTranscript() {
-  document.removeEventListener("keydown", onKey);
-  openId = null;
-  body = null;
-  if (el) {
-    el.hidden = true;
-    el.replaceChildren();
-  }
-  unlockPage("transcript");
-}
-var transcriptOpen = () => openId !== null;
-
-// web/terminal.ts
-var KEY = "guildhall.control";
-var WRAP = "guildhall.terminal.wrap";
-var KEYPAD = "guildhall.terminal.keys";
-var wrap = localStorage.getItem(WRAP) !== "exact";
-var keypad = localStorage.getItem(KEYPAD) === "on";
-var lastSig = "";
-function repaintSoon() {
-  lastSig = "";
-  lastTag = "";
-}
-var openId2 = null;
-var openName = "";
-var timer;
-var el2;
-var onClose = () => {
-};
-function holdPage() {
-  if (fullScreen()) lockPage("terminal");
-  else unlockPage("terminal");
-}
-var token = () => sessionStorage.getItem(KEY) ?? "";
-var lastTag = "";
-async function api(path, init = {}) {
-  try {
-    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
-    if (res.status === 304) return { status: 304 };
-    lastTag = res.headers.get("etag") ?? lastTag;
-    const body2 = await res.json().catch(() => ({ error: "unreadable reply" }));
-    return { status: res.status, ...body2 };
-  } catch (e) {
-    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
-    return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
-  }
-}
-function askForToken(why) {
-  clearInterval(timer);
-  timer = void 0;
-  el2.innerHTML = "";
-  el2.style.maxWidth = "";
-  el2.style.marginInline = "";
-  el2.append(titleBar(openName, "password needed"));
-  const wrap2 = document.createElement("div");
-  wrap2.className = "p-4";
-  const h = document.createElement("p");
-  h.className = "mt-0 mb-2 text-label";
-  h.textContent = "Control password";
-  const p = document.createElement("p");
-  p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
-  p.textContent = `${why} It is the password you set on the machine running guildhall \u2014 press ? there, then c.`;
-  const input = document.createElement("input");
-  input.type = "password";
-  input.autocomplete = "off";
-  input.spellcheck = false;
-  input.placeholder = "the password you set";
-  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
-  const go = document.createElement("button");
-  go.type = "button";
-  go.textContent = "Unlock";
-  go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
-  const submit = () => {
-    sessionStorage.setItem(KEY, input.value.trim());
-    if (openId2) show(openId2, openName);
-  };
-  go.addEventListener("click", submit);
-  input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
-  wrap2.append(h, p, input, go);
-  el2.append(wrap2);
-  input.focus();
-}
-function titleBar(name, subtitle) {
-  const bar3 = document.createElement("div");
-  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "truncate font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "shrink-0 text-[0.72rem] text-faint";
-  live2.textContent = subtitle;
-  const x = document.createElement("button");
-  x.type = "button";
-  x.textContent = "\u2715 Close";
-  x.title = "Close the terminal (Esc)";
-  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  bar3.append(title, live2, x);
-  return bar3;
-}
-function chrome(name) {
-  el2.innerHTML = "";
-  const bar3 = document.createElement("div");
-  bar3.id = "screenbar";
-  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "min-w-0 flex-1 truncate font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "hidden shrink-0 text-[0.72rem] text-faint min-[480px]:inline";
-  live2.textContent = "live terminal";
-  const mode = document.createElement("button");
-  mode.type = "button";
-  mode.id = "screenmode";
-  mode.hidden = true;
-  mode.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
-  const label = () => {
-    mode.textContent = wrap ? "Wrapped" : "Exact";
-    mode.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
-  };
-  label();
-  mode.addEventListener("click", () => {
-    wrap = !wrap;
-    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
-    label();
-    repaintSoon();
-    refresh();
-  });
-  const x = document.createElement("button");
-  x.type = "button";
-  const xMark = document.createElement("span");
-  xMark.textContent = "\u2715";
-  const xWord = document.createElement("span");
-  xWord.className = "hidden min-[400px]:inline";
-  xWord.textContent = "Close";
-  x.append(xMark, xWord);
-  x.setAttribute("aria-label", "Close the terminal");
-  x.title = "Close the terminal (Esc)";
-  x.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  const keysBtn = document.createElement("button");
-  keysBtn.type = "button";
-  keysBtn.id = "keystoggle";
-  const labelKeys = () => {
-    keysBtn.textContent = "\u2328";
-    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
-    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
-  };
-  labelKeys();
-  tap(keysBtn, () => {
-    keypad = !keypad;
-    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
-    labelKeys();
-    const row = document.getElementById("promptkeys");
-    if (row) row.hidden = !keypad;
-  });
-  const logBtn = document.createElement("button");
-  logBtn.type = "button";
-  logBtn.id = "transcripttoggle";
-  logBtn.textContent = "\u2630";
-  logBtn.title = "Read the conversation history \u2014 the terminal itself keeps no scrollback";
-  logBtn.setAttribute("aria-label", "Read the conversation history");
-  logBtn.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-line bg-transparent px-2 text-[0.95rem] text-muted";
-  tap(logBtn, () => {
-    if (openId2) openTranscript(openId2, openName, token());
-  });
-  const tail = document.createElement("div");
-  tail.className = "ml-auto flex shrink-0 items-center gap-2";
-  tail.append(mode, logBtn, keysBtn, x);
-  bar3.append(title, live2, tail);
-  const pre = document.createElement("pre");
-  pre.id = "screen";
-  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
-  pre.textContent = "reading\u2026";
-  const form = document.createElement("form");
-  form.className = "flex gap-2 border-t border-line p-2";
-  const input = document.createElement("input");
-  input.id = "ask";
-  input.autocomplete = "off";
-  input.placeholder = "Type into this session\u2026";
-  input.enterKeyHint = "send";
-  input.addEventListener("keydown", (e) => {
-    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
-    e.preventDefault();
-    form.requestSubmit();
-  });
-  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
-  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
-  const send = document.createElement("button");
-  send.type = "submit";
-  send.textContent = "Send";
-  send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
-  tap(send, () => form.requestSubmit());
-  const note = document.createElement("p");
-  note.id = "sendnote";
-  note.hidden = true;
-  note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
-  form.append(input, send);
-  const keys = document.createElement("div");
-  keys.id = "promptkeys";
-  keys.hidden = !keypad;
-  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
-  const hint = document.createElement("span");
-  hint.className = "mr-auto text-[0.72rem] text-faint";
-  hint.textContent = "answer a prompt";
-  keys.append(hint);
-  for (const [label2, key, title2] of [
-    ["\u25B2", "up", "Move up the list"],
-    ["\u25BC", "down", "Move down the list"],
-    ["\u23CE", "enter", "Choose the highlighted option"],
-    ["esc", "escape", "Cancel the prompt"]
-  ]) {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.title = title2;
-    b.textContent = label2;
-    b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
-    tap(b, () => {
-      if (key === "enter" && input.value.trim()) return void form.requestSubmit();
-      sendKey(key, pre);
-    });
-    keys.append(b);
-  }
-  el2.append(keys);
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = input.value;
-    if (!text.trim() || sending) return;
-    input.value = "";
-    sending = true;
-    send.disabled = true;
-    send.textContent = "Sending\u2026";
-    let r;
-    try {
-      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text }) });
-    } finally {
-      sending = false;
-      send.disabled = false;
-      send.textContent = "Send";
-    }
-    if (r.error) {
-      pre.textContent = `${r.error}
-
-${pre.textContent}`;
-      input.value = text;
-    }
-    note.textContent = r.note ?? "";
-    note.hidden = !r.note;
-    refresh();
-  });
-  el2.append(bar3, pre, note, form);
-  return { pre, input };
-}
-var polling = false;
-var sending = false;
-async function sendKey(key, pre) {
-  if (!openId2) return;
-  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId2, key }) });
-  if (r.error) {
-    pre.textContent = `${r.error}
-
-${pre.textContent}`;
-    return;
-  }
-  await new Promise((r2) => setTimeout(r2, 120));
-  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
-  refresh();
-}
-async function refresh() {
-  if (!openId2 || polling || sending) return;
-  polling = true;
-  try {
-    await poll();
-  } finally {
-    polling = false;
-  }
-}
-async function poll() {
-  if (!openId2) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
-  if (r.status === 304) return;
-  if (r.status === 401) return askForToken("That password was not accepted.");
-  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
-  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
-  const pre = document.getElementById("screen");
-  if (!pre) return;
-  if (r.error) return void (pre.textContent = r.error);
-  if (!r.render_grid) return;
-  const sig = JSON.stringify(r.render_grid.row_spans);
-  if (sig === lastSig && pre.childElementCount) return;
-  lastSig = sig;
-  const btn = document.getElementById("screenmode");
-  const cramped = paint(pre, r.render_grid, el2, wrap);
-  if (btn) btn.hidden = !cramped;
-}
-function show(id, name) {
-  openId2 = id;
-  openName = name;
-  el2.hidden = false;
-  holdPage();
-  measure();
-  if (!token()) return askForToken("This is behind a separate password from the passcode.");
-  const { input } = chrome(name);
-  refresh();
-  clearInterval(timer);
-  timer = setInterval(refresh, 2e3);
-  if (!fullScreen()) input.focus();
-}
-function close() {
-  openId2 = null;
-  lastTag = "";
-  clearInterval(timer);
-  timer = void 0;
-  el2.hidden = true;
-  el2.innerHTML = "";
-  el2.style.maxWidth = "";
-  el2.style.marginInline = "";
-  el2.style.height = "";
-  el2.style.top = "";
-  el2.style.bottom = "";
-  el2.style.transform = "";
-  unlockPage("terminal");
-  onClose();
-}
-function mountTerminal(host2, closed) {
-  el2 = host2;
-  onClose = closed;
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && openId2) close();
-  });
-  watch(host2, isOpen);
-  let t;
-  addEventListener("resize", () => {
-    if (!openId2) return;
-    holdPage();
-    settle();
-    clearTimeout(t);
-    t = setTimeout(() => {
-      repaintSoon();
-      refresh();
-    }, 120);
-  });
-}
-var hasControl = () => token() !== "";
-var setControl = (v) => sessionStorage.setItem(KEY, v.trim());
-async function sendTo(id, text) {
-  return api("/api/send", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ id, text })
-  });
-}
-var isOpen = () => openId2 !== null;
-var busy = () => {
-  if (!openId2) return false;
-  if (sending) return true;
-  return !!document.getElementById("ask")?.value.trim();
-};
-
 // src/screens.ts
 var W = 16;
 var H = 24;
@@ -1017,6 +523,868 @@ function badge(level, tier, face = "") {
   return g;
 }
 
+// web/md.ts
+function inlines(text) {
+  const out = [];
+  const re = /\*\*([^*]+)\*\*|`([^`]+)`/g;
+  let last2 = 0;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    if (m.index > last2) out.push({ text: text.slice(last2, m.index) });
+    if (m[1] !== void 0) out.push({ text: m[1], strong: true });
+    else out.push({ text: m[2], code: true });
+    last2 = m.index + m[0].length;
+  }
+  if (last2 < text.length) out.push({ text: text.slice(last2) });
+  return out.length ? out : [{ text }];
+}
+var BOLD_LINE = /^\s*\*\*(.+?)\*\*[:.]?\s*$/;
+var HASH = /^\s*#{1,6}\s+(.*)$/;
+var TLDR = /^\s*\*{0,2}TL;?DR\*{0,2}\s*[—:-]*\s*/i;
+var BULLET = /^\s*[-*•]\s+(.*)$/;
+var RULE2 = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/;
+var HAS_PIPE = /\|/;
+function cells(line) {
+  return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((c) => c.trim());
+}
+function aligns(rule) {
+  return cells(rule).map((c) => {
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    return right && left ? "center" : right ? "right" : "left";
+  });
+}
+var QUOTE = /^\s*>\s?(.*)$/;
+var FENCE = /^\s*```/;
+function blocks(text) {
+  const out = [];
+  const lines = text.split("\n");
+  let para = [];
+  let bullets = [];
+  const flushPara = () => {
+    if (!para.length) return;
+    const joined = para.join("\n").trim();
+    para = [];
+    if (!joined) return;
+    if (TLDR.test(joined)) out.push({ kind: "tldr", runs: inlines(joined.replace(TLDR, "")) });
+    else out.push({ kind: "para", runs: inlines(joined) });
+  };
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    out.push({ kind: "bullet", items: bullets });
+    bullets = [];
+  };
+  const flush = () => {
+    flushPara();
+    flushBullets();
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (FENCE.test(line)) {
+      flush();
+      const body2 = [];
+      i++;
+      for (; i < lines.length && !FENCE.test(lines[i]); i++) body2.push(lines[i]);
+      out.push({ kind: "code", text: body2.join("\n") });
+      continue;
+    }
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    const hash = HASH.exec(line);
+    const bold = BOLD_LINE.exec(line);
+    if (hash || bold) {
+      flush();
+      out.push({ kind: "heading", runs: inlines((hash?.[1] ?? bold?.[1] ?? "").trim()) });
+      continue;
+    }
+    const next = lines[i + 1];
+    if (HAS_PIPE.test(line) && next !== void 0 && RULE2.test(next) && HAS_PIPE.test(next)) {
+      flush();
+      const head = cells(line).map(inlines);
+      const align = aligns(next);
+      const rows = [];
+      i += 2;
+      for (; i < lines.length && HAS_PIPE.test(lines[i]) && lines[i].trim(); i++) {
+        const row = cells(lines[i]);
+        while (row.length < head.length) row.push("");
+        rows.push(row.slice(0, head.length).map(inlines));
+      }
+      i--;
+      out.push({ kind: "table", head, rows, align });
+      continue;
+    }
+    const quote = QUOTE.exec(line);
+    if (quote) {
+      flush();
+      out.push({ kind: "quote", runs: inlines(quote[1] ?? "") });
+      continue;
+    }
+    const bullet = BULLET.exec(line);
+    if (bullet) {
+      flushPara();
+      bullets.push(inlines(bullet[1] ?? ""));
+      continue;
+    }
+    flushBullets();
+    para.push(line);
+  }
+  flush();
+  return out;
+}
+
+// web/mdview.ts
+function runs(list) {
+  const frag = document.createDocumentFragment();
+  for (const r of list) {
+    if (r.code) {
+      const code = document.createElement("code");
+      code.className = "rounded-sm bg-bg/70 px-1 text-[0.72rem] text-newer";
+      code.textContent = r.text;
+      frag.append(code);
+      continue;
+    }
+    const host2 = r.strong ? document.createElement("strong") : frag;
+    if (r.strong) host2.className = "font-bold text-label";
+    for (const part of linkParts(r.text)) {
+      if (!part.href) {
+        host2.append(document.createTextNode(part.text));
+        continue;
+      }
+      const a = document.createElement("a");
+      a.href = part.href;
+      a.textContent = part.text;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.className = "text-newer underline decoration-dotted underline-offset-2";
+      host2.append(a);
+    }
+    if (r.strong) frag.append(host2);
+  }
+  return frag;
+}
+function one(b) {
+  const el5 = document.createElement("div");
+  if (b.kind === "code") {
+    el5.className = "mt-2 overflow-x-auto rounded border border-line bg-bg/70 px-2 py-1.5 text-[0.72rem] whitespace-pre text-muted";
+    el5.textContent = b.text;
+    return el5;
+  }
+  if (b.kind === "bullet") {
+    el5.className = "mt-2";
+    for (const item of b.items) {
+      const row = document.createElement("div");
+      row.className = "flex gap-2 whitespace-pre-wrap break-words text-label";
+      const dot = document.createElement("span");
+      dot.className = "shrink-0 text-muted";
+      dot.textContent = "\u2022";
+      const body2 = document.createElement("span");
+      body2.className = "min-w-0 flex-1";
+      body2.append(runs(item));
+      row.append(dot, body2);
+      el5.append(row);
+    }
+    return el5;
+  }
+  if (b.kind === "heading") {
+    el5.className = "mt-4 font-bold whitespace-pre-wrap break-words";
+    el5.style.color = rgb(TINT.read);
+    el5.append(runs(b.runs));
+    return el5;
+  }
+  if (b.kind === "tldr") {
+    el5.className = "mt-4 rounded-sm border-l-2 border-newer bg-bg/40 px-2 py-1.5 whitespace-pre-wrap break-words text-newer";
+    const tag = document.createElement("span");
+    tag.className = "mr-2 text-[0.66rem] font-bold tracking-wide text-newer/80";
+    tag.textContent = "TL;DR";
+    el5.append(tag, runs(b.runs));
+    return el5;
+  }
+  if (b.kind === "table") {
+    el5.className = "mt-3 -mx-1 overflow-x-auto overscroll-x-contain";
+    const table = document.createElement("table");
+    table.className = "w-max border-collapse text-[0.72rem]";
+    const cell = (kind, runsIn, align) => {
+      const c = document.createElement(kind);
+      c.className = kind === "th" ? "border-b border-line px-2 py-1 text-left font-bold whitespace-nowrap" : "border-b border-line/50 px-2 py-1 align-top text-label";
+      if (align !== "left") c.style.textAlign = align;
+      if (kind === "th") c.style.color = rgb(TINT.read);
+      c.append(runs(runsIn));
+      return c;
+    };
+    const thead = document.createElement("thead");
+    const hr = document.createElement("tr");
+    for (const [i, h] of b.head.entries()) hr.append(cell("th", h, b.align[i] ?? "left"));
+    thead.append(hr);
+    const tbody = document.createElement("tbody");
+    for (const row of b.rows) {
+      const tr = document.createElement("tr");
+      for (const [i, c] of row.entries()) tr.append(cell("td", c, b.align[i] ?? "left"));
+      tbody.append(tr);
+    }
+    table.append(thead, tbody);
+    el5.append(table);
+    return el5;
+  }
+  if (b.kind === "quote") {
+    el5.className = "mt-2 border-l-2 border-line pl-2 whitespace-pre-wrap break-words text-muted italic";
+    el5.append(runs(b.runs));
+    return el5;
+  }
+  el5.className = "mt-2 whitespace-pre-wrap break-words text-label";
+  el5.append(runs(b.runs));
+  return el5;
+}
+function renderMarkdown(text) {
+  const frag = document.createDocumentFragment();
+  for (const b of blocks(text)) frag.append(one(b));
+  return frag;
+}
+
+// src/data/describe.ts
+var cut = (s, n) => {
+  const t = (s ?? "").replace(/\s+/g, " ").trim();
+  return [...t].length > n ? [...t].slice(0, Math.max(0, n - 1)).join("") + "\u2026" : t;
+};
+var KIND = {
+  Edit: "edit",
+  Write: "edit",
+  NotebookEdit: "edit",
+  Read: "read",
+  Bash: "run",
+  Grep: "search",
+  Glob: "search",
+  WebSearch: "search",
+  WebFetch: "read",
+  Task: "agent",
+  Agent: "agent",
+  Workflow: "agent"
+};
+
+// web/transcript.ts
+var MODE = "guildhall.transcript.mode";
+var el = null;
+var body = null;
+var cursor = null;
+var openId = null;
+var loading = false;
+var exhausted = false;
+var mode = localStorage.getItem(MODE) === "all" ? "all" : "talk";
+function withLinks(text) {
+  const frag = document.createDocumentFragment();
+  for (const part of linkParts(text)) {
+    if (!part.href) {
+      frag.append(document.createTextNode(part.text));
+      continue;
+    }
+    const a = document.createElement("a");
+    a.href = part.href;
+    a.textContent = part.text;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.className = "text-newer underline decoration-dotted underline-offset-2";
+    frag.append(a);
+  }
+  return frag;
+}
+var toolName = (raw) => raw.replace(/^mcp__[^_]+(?:-[^_]+)*__/, "").replace(/_/g, " ");
+function toolTint(raw) {
+  const kind = raw ? KIND[raw.replace(/^mcp__[^_]+(?:-[^_]+)*__/, "")] : void 0;
+  return kind ? rgb(TINT[kind]) : "var(--color-muted)";
+}
+function prose(e) {
+  const row = document.createElement("div");
+  if (e.kind === "text" && e.role === "user") {
+    row.className = "mt-5 border-l-2 border-gold/60 py-1 pl-2 whitespace-pre-wrap break-words text-gold";
+  } else if (e.kind === "thinking") {
+    row.className = "mt-3 whitespace-pre-wrap break-words italic";
+    row.style.color = rgb(TINT.think);
+  } else {
+    row.className = "mt-3 whitespace-pre-wrap break-words text-label";
+  }
+  if (e.kind === "text" && e.role === "user" && e.at) {
+    const when = Date.parse(e.at);
+    if (Number.isFinite(when)) {
+      const stamp = document.createElement("span");
+      stamp.className = "mr-2 text-[0.66rem] text-muted";
+      stamp.textContent = ago(Math.max(0, Date.now() - when));
+      row.append(stamp);
+    }
+  }
+  if (e.role === "assistant" && e.kind === "text") row.append(renderMarkdown(e.text));
+  else row.append(withLinks(e.text));
+  return row;
+}
+function step2(call, result) {
+  const wrap2 = document.createElement("div");
+  wrap2.className = "mt-1";
+  const line = document.createElement("button");
+  line.type = "button";
+  line.className = "flex w-full min-h-11 cursor-pointer items-center gap-2 rounded px-1 text-left";
+  line.style.color = result?.error ? "var(--color-hot)" : toolTint(call.tool);
+  const caret = document.createElement("span");
+  caret.className = "shrink-0 text-muted";
+  caret.textContent = result ? "\u25B8" : "\xB7";
+  const label = document.createElement("span");
+  label.className = "min-w-0 flex-1 break-words";
+  label.textContent = `${toolName(call.tool ?? "tool")}${call.text ? `(${call.text})` : ""}`;
+  line.append(caret, label);
+  const out = document.createElement("div");
+  out.className = "mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 whitespace-pre-wrap break-words text-[0.72rem] text-muted";
+  out.style.borderLeftColor = result?.error ? "var(--color-hot)" : toolTint(call.tool);
+  if (result) out.append(withLinks(result.text || (result.error ? "failed, with no output" : "")));
+  if (result) {
+    tap(line, () => {
+      const open3 = out.classList.toggle("hidden");
+      caret.textContent = open3 ? "\u25B8" : "\u25BE";
+      line.setAttribute("aria-expanded", String(!open3));
+    });
+    line.setAttribute("aria-expanded", "false");
+  } else {
+    line.disabled = true;
+    line.className += " cursor-default";
+  }
+  wrap2.append(line, out);
+  return wrap2;
+}
+function run(steps) {
+  const wrap2 = document.createElement("div");
+  wrap2.className = "mt-3";
+  const failed2 = steps.filter((s) => s.result?.error).length;
+  const inner = document.createElement("div");
+  inner.className = "mt-1 border-l border-line pl-2";
+  for (const s of steps) inner.append(step2(s.call, s.result));
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "flex min-h-11 w-full cursor-pointer items-center gap-2 rounded border border-line/70 px-2 text-left text-[0.72rem] text-muted hover:border-gold hover:text-gold";
+  const caret = document.createElement("span");
+  const dots = document.createElement("span");
+  dots.className = "flex shrink-0 items-center gap-0.5";
+  for (const k of [...new Set(steps.map((s) => s.result?.error ? "error" : toolTint(s.call.tool)))]) {
+    const d = document.createElement("span");
+    d.textContent = "\u25CF";
+    d.style.color = k === "error" ? "var(--color-hot)" : k;
+    dots.append(d);
+  }
+  const words = document.createElement("span");
+  words.className = "min-w-0 flex-1 truncate";
+  const names = [...new Set(steps.map((s) => toolName(s.call.tool ?? "tool")))];
+  const summary = `${steps.length} step${steps.length === 1 ? "" : "s"} \xB7 ${names.slice(0, 3).join(", ")}${names.length > 3 ? "\u2026" : ""}`;
+  words.textContent = failed2 ? `${summary} \xB7 ${failed2} failed` : summary;
+  if (failed2) words.className = "text-hot";
+  toggle.append(caret, dots, words);
+  const set = (open3) => {
+    inner.classList.toggle("hidden", !open3);
+    caret.textContent = open3 ? "\u25BE" : "\u25B8";
+    toggle.setAttribute("aria-expanded", String(open3));
+  };
+  set(mode === "all");
+  tap(toggle, () => set(inner.classList.contains("hidden")));
+  wrap2.append(toggle, inner);
+  return wrap2;
+}
+function build(entries) {
+  const frag = document.createDocumentFragment();
+  const results = /* @__PURE__ */ new Map();
+  for (const e of entries) if (e.kind === "result" && e.for) results.set(e.for, e);
+  const orphans = entries.filter((e) => e.kind === "result" && !e.for);
+  let steps = [];
+  const flush = () => {
+    if (steps.length) frag.append(run(steps));
+    steps = [];
+  };
+  for (const e of entries) {
+    if (e.kind === "tool") {
+      steps.push({ call: e, result: e.id ? results.get(e.id) : orphans.shift() });
+      continue;
+    }
+    if (e.kind === "result") continue;
+    if (e.kind === "thinking" && mode === "talk") continue;
+    flush();
+    frag.append(prose(e));
+  }
+  flush();
+  return frag;
+}
+async function load(token3, older) {
+  if (!body || !openId || loading || older && exhausted) return;
+  loading = true;
+  const note = older ? topNote("reading older\u2026") : null;
+  if (note && older) body.prepend(note);
+  try {
+    const q = older && cursor !== null ? `&before=${cursor}` : "";
+    const res = await fetch(`/api/transcript?id=${encodeURIComponent(openId)}${q}`, {
+      signal: AbortSignal.timeout(2e4),
+      headers: { "x-guildhall-control": token3 }
+    });
+    const data = await res.json().catch(() => ({ error: "unreadable reply" }));
+    note?.remove();
+    if (!res.ok || data.error) {
+      body.prepend(topNote(data.error ?? `the server said ${res.status}`));
+      return;
+    }
+    pages.push(data.entries);
+    const before = body.scrollHeight;
+    const frag = build(data.entries);
+    if (older) {
+      body.prepend(frag);
+      body.scrollTop += body.scrollHeight - before;
+    } else {
+      body.append(frag);
+      body.scrollTop = body.scrollHeight;
+    }
+    cursor = data.cursor;
+    if (data.cursor === null) {
+      exhausted = true;
+      body.prepend(topNote("the beginning of this conversation"));
+    }
+  } catch {
+    note?.remove();
+    body.prepend(topNote("could not reach guildhall"));
+  } finally {
+    loading = false;
+  }
+}
+var pages = [];
+function topNote(text) {
+  const n = document.createElement("div");
+  n.className = "py-2 text-center text-[0.72rem] text-muted";
+  n.textContent = text;
+  return n;
+}
+function openTranscript(id, name, token3) {
+  openId = id;
+  cursor = null;
+  exhausted = false;
+  pages = [];
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "transcript";
+    document.body.append(el);
+  }
+  el.className = `fixed inset-0 z-50 flex flex-col border-line bg-panel text-label ${fullScreen() ? "" : "sm:inset-8 sm:rounded-lg sm:border"}`;
+  el.hidden = false;
+  el.replaceChildren();
+  lockPage("transcript");
+  const bar3 = document.createElement("div");
+  bar3.className = "flex items-center gap-2 border-b border-line px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "min-w-0 flex-1 truncate text-[0.8rem] font-bold";
+  title.textContent = name;
+  const modeBtn = document.createElement("button");
+  modeBtn.type = "button";
+  modeBtn.className = "flex min-h-11 shrink-0 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.72rem] text-muted hover:border-gold hover:text-gold";
+  const labelMode = () => {
+    modeBtn.textContent = mode === "talk" ? "Conversation" : "Everything";
+    modeBtn.title = mode === "talk" ? "Showing the conversation, with tool work folded. Tap for everything." : "Showing every step. Tap for the conversation alone.";
+  };
+  labelMode();
+  tap(modeBtn, () => {
+    mode = mode === "talk" ? "all" : "talk";
+    localStorage.setItem(MODE, mode);
+    labelMode();
+    if (!body) return;
+    body.replaceChildren();
+    for (const p of pages) body.append(build(p));
+    if (exhausted) body.prepend(topNote("the beginning of this conversation"));
+    body.scrollTop = body.scrollHeight;
+  });
+  const x = document.createElement("button");
+  x.type = "button";
+  const xMark = document.createElement("span");
+  xMark.textContent = "\u2715";
+  const xWord = document.createElement("span");
+  xWord.className = "hidden min-[400px]:inline";
+  xWord.textContent = "Close";
+  x.append(xMark, xWord);
+  x.setAttribute("aria-label", "Close the transcript");
+  x.title = "Back to the terminal (Esc)";
+  x.className = "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg";
+  tap(x, closeTranscript);
+  const tail = document.createElement("div");
+  tail.className = "ml-auto flex shrink-0 items-center gap-2";
+  tail.append(modeBtn, x);
+  bar3.append(title, tail);
+  body = document.createElement("div");
+  body.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.5]";
+  body.textContent = "reading\u2026";
+  body.addEventListener("scroll", () => {
+    if (body && body.scrollTop < 240) void load(token3, true);
+  });
+  el.append(bar3, body);
+  body.replaceChildren();
+  void load(token3, false);
+  document.addEventListener("keydown", onKey);
+}
+function onKey(e) {
+  if (e.key === "Escape") closeTranscript();
+}
+function closeTranscript() {
+  document.removeEventListener("keydown", onKey);
+  openId = null;
+  body = null;
+  pages = [];
+  if (el) {
+    el.hidden = true;
+    el.replaceChildren();
+  }
+  unlockPage("transcript");
+}
+var transcriptOpen = () => openId !== null;
+
+// web/terminal.ts
+var KEY = "guildhall.control";
+var WRAP = "guildhall.terminal.wrap";
+var KEYPAD = "guildhall.terminal.keys";
+var wrap = localStorage.getItem(WRAP) !== "exact";
+var keypad = localStorage.getItem(KEYPAD) === "on";
+var lastSig = "";
+function repaintSoon() {
+  lastSig = "";
+  lastTag = "";
+}
+var openId2 = null;
+var openName = "";
+var msgKey = null;
+var timer;
+var el2;
+var onClose = () => {
+};
+function holdPage() {
+  if (fullScreen()) lockPage("terminal");
+  else unlockPage("terminal");
+}
+var token = () => sessionStorage.getItem(KEY) ?? "";
+var lastTag = "";
+async function api(path, init = {}) {
+  try {
+    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+    if (res.status === 304) return { status: 304 };
+    lastTag = res.headers.get("etag") ?? lastTag;
+    const body2 = await res.json().catch(() => ({ error: "unreadable reply" }));
+    return { status: res.status, ...body2 };
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === "TimeoutError";
+    return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
+  }
+}
+function askForToken(why) {
+  clearInterval(timer);
+  timer = void 0;
+  el2.innerHTML = "";
+  el2.style.maxWidth = "";
+  el2.style.marginInline = "";
+  el2.append(titleBar(openName, "password needed"));
+  const wrap2 = document.createElement("div");
+  wrap2.className = "p-4";
+  const h = document.createElement("p");
+  h.className = "mt-0 mb-2 text-label";
+  h.textContent = "Control password";
+  const p = document.createElement("p");
+  p.className = "mt-0 mb-3 text-[0.78rem]/[1.45] text-faint";
+  p.textContent = `${why} It is the password you set on the machine running guildhall \u2014 press ? there, then c.`;
+  const input = document.createElement("input");
+  input.type = "password";
+  input.autocomplete = "off";
+  input.spellcheck = false;
+  input.placeholder = "the password you set";
+  input.className = "min-h-11 w-full rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const go = document.createElement("button");
+  go.type = "button";
+  go.textContent = "Unlock";
+  go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
+  const submit = () => {
+    sessionStorage.setItem(KEY, input.value.trim());
+    if (openId2) show(openId2, openName);
+  };
+  go.addEventListener("click", submit);
+  input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+  wrap2.append(h, p, input, go);
+  el2.append(wrap2);
+  input.focus();
+}
+function titleBar(name, subtitle) {
+  const bar3 = document.createElement("div");
+  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "shrink-0 text-[0.72rem] text-faint";
+  live2.textContent = subtitle;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, close);
+  bar3.append(title, live2, x);
+  return bar3;
+}
+function chrome(name) {
+  el2.innerHTML = "";
+  const bar3 = document.createElement("div");
+  bar3.id = "screenbar";
+  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "min-w-0 flex-1 truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "hidden shrink-0 text-[0.72rem] text-faint min-[480px]:inline";
+  live2.textContent = "live terminal";
+  const mode2 = document.createElement("button");
+  mode2.type = "button";
+  mode2.id = "screenmode";
+  mode2.hidden = true;
+  mode2.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+  const label = () => {
+    mode2.textContent = wrap ? "Wrapped" : "Exact";
+    mode2.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
+  };
+  label();
+  mode2.addEventListener("click", () => {
+    wrap = !wrap;
+    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
+    label();
+    repaintSoon();
+    refresh();
+  });
+  const x = document.createElement("button");
+  x.type = "button";
+  const xMark = document.createElement("span");
+  xMark.textContent = "\u2715";
+  const xWord = document.createElement("span");
+  xWord.className = "hidden min-[400px]:inline";
+  xWord.textContent = "Close";
+  x.append(xMark, xWord);
+  x.setAttribute("aria-label", "Close the terminal");
+  x.title = "Close the terminal (Esc)";
+  x.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, close);
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.id = "keystoggle";
+  const labelKeys = () => {
+    keysBtn.textContent = "\u2328";
+    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
+    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
+  };
+  labelKeys();
+  tap(keysBtn, () => {
+    keypad = !keypad;
+    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
+    labelKeys();
+    const row = document.getElementById("promptkeys");
+    if (row) row.hidden = !keypad;
+  });
+  const logBtn = document.createElement("button");
+  logBtn.type = "button";
+  logBtn.id = "transcripttoggle";
+  logBtn.textContent = "\u2630";
+  logBtn.title = "Read the conversation history \u2014 the terminal itself keeps no scrollback";
+  logBtn.setAttribute("aria-label", "Read the conversation history");
+  logBtn.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-line bg-transparent px-2 text-[0.95rem] text-muted";
+  tap(logBtn, () => {
+    if (openId2) openTranscript(openId2, openName, token());
+  });
+  const tail = document.createElement("div");
+  tail.className = "ml-auto flex shrink-0 items-center gap-2";
+  tail.append(mode2, logBtn, keysBtn, x);
+  bar3.append(title, live2, tail);
+  const pre = document.createElement("pre");
+  pre.id = "screen";
+  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
+  pre.textContent = "reading\u2026";
+  const form = document.createElement("form");
+  form.className = "flex gap-2 border-t border-line p-2";
+  const input = document.createElement("input");
+  input.id = "ask";
+  input.autocomplete = "off";
+  input.placeholder = "Type into this session\u2026";
+  input.enterKeyHint = "send";
+  input.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
+    e.preventDefault();
+    form.requestSubmit();
+  });
+  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
+  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const send = document.createElement("button");
+  send.type = "submit";
+  send.textContent = "Send";
+  send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
+  tap(send, () => form.requestSubmit());
+  const note = document.createElement("p");
+  note.id = "sendnote";
+  note.hidden = true;
+  note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
+  form.append(input, send);
+  const keys = document.createElement("div");
+  keys.id = "promptkeys";
+  keys.hidden = !keypad;
+  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
+  const hint = document.createElement("span");
+  hint.className = "mr-auto text-[0.72rem] text-faint";
+  hint.textContent = "answer a prompt";
+  keys.append(hint);
+  for (const [label2, key, title2] of [
+    ["\u25B2", "up", "Move up the list"],
+    ["\u25BC", "down", "Move down the list"],
+    ["\u23CE", "enter", "Choose the highlighted option"],
+    ["esc", "escape", "Cancel the prompt"]
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = title2;
+    b.textContent = label2;
+    b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
+    tap(b, () => {
+      if (key === "enter" && input.value.trim()) return void form.requestSubmit();
+      sendKey(key, pre);
+    });
+    keys.append(b);
+  }
+  el2.append(keys);
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = input.value;
+    if (!text.trim() || sending) return;
+    if (!msgKey) msgKey = crypto.randomUUID();
+    const key = msgKey;
+    input.value = "";
+    sending = true;
+    send.disabled = true;
+    send.textContent = "Sending\u2026";
+    let r;
+    try {
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text, key }) });
+    } finally {
+      sending = false;
+      send.disabled = false;
+      send.textContent = "Send";
+    }
+    if (r.error) {
+      const unknown = r.status === 0;
+      pre.textContent = `${unknown ? `${r.error} \u2014 it may still have gone through; sending again is safe, it will not arrive twice` : r.error}
+
+${pre.textContent}`;
+      input.value = text;
+    } else {
+      msgKey = null;
+    }
+    note.textContent = r.note ?? "";
+    note.hidden = !r.note;
+    refresh();
+  });
+  el2.append(bar3, pre, note, form);
+  return { pre, input };
+}
+var polling = false;
+var sending = false;
+async function sendKey(key, pre) {
+  if (!openId2) return;
+  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId2, key }) });
+  if (r.error) {
+    pre.textContent = `${r.error}
+
+${pre.textContent}`;
+    return;
+  }
+  await new Promise((r2) => setTimeout(r2, 120));
+  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
+  refresh();
+}
+async function refresh() {
+  if (!openId2 || polling || sending) return;
+  polling = true;
+  try {
+    await poll();
+  } finally {
+    polling = false;
+  }
+}
+async function poll() {
+  if (!openId2) return;
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  if (r.status === 304) return;
+  if (r.status === 401) return askForToken("That password was not accepted.");
+  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
+  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
+  const pre = document.getElementById("screen");
+  if (!pre) return;
+  if (r.error) return void (pre.textContent = r.error);
+  if (!r.render_grid) return;
+  const sig = JSON.stringify(r.render_grid.row_spans);
+  if (sig === lastSig && pre.childElementCount) return;
+  lastSig = sig;
+  const btn = document.getElementById("screenmode");
+  const cramped = paint(pre, r.render_grid, el2, wrap);
+  if (btn) btn.hidden = !cramped;
+}
+function show(id, name) {
+  openId2 = id;
+  openName = name;
+  el2.hidden = false;
+  holdPage();
+  measure();
+  if (!token()) return askForToken("This is behind a separate password from the passcode.");
+  const { input } = chrome(name);
+  refresh();
+  clearInterval(timer);
+  timer = setInterval(refresh, 2e3);
+  if (!fullScreen()) input.focus();
+}
+function close() {
+  openId2 = null;
+  lastTag = "";
+  clearInterval(timer);
+  timer = void 0;
+  el2.hidden = true;
+  el2.innerHTML = "";
+  el2.style.maxWidth = "";
+  el2.style.marginInline = "";
+  el2.style.height = "";
+  el2.style.top = "";
+  el2.style.bottom = "";
+  el2.style.transform = "";
+  unlockPage("terminal");
+  onClose();
+}
+function mountTerminal(host2, closed) {
+  el2 = host2;
+  onClose = closed;
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && openId2) close();
+  });
+  watch(host2, isOpen);
+  let t;
+  addEventListener("resize", () => {
+    if (!openId2) return;
+    holdPage();
+    settle();
+    clearTimeout(t);
+    t = setTimeout(() => {
+      repaintSoon();
+      refresh();
+    }, 120);
+  });
+}
+var hasControl = () => token() !== "";
+var setControl = (v) => sessionStorage.setItem(KEY, v.trim());
+async function sendTo(id, text) {
+  return api("/api/send", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ id, text })
+  });
+}
+var isOpen = () => openId2 !== null;
+var busy = () => {
+  if (!openId2) return false;
+  if (sending) return true;
+  return !!document.getElementById("ask")?.value.trim();
+};
+
 // src/logos.ts
 var W2 = 16;
 var H2 = 16;
@@ -1050,7 +1418,7 @@ var ART = { claude: CLAUDE, codex: CODEX };
 function logoRuns(agent) {
   const rows = ART[agent];
   if (!rows) return null;
-  const runs = [];
+  const runs2 = [];
   rows.forEach((row, y) => {
     let x = 0;
     while (x < row.length) {
@@ -1060,11 +1428,11 @@ function logoRuns(agent) {
       }
       let w = 1;
       while (row[x + w] === "#") w++;
-      runs.push({ x, y, w });
+      runs2.push({ x, y, w });
       x += w;
     }
   });
-  return runs;
+  return runs2;
 }
 var logoSize = (agent) => ART[agent]?.length ?? 0;
 var PLATE = [40, 42, 54];
@@ -1105,10 +1473,10 @@ var crtTemplate = document.createElement("template");
 crtTemplate.innerHTML = CRT;
 var crtIcon = () => crtTemplate.content.firstElementChild.cloneNode(true);
 function markSvg(agent) {
-  const runs = logoRuns(agent);
+  const runs2 = logoRuns(agent);
   const n = logoSize(agent);
-  if (!runs || !n) return null;
-  const rects = runs.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="1"/>`);
+  if (!runs2 || !n) return null;
+  const rects = runs2.map((r) => `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="1"/>`);
   return `<svg viewBox="0 0 ${n} ${n}" width="13" height="13" shape-rendering="crispEdges" fill="currentColor" aria-hidden="true">${rects.join("")}</svg>`;
 }
 var markTemplates = /* @__PURE__ */ new Map();
@@ -1518,12 +1886,6 @@ var Canvas = class {
 
 // src/data/types.ts
 var RANK = { error: 0, needs: 1, working: 2, shell: 3, review: 4, done: 5, parked: 6 };
-
-// src/data/describe.ts
-var cut = (s, n) => {
-  const t = (s ?? "").replace(/\s+/g, " ").trim();
-  return [...t].length > n ? [...t].slice(0, Math.max(0, n - 1)).join("") + "\u2026" : t;
-};
 
 // src/props.ts
 var U = 16;
@@ -2316,8 +2678,8 @@ var SimBase = class extends RoomBase {
    * once, which is invisible next to the poll that produced the sessions.
    */
   settle(sessions3, seconds = 20) {
-    const step2 = 1 / 30;
-    for (let i = 0; i < Math.round(seconds / step2); i++) this.update(step2, sessions3);
+    const step3 = 1 / 30;
+    for (let i = 0; i < Math.round(seconds / step3); i++) this.update(step3, sessions3);
   }
   update(dt, sessions3) {
     this.ballT += dt * 1.6;
@@ -2781,9 +3143,9 @@ var Office = class extends SimBase {
       const seated = ch.state === "type" || ch.state === "act" && this.postureOf(ch) === "sit";
       const pose = seated ? "typing" : "walk";
       const rally = ch.activity?.kind === "pingpong";
-      const step2 = seated || rally || ch.state === "walk" ? ch.frame : 1;
+      const step3 = seated || rally || ch.state === "walk" ? ch.frame : 1;
       const y = Math.round(ch.y - CHAR_H + (seated ? SIT_SINK : 0));
-      out.push({ s, ch, facing: ch.dir, pose, step: step2, x: Math.round(ch.x - CHAR_W / 2), y: y - (y & 1) });
+      out.push({ s, ch, facing: ch.dir, pose, step: step3, x: Math.round(ch.x - CHAR_W / 2), y: y - (y & 1) });
     }
     return out;
   }
@@ -2808,7 +3170,7 @@ var Office = class extends SimBase {
   horizontalPlates(cv2) {
     const named = /* @__PURE__ */ new Set();
     const claimed = /* @__PURE__ */ new Map();
-    const blocks = (row) => claimed.get(row) ?? [];
+    const blocks2 = (row) => claimed.get(row) ?? [];
     for (const pod of [...this.pods].sort((a, b) => b.c1 - b.c0 - (a.c1 - a.c0))) {
       if (named.has(pod.proj)) continue;
       named.add(pod.proj);
@@ -2816,7 +3178,7 @@ var Office = class extends SimBase {
       const rightOf = band2.filter((p) => p.c0 > pod.c1).sort((a, b) => a.c0 - b.c0);
       const leftOf = band2.filter((p) => p.c1 < pod.c0).sort((a, b) => b.c1 - a.c1);
       const plateRow = Math.min(cv2.rows - 1, Math.floor((pod.seatRow + 1) * TILE / 2));
-      const here = blocks(plateRow);
+      const here = blocks2(plateRow);
       const left0 = pod.c0 * TILE;
       const right0 = (pod.c1 + 1) * TILE;
       const podRight = (rightOf.length ? rightOf[0].c0 : this.cols - 1) * TILE;
@@ -2865,10 +3227,10 @@ var Office = class extends SimBase {
       const want = prefix.length + 27;
       const least = prefix.length + 6;
       const room = ([r, c]) => {
-        const step2 = c < p.x ? -1 : 1;
+        const step3 = c < p.x ? -1 : 1;
         let n2 = 0;
         while (n2 < want) {
-          const x = c + step2 * (n2 + 1);
+          const x = c + step3 * (n2 + 1);
           if (x < 0 || x >= cv2.w || this.blocked(r, x, 1, taken)) break;
           n2++;
         }
@@ -2988,14 +3350,14 @@ function pinBadge(g, colour) {
   return { w: g.w, h: g.h, grid };
 }
 var BLANK = { w: FRAME_W, h: FRAME_H, grid: Array.from({ length: FRAME_H }, () => new Array(FRAME_W).fill(null)) };
-function frameOf(palette, hueShift, facing, pose, step2, badge2) {
+function frameOf(palette, hueShift, facing, pose, step3, badge2) {
   if (!sheets.length) return BLANK;
-  const key = `${palette}:${hueShift}:${facing}:${pose}:${step2}:${badge2?.join("") ?? ""}`;
+  const key = `${palette}:${hueShift}:${facing}:${pose}:${step3}:${badge2?.join("") ?? ""}`;
   const hit = cache4.get(key);
   if (hit) return hit;
   const sheet = sheets[palette % sheets.length];
   const cycle = POSE_FRAMES[pose];
-  const frame2 = cycle[step2 % cycle.length];
+  const frame2 = cycle[step3 % cycle.length];
   const rowIdx = ROWS.indexOf(facing === "left" ? "right" : facing);
   let g = hueRotate(extract(sheet, rowIdx < 0 ? 0 : rowIdx, frame2, facing === "left"), hueShift);
   if (badge2) g = pinBadge(g, badge2);
@@ -3743,7 +4105,7 @@ function heading(text, count) {
   h.append(label, rule);
   return h;
 }
-function render2(snap) {
+function render(snap) {
   const sig = JSON.stringify([snap.items, snap.repos, snap.local, snap.error, snap.stale, snap.githubError, snap.cloudflareError, !!snap.loading, deploys]);
   if (sig === lastRender && el3.childElementCount) {
     const meta2 = el3.querySelector(".press-meta");
@@ -3873,17 +4235,17 @@ async function refresh2() {
   let snap;
   try {
     const res = await fetch(`/api/press${deploys ? "?deploys=1" : ""}`, { signal: AbortSignal.timeout(deploys ? FULL_WAIT : LOCAL_WAIT) });
-    if (!res.ok) return render2({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? "The passcode changed \u2014 reload to sign in again." : `the server said ${res.status}` });
+    if (!res.ok) return render({ at: Date.now(), items: [], repos: [], local: true, error: res.status === 401 ? "The passcode changed \u2014 reload to sign in again." : `the server said ${res.status}` });
     snap = await res.json();
   } catch (e) {
     const timedOut = e instanceof DOMException && e.name === "TimeoutError";
-    return render2({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? "guildhall did not answer in time \u2014 the machine may be asleep." : "could not reach guildhall" });
+    return render({ at: Date.now(), items: [], repos: [], local: true, error: timedOut ? "guildhall did not answer in time \u2014 the machine may be asleep." : "could not reach guildhall" });
   }
   const shaped = normalise(snap);
   try {
-    render2(shaped);
+    render(shaped);
   } catch (e) {
-    render2({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
+    render({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
   }
   if (shaped.loading) {
     clearInterval(timer2);
@@ -3899,7 +4261,7 @@ function show2() {
   settled2 = false;
   el3.hidden = false;
   lockPage("press");
-  render2({ at: Date.now(), items: [], repos: [], local: !deploys });
+  render({ at: Date.now(), items: [], repos: [], local: !deploys });
   refresh2();
   clearInterval(timer2);
   timer2 = setInterval(refresh2, 3e4);
@@ -4127,10 +4489,10 @@ function apply(data) {
   setRoomSessions(sessions2);
   if (data.version) {
     const [num, commit] = data.version.split(" \xB7 ");
-    const build = document.createElement("span");
-    build.className = "build";
-    build.textContent = commit ? ` \xB7 ${commit}` : "";
-    bar2.ver.replaceChildren((data.update ? "\u21E1 v" : "v") + num, build);
+    const build2 = document.createElement("span");
+    build2.className = "build";
+    build2.textContent = commit ? ` \xB7 ${commit}` : "";
+    bar2.ver.replaceChildren((data.update ? "\u21E1 v" : "v") + num, build2);
     bar2.ver.classList.toggle("newer", !!data.update);
     bar2.ver.title = data.update ? `v${data.update} is available` : "";
   }
