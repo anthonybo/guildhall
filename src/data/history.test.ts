@@ -181,3 +181,76 @@ test('a result carries the id of the call it answers, and says when it failed', 
 	assert.equal(results[1]!.error, true, 'a failed result was not marked')
 	assert.equal(results[1]!.text, '', 'an empty failure should still be an entry, with no text')
 })
+
+test('an edit carries the change, not just the receipt', () => {
+	// What a tool RETURNS for an edit is a confirmation — "the file has been updated".
+	// The code is in what was SENT. Reading only the result is why expanding an edit
+	// showed a filename and nothing else.
+	fs.mkdirSync(DIR, { recursive: true })
+	fs.writeFileSync(
+		path.join(DIR, `${ID}.jsonl`),
+		[
+			JSON.stringify({
+				type: 'assistant',
+				timestamp: '2026-08-27T00:00:00.000Z',
+				message: {
+					role: 'assistant',
+					content: [
+						{
+							type: 'tool_use',
+							id: 'edit_1',
+							name: 'Edit',
+							input: { file_path: '/tmp/guildhall-fixture/flows.ts', old_string: 'const limit = 10', new_string: 'const limit = 25' },
+						},
+					],
+				},
+			}),
+			JSON.stringify({
+				type: 'assistant',
+				timestamp: '2026-08-27T00:00:01.000Z',
+				message: {
+					role: 'assistant',
+					content: [{ type: 'tool_use', id: 'write_1', name: 'Write', input: { file_path: '/tmp/guildhall-fixture/new.ts', content: 'export const x = 1' } }],
+				},
+			}),
+			JSON.stringify({
+				type: 'assistant',
+				timestamp: '2026-08-27T00:00:02.000Z',
+				message: { role: 'assistant', content: [{ type: 'tool_use', id: 'read_1', name: 'Read', input: { file_path: '/tmp/guildhall-fixture/flows.ts' } }] },
+			}),
+		].join('\n') + '\n',
+	)
+	const calls = historyPage(ID)!.entries.filter((e) => e.kind === 'tool')
+	const [edit, write, read] = calls
+	assert.equal(edit!.before, 'const limit = 10', 'the removed text was dropped')
+	assert.equal(edit!.after, 'const limit = 25', 'the added text was dropped')
+	// A Write replaces everything, so claiming a "before" would imply a removal that
+	// did not happen.
+	assert.equal(write!.before, undefined, 'a Write reported something as removed')
+	assert.equal(write!.after, 'export const x = 1')
+	// A Read changes nothing and must carry no diff at all.
+	assert.equal(read!.before, undefined)
+	assert.equal(read!.after, undefined)
+	// The subject line is still the file, which is what the collapsed row shows.
+	assert.match(edit!.text, /flows\.ts$/)
+})
+
+test('a huge edit is clipped rather than sent whole', () => {
+	// These ride along with the page rather than being fetched on demand, so one
+	// enormous edit must not become the page.
+	fs.mkdirSync(DIR, { recursive: true })
+	const huge = 'x'.repeat(20_000)
+	fs.writeFileSync(
+		path.join(DIR, `${ID}.jsonl`),
+		JSON.stringify({
+			type: 'assistant',
+			timestamp: '2026-08-27T00:00:00.000Z',
+			message: { role: 'assistant', content: [{ type: 'tool_use', id: 'e', name: 'Edit', input: { file_path: '/tmp/f.ts', old_string: huge, new_string: huge } }] },
+		}) + '\n',
+	)
+	const call = historyPage(ID)!.entries.find((e) => e.kind === 'tool')!
+	assert.ok(call.before!.length < 2_000, `before was ${call.before!.length} characters`)
+	assert.ok(call.after!.length < 3_000, `after was ${call.after!.length} characters`)
+	// and it says so, rather than silently ending mid-line
+	assert.match(call.after!, /more characters$/)
+})

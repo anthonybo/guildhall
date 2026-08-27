@@ -51,6 +51,9 @@ type Entry = {
 	id?: string
 	for?: string
 	error?: true
+	/** The change an edit made: what was removed, and what replaced it. */
+	before?: string
+	after?: string
 }
 type Page = { entries: Entry[]; cursor: number | null; size: number }
 
@@ -166,7 +169,7 @@ function step(call: Entry, result?: Entry): HTMLElement {
 	line.style.color = result?.error ? 'var(--color-hot)' : toolTint(call.tool)
 	const caret = document.createElement('span')
 	caret.className = 'shrink-0 text-muted'
-	caret.textContent = result ? '▸' : '·'
+	caret.textContent = result || call.before || call.after ? '▸' : '·'
 	const label = document.createElement('span')
 	label.className = 'min-w-0 flex-1 break-words'
 	label.textContent = `${toolName(call.tool ?? 'tool')}${call.text ? `(${call.text})` : ''}`
@@ -175,13 +178,47 @@ function step(call: Entry, result?: Entry): HTMLElement {
 	const out = document.createElement('div')
 	// Given its own ground and a heavier rule, so it reads as belonging to the line
 	// above rather than as the next item in the list.
-	out.className = 'mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 whitespace-pre-wrap break-words text-[0.72rem] text-muted'
+	out.className = 'mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 text-[0.72rem] text-muted'
 	// The rule carries the call's colour, so an opened output is tied to the line it
 	// came from even when several are open at once.
 	out.style.borderLeftColor = result?.error ? 'var(--color-hot)' : toolTint(call.tool)
-	if (result) out.append(withLinks(result.text || (result.error ? 'failed, with no output' : '')))
 
+	/**
+	 * The change, where there was one.
+	 *
+	 * Opening an edit used to show its RECEIPT — "the file has been updated" — because
+	 * that is what the tool returns. The code is in what was sent, not in what came
+	 * back. Removed above added, red then green, each scrolling rather than wrapping:
+	 * reflowed code is code you cannot trust to read.
+	 */
+	const chunk = (text: string, mark: string, colour: string) => {
+		const box = document.createElement('div')
+		// `whitespace-pre` belongs on the TEXT, not on the box. On the container it also
+		// preserves the whitespace between child elements, which shows up as blank bands
+		// above and below the code the moment anything appends a stray text node.
+		box.className = 'mt-1 overflow-x-auto rounded-sm border-l-2 bg-bg/70 px-2 py-1 text-[0.7rem]'
+		box.style.borderLeftColor = colour
+		box.style.color = colour
+		const tag = document.createElement('div')
+		tag.className = 'text-[0.62rem] tracking-wide opacity-70'
+		tag.textContent = mark
+		const body = document.createElement('div')
+		body.className = 'whitespace-pre text-label'
+		body.textContent = text
+		box.append(tag, body)
+		return box
+	}
+	if (call.before) out.append(chunk(call.before, 'removed', 'var(--color-hot)'))
+	if (call.after) out.append(chunk(call.after, call.before ? 'added' : 'written', 'var(--color-ok)'))
 	if (result) {
+		const said = document.createElement('div')
+		said.className = 'mt-1 whitespace-pre-wrap break-words'
+		said.append(withLinks(result.text || (result.error ? 'failed, with no output' : '')))
+		out.append(said)
+	}
+
+	// Expandable when there is anything to show — the change counts, not just a result.
+	if (result || call.before || call.after) {
 		tap(line, () => {
 			const open = out.classList.toggle('hidden')
 			caret.textContent = open ? '▸' : '▾'

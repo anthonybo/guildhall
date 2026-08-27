@@ -42,6 +42,17 @@ export type Entry = {
 	for?: string
 	/** On a result: the tool reported failure, which is worth seeing without expanding. */
 	error?: true
+	/**
+	 * The change itself, for a tool that made one.
+	 *
+	 * A tool RESULT for an edit is a receipt — "the file has been updated" — so opening
+	 * one showed the filename and nothing else: "I see it saying it is editing files
+	 * then go to expand and it just shows the files not the actual code that was
+	 * changed". The code is in the tool's INPUT, which was being read for the file path
+	 * and thrown away.
+	 */
+	before?: string
+	after?: string
 }
 
 export type Page = {
@@ -57,8 +68,16 @@ const CHUNK = 256 * 1024
 /** Never walk further than this for one page, so a run of huge tool results cannot
  *  turn one request into reading the entire file. */
 const MAX_WALK = 4 * 1024 * 1024
-/** Long tool output is for the terminal, not for a history page. */
-const CAP = { text: 8000, result: 400, tool: 300, thinking: 4000 } as const
+/**
+ * Long tool output is for the terminal, not for a history page.
+ *
+ * `before`/`after` are generous because they are the answer to "what actually changed",
+ * and stingy compared with the file: an edit's new text here runs to a median of 2,148
+ * characters and a measured maximum of 3,053, so most survive whole and the rest say how
+ * much was left. They ride along rather than being fetched on demand because opening the
+ * transcript is a deliberate act, not a poll.
+ */
+const CAP = { text: 8000, result: 400, tool: 300, thinking: 4000, before: 900, after: 2200 } as const
 
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … +${s.length - n} more characters` : s)
 
@@ -102,7 +121,28 @@ function entriesOf(rec: unknown): Entry[] {
 			// The one line the terminal draws for a call: the tool and its subject.
 			const input = b.input as Record<string, unknown> | undefined
 			const subject = input ? (input.file_path ?? input.path ?? input.command ?? input.pattern ?? input.url ?? input.description ?? '') : ''
-			out.push({ at, role, kind: 'tool', tool: String(b.name ?? 'tool'), text: clip(String(subject ?? ''), CAP.tool), ...(b.id ? { id: b.id } : {}) })
+			// The change itself, where the tool made one. `Write` has no before: the whole
+			// file is the after, and showing an empty removal beside it would imply one.
+			const name = String(b.name ?? 'tool')
+			const before = typeof input?.old_string === 'string' ? input.old_string : undefined
+			const after =
+				typeof input?.new_string === 'string'
+					? input.new_string
+					: typeof input?.content === 'string'
+						? input.content
+						: typeof input?.new_source === 'string'
+							? input.new_source
+							: undefined
+			out.push({
+				at,
+				role,
+				kind: 'tool',
+				tool: name,
+				text: clip(String(subject ?? ''), CAP.tool),
+				...(b.id ? { id: b.id } : {}),
+				...(before ? { before: clip(before, CAP.before) } : {}),
+				...(after ? { after: clip(after, CAP.after) } : {}),
+			})
 		} else if (b.type === 'tool_result') {
 			const c = b.content
 			const text = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => (x as { text?: string })?.text ?? '').join('\n') : ''

@@ -880,11 +880,17 @@
     font-size: var(--text-xs);
     line-height: var(--tw-leading, var(--text-xs--line-height));
   }
+  .text-\[0\.7rem\] {
+    font-size: 0.7rem;
+  }
   .text-\[0\.8rem\] {
     font-size: 0.8rem;
   }
   .text-\[0\.9rem\] {
     font-size: 0.9rem;
+  }
+  .text-\[0\.62rem\] {
+    font-size: 0.62rem;
   }
   .text-\[0\.66rem\] {
     font-size: 0.66rem;
@@ -1038,6 +1044,9 @@
   }
   .underline-offset-2 {
     text-underline-offset: 2px;
+  }
+  .opacity-70 {
+    opacity: 70%;
   }
   .shadow-\[0_0_60px_rgb\(0_0_0\/60\%\)\] {
     --tw-shadow: 0 0 60px var(--tw-shadow-color, rgb(0 0 0/60%));

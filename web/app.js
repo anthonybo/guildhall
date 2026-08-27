@@ -827,16 +827,37 @@ function step2(call, result) {
   line.style.color = result?.error ? "var(--color-hot)" : toolTint(call.tool);
   const caret = document.createElement("span");
   caret.className = "shrink-0 text-muted";
-  caret.textContent = result ? "\u25B8" : "\xB7";
+  caret.textContent = result || call.before || call.after ? "\u25B8" : "\xB7";
   const label = document.createElement("span");
   label.className = "min-w-0 flex-1 break-words";
   label.textContent = `${toolName(call.tool ?? "tool")}${call.text ? `(${call.text})` : ""}`;
   line.append(caret, label);
   const out = document.createElement("div");
-  out.className = "mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 whitespace-pre-wrap break-words text-[0.72rem] text-muted";
+  out.className = "mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 text-[0.72rem] text-muted";
   out.style.borderLeftColor = result?.error ? "var(--color-hot)" : toolTint(call.tool);
-  if (result) out.append(withLinks(result.text || (result.error ? "failed, with no output" : "")));
+  const chunk = (text, mark, colour) => {
+    const box = document.createElement("div");
+    box.className = "mt-1 overflow-x-auto rounded-sm border-l-2 bg-bg/70 px-2 py-1 text-[0.7rem]";
+    box.style.borderLeftColor = colour;
+    box.style.color = colour;
+    const tag = document.createElement("div");
+    tag.className = "text-[0.62rem] tracking-wide opacity-70";
+    tag.textContent = mark;
+    const body2 = document.createElement("div");
+    body2.className = "whitespace-pre text-label";
+    body2.textContent = text;
+    box.append(tag, body2);
+    return box;
+  };
+  if (call.before) out.append(chunk(call.before, "removed", "var(--color-hot)"));
+  if (call.after) out.append(chunk(call.after, call.before ? "added" : "written", "var(--color-ok)"));
   if (result) {
+    const said = document.createElement("div");
+    said.className = "mt-1 whitespace-pre-wrap break-words";
+    said.append(withLinks(result.text || (result.error ? "failed, with no output" : "")));
+    out.append(said);
+  }
+  if (result || call.before || call.after) {
     tap(line, () => {
       const open3 = out.classList.toggle("hidden");
       caret.textContent = open3 ? "\u25B8" : "\u25BE";
