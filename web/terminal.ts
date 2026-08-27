@@ -78,6 +78,33 @@ let openId: string | null = null
 let openName = ''
 /** The idempotency key for the message currently in the box, if one has been sent. */
 let msgKey: string | null = null
+
+/**
+ * A random key for one composed message.
+ *
+ * NOT `crypto.randomUUID()`. That is gated on a SECURE CONTEXT — it exists on
+ * localhost and over https and is `undefined` over plain http — and this app is served
+ * over http on a tailnet address, which is the one place it actually runs. Calling it
+ * there threw before the send was attempted, so the dedupe key broke sending outright:
+ * reported as "I can no longer send messages, I had to come back to my laptop".
+ *
+ * `crypto.getRandomValues` is NOT secure-context gated and is the right primitive here.
+ * The last fallback is only so that a missing crypto object cannot stop a message going
+ * out; a key is a deduplication aid, and nothing about sending may depend on having one.
+ */
+function newKey(): string | null {
+	try {
+		const b = new Uint8Array(16)
+		crypto.getRandomValues(b)
+		return Array.from(b, (n) => n.toString(16).padStart(2, '0')).join('')
+	} catch {
+		try {
+			return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`
+		} catch {
+			return null
+		}
+	}
+}
 // a handle, not an integer — see the note in press.ts
 let timer: ReturnType<typeof setTimeout> | undefined
 let el: HTMLElement
@@ -490,7 +517,7 @@ function chrome(name: string) {
 		 * confirms, so a second attempt is recognised as the same message and typed
 		 * nowhere. See src/once.ts.
 		 */
-		if (!msgKey) msgKey = crypto.randomUUID()
+		if (!msgKey) msgKey = newKey()
 		const key = msgKey
 		input.value = ''
 		// Say it is working, rather than going quiet.
@@ -507,7 +534,10 @@ function chrome(name: string) {
 		// rather than a control that has quietly stopped working.
 		let r: Awaited<ReturnType<typeof api>>
 		try {
-			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text, key }) })
+			// `key` may be null if this browser has no usable randomness. The server
+			// treats an absent key as an ordinary send, which is exactly the behaviour
+			// before this existed — degraded, never broken.
+			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text, ...(key ? { key } : {}) }) })
 		} finally {
 			sending = false
 			send.disabled = false

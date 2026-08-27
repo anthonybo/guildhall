@@ -1132,3 +1132,49 @@ each required their explanation to be correct, and none of them was.
 - `finish()` must refuse to write back a claim that has already outlived its window, or
   a send slower than the TTL revives a key nobody holds. Found by a test, not by
   reasoning — nothing sweeps between a claim and its finish.
+
+---
+
+## The fix for the double send broke sending entirely
+
+**Status: fixed**, and it is the sharpest example in this file of testing the wrong
+thing. Reported as "those changes broke terminal on the browser, I can no longer send
+messages — I had to come back to my laptop to respond to you".
+
+The idempotency key was generated with `crypto.randomUUID()`. That is gated on a
+**secure context**: it exists over https and on localhost, and it is `undefined`
+anywhere else. This app is served over **plain http on a tailnet address**, always,
+because there is no certificate and there is not going to be one. So the first line of
+the send handler threw `TypeError: crypto.randomUUID is not a function` before anything
+was sent, and the browser view lost the ability to type into a session at all.
+
+**Every test passed**, including a browser one, because everything reachable in a test
+here is `127.0.0.1` — and localhost is treated as a secure context. The API is present
+in exactly the places this project can test and absent in the one place it runs.
+
+### Measured, so do not re-measure
+
+Served from `192.168.4.57` over http and read in a real browser:
+
+    isSecureContext:            false
+    typeof crypto.randomUUID:   "undefined"
+    crypto.randomUUID():        TypeError: crypto.randomUUID is not a function
+    crypto.getRandomValues:     works
+
+`crypto.getRandomValues` is **not** secure-context gated and is the right primitive.
+`crypto.subtle`, `navigator.clipboard`, `navigator.mediaDevices` and the file pickers
+are all gated the same way — see `tools/check-insecure.mjs`, which now fails the build
+if any of them reach the bundle, and which reads the BUILT bundle rather than the
+sources so a dependency cannot smuggle one in.
+
+**The general lesson, which is the one worth keeping:** *localhost is not a
+representative origin for this app.* Anything that behaves differently under
+`isSecureContext` will pass every check here and fail on the phone. To test browser
+behavior, serve it from a non-loopback address — `python3 -m http.server --bind
+<lan-ip>` is enough, and it takes about a minute.
+
+**A feature must not be able to break the thing it is decorating.** The key is a
+deduplication aid; sending is the product. The generator now falls back twice and may
+return `null`, and a send with no key goes out as an ordinary send — degraded, never
+blocked. That property was missing in the version that shipped, and it is why a
+one-line failure took the whole feature down with it.

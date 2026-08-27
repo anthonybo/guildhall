@@ -1046,6 +1046,19 @@ function repaintSoon() {
 var openId2 = null;
 var openName = "";
 var msgKey = null;
+function newKey() {
+  try {
+    const b = new Uint8Array(16);
+    crypto.getRandomValues(b);
+    return Array.from(b, (n) => n.toString(16).padStart(2, "0")).join("");
+  } catch {
+    try {
+      return `k${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+    } catch {
+      return null;
+    }
+  }
+}
 var timer;
 var el2;
 var onClose = () => {
@@ -1249,7 +1262,7 @@ function chrome(name) {
     e.preventDefault();
     const text = input.value;
     if (!text.trim() || sending) return;
-    if (!msgKey) msgKey = crypto.randomUUID();
+    if (!msgKey) msgKey = newKey();
     const key = msgKey;
     input.value = "";
     sending = true;
@@ -1257,7 +1270,7 @@ function chrome(name) {
     send.textContent = "Sending\u2026";
     let r;
     try {
-      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text, key }) });
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text, ...key ? { key } : {} }) });
     } finally {
       sending = false;
       send.disabled = false;
