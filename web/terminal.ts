@@ -443,11 +443,69 @@ function chrome(name: string) {
 	// `requestSubmit` rather than letting the form handle it, since cancelling the
 	// press to suppress the synthesised click also suppresses implicit submission.
 	tap(send, () => form.requestSubmit())
+	/**
+	 * Clear the box — on the FAR side of it from Send.
+	 *
+	 * A long message is tedious to clear on a phone: select-all in a text field means
+	 * a long press and a popup, and backspace means holding it. So there is a button.
+	 *
+	 * Two things about where it is. It sits at the LEFT end of the row, the maximum
+	 * distance the row allows from Send, because those two are the pair you least want
+	 * to confuse — asked for as "clearly shown and not easy to fat finger". And it is
+	 * only present when there is something to clear, so it cannot be hit by accident
+	 * while reaching for anything else.
+	 *
+	 * A mis-tap costs one tap, not the message: clearing keeps the text and the button
+	 * becomes Undo until you type again. Destructive-with-undo beats a confirmation
+	 * step here, because a confirm would be in the way every single time to guard
+	 * against the rare case.
+	 */
+	let cleared: string | null = null
+	const wipe = document.createElement('button')
+	wipe.type = 'button'
+	const labelWipe = () => {
+		const undo = cleared !== null
+		wipe.textContent = undo ? '↺' : '✕'
+		wipe.title = undo ? 'Put back what was cleared' : 'Clear the message'
+		wipe.setAttribute('aria-label', undo ? 'Undo clearing the message' : 'Clear the message')
+		// Gold while it is an undo, so the way back is the thing that stands out.
+		// `border-muted/50`, not `border-line`. `line` is #302c40 against a #221f2e panel
+		// and is the same near-invisible hairline the tables were reported for — and a
+		// control that has to be CLEARLY shown is the last place to spend it.
+		wipe.className = `min-h-11 min-w-11 shrink-0 cursor-pointer rounded border bg-transparent text-[15px] ${
+			undo ? 'border-gold text-gold' : 'border-muted/50 text-muted'
+		}`
+		// Nothing to clear and nothing to put back: not on screen at all.
+		wipe.hidden = !undo && !input.value
+	}
+	tap(wipe, () => {
+		if (cleared !== null) {
+			input.value = cleared
+			cleared = null
+		} else {
+			if (!input.value) return
+			cleared = input.value
+			input.value = ''
+			// A cleared box is a new message. The idempotency key must not carry over,
+			// or the next send would be answered with the previous one's result.
+			msgKey = null
+		}
+		labelWipe()
+		input.focus()
+	})
+	// Typing is the end of the undo: the text being replaced is no longer the text
+	// that was cleared, and offering to put the old one back would destroy the new one.
+	input.addEventListener('input', () => {
+		if (input.value) cleared = null
+		labelWipe()
+	})
+	labelWipe()
+
 	const note = document.createElement('p')
 	note.id = 'sendnote'
 	note.hidden = true
 	note.className = 'm-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold'
-	form.append(input, send)
+	form.append(wipe, input, send)
 
 	/**
 	 * The four keys a prompt needs.
@@ -554,7 +612,10 @@ function chrome(name: string) {
 		} else {
 			// Confirmed. The next message is a new message and gets its own key.
 			msgKey = null
+			// Sent, not cleared: there is nothing to put back, and the button goes away.
+			cleared = null
 		}
+		labelWipe()
 		// A send that worked but will sit for a while says so, ONCE, above the screen.
 		//
 		// Shown as a banner rather than folded into the terminal text, because the

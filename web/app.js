@@ -701,12 +701,12 @@ function one(b) {
     return el5;
   }
   if (b.kind === "table") {
-    el5.className = "mt-3 -mx-1 overflow-x-auto overscroll-x-contain";
+    el5.className = "mt-3 overflow-x-auto overscroll-x-contain rounded border border-muted/25";
     const table = document.createElement("table");
     table.className = "w-max border-collapse text-[0.72rem]";
     const cell = (kind, runsIn, align) => {
       const c = document.createElement(kind);
-      c.className = kind === "th" ? "border-b border-line px-2 py-1 text-left font-bold whitespace-nowrap" : "border-b border-line/50 px-2 py-1 align-top text-label";
+      c.className = kind === "th" ? "px-2.5 py-1.5 text-left font-bold whitespace-nowrap" : "border-t border-muted/20 px-2.5 py-1.5 align-top text-label";
       if (align !== "left") c.style.textAlign = align;
       if (kind === "th") c.style.color = rgb(TINT.read);
       c.append(runs(runsIn));
@@ -714,11 +714,14 @@ function one(b) {
     };
     const thead = document.createElement("thead");
     const hr = document.createElement("tr");
+    hr.className = "border-b-2 bg-bg/50";
+    hr.style.borderBottomColor = rgb(TINT.read);
     for (const [i, h] of b.head.entries()) hr.append(cell("th", h, b.align[i] ?? "left"));
     thead.append(hr);
     const tbody = document.createElement("tbody");
-    for (const row of b.rows) {
+    for (const [n, row] of b.rows.entries()) {
       const tr = document.createElement("tr");
+      if (n % 2) tr.className = "bg-bg/35";
       for (const [i, c] of row.entries()) tr.append(cell("td", c, b.align[i] ?? "left"));
       tbody.append(tr);
     }
@@ -1227,11 +1230,40 @@ function chrome(name) {
   send.textContent = "Send";
   send.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
   tap(send, () => form.requestSubmit());
+  let cleared = null;
+  const wipe = document.createElement("button");
+  wipe.type = "button";
+  const labelWipe = () => {
+    const undo = cleared !== null;
+    wipe.textContent = undo ? "\u21BA" : "\u2715";
+    wipe.title = undo ? "Put back what was cleared" : "Clear the message";
+    wipe.setAttribute("aria-label", undo ? "Undo clearing the message" : "Clear the message");
+    wipe.className = `min-h-11 min-w-11 shrink-0 cursor-pointer rounded border bg-transparent text-[15px] ${undo ? "border-gold text-gold" : "border-muted/50 text-muted"}`;
+    wipe.hidden = !undo && !input.value;
+  };
+  tap(wipe, () => {
+    if (cleared !== null) {
+      input.value = cleared;
+      cleared = null;
+    } else {
+      if (!input.value) return;
+      cleared = input.value;
+      input.value = "";
+      msgKey = null;
+    }
+    labelWipe();
+    input.focus();
+  });
+  input.addEventListener("input", () => {
+    if (input.value) cleared = null;
+    labelWipe();
+  });
+  labelWipe();
   const note = document.createElement("p");
   note.id = "sendnote";
   note.hidden = true;
   note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
-  form.append(input, send);
+  form.append(wipe, input, send);
   const keys = document.createElement("div");
   keys.id = "promptkeys";
   keys.hidden = !keypad;
@@ -1284,7 +1316,9 @@ ${pre.textContent}`;
       input.value = text;
     } else {
       msgKey = null;
+      cleared = null;
     }
+    labelWipe();
     note.textContent = r.note ?? "";
     note.hidden = !r.note;
     refresh();

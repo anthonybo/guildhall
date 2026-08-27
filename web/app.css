@@ -199,6 +199,9 @@
   .collapse {
     visibility: collapse;
   }
+  .invisible {
+    visibility: hidden;
+  }
   .visible {
     visibility: visible;
   }
@@ -270,9 +273,6 @@
   }
   .m-0 {
     margin: 0px;
-  }
-  .-mx-1 {
-    margin-inline: calc(var(--spacing) * -1);
   }
   .mt-0 {
     margin-top: 0px;
@@ -574,6 +574,10 @@
     border-bottom-style: var(--tw-border-style);
     border-bottom-width: 1px;
   }
+  .border-b-2 {
+    border-bottom-style: var(--tw-border-style);
+    border-bottom-width: 2px;
+  }
   .border-l {
     border-left-style: var(--tw-border-style);
     border-left-width: 1px;
@@ -628,16 +632,28 @@
   .border-line {
     border-color: var(--color-line);
   }
-  .border-line\/50 {
-    border-color: color-mix(in srgb, #302c40 50%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--color-line) 50%, transparent);
-    }
-  }
   .border-line\/70 {
     border-color: color-mix(in srgb, #302c40 70%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-line) 70%, transparent);
+    }
+  }
+  .border-muted\/20 {
+    border-color: color-mix(in srgb, #8a8a8a 20%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-muted) 20%, transparent);
+    }
+  }
+  .border-muted\/25 {
+    border-color: color-mix(in srgb, #8a8a8a 25%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-muted) 25%, transparent);
+    }
+  }
+  .border-muted\/50 {
+    border-color: color-mix(in srgb, #8a8a8a 50%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-muted) 50%, transparent);
     }
   }
   .border-newer {
@@ -664,10 +680,22 @@
   .bg-bg {
     background-color: var(--color-bg);
   }
+  .bg-bg\/35 {
+    background-color: color-mix(in srgb, #191722 35%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-bg) 35%, transparent);
+    }
+  }
   .bg-bg\/40 {
     background-color: color-mix(in srgb, #191722 40%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--color-bg) 40%, transparent);
+    }
+  }
+  .bg-bg\/50 {
+    background-color: color-mix(in srgb, #191722 50%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-bg) 50%, transparent);
     }
   }
   .bg-bg\/60 {
@@ -1034,6 +1062,10 @@
     --tw-backdrop-blur: blur(8px);
     -webkit-backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
     backdrop-filter: var(--tw-backdrop-blur,) var(--tw-backdrop-brightness,) var(--tw-backdrop-contrast,) var(--tw-backdrop-grayscale,) var(--tw-backdrop-hue-rotate,) var(--tw-backdrop-invert,) var(--tw-backdrop-opacity,) var(--tw-backdrop-saturate,) var(--tw-backdrop-sepia,);
+  }
+  .select-all {
+    -webkit-user-select: all;
+    user-select: all;
   }
   .\[-webkit-text-size-adjust\:100\%\] {
     -webkit-text-size-adjust: 100%;

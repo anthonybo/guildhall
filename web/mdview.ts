@@ -105,15 +105,26 @@ function one(b: Block): HTMLElement {
 		// a cell under its heading, and wrapping columns to fit a phone destroys exactly
 		// that. So it scrolls sideways inside its own box — the page never scrolls, and
 		// the comparison survives.
-		el.className = 'mt-3 -mx-1 overflow-x-auto overscroll-x-contain'
+		// Borders you can actually see.
+		//
+		// These were `border-line`, which is #302c40 against a #221f2e panel — about one
+		// shade apart. That is a fine hairline on a desk monitor and invisible on a phone
+		// in daylight: "so faint I cannot read them". So the grid is drawn with `muted`
+		// (#8a8a8a) at low opacity instead, which separates rows at arm's length, and the
+		// header is underlined in its own cyan rather than in grey.
+		//
+		// Alternating row tints do most of the work at this size. A row you can follow
+		// across without a ruler is worth more than a crisp line between rows, and it
+		// survives being read at an angle on a bright screen.
+		el.className = 'mt-3 overflow-x-auto overscroll-x-contain rounded border border-muted/25'
 		const table = document.createElement('table')
 		table.className = 'w-max border-collapse text-[0.72rem]'
 		const cell = (kind: 'th' | 'td', runsIn: Inline[], align: Align) => {
 			const c = document.createElement(kind)
 			c.className =
 				kind === 'th'
-					? 'border-b border-line px-2 py-1 text-left font-bold whitespace-nowrap'
-					: 'border-b border-line/50 px-2 py-1 align-top text-label'
+					? 'px-2.5 py-1.5 text-left font-bold whitespace-nowrap'
+					: 'border-t border-muted/20 px-2.5 py-1.5 align-top text-label'
 			if (align !== 'left') c.style.textAlign = align
 			if (kind === 'th') c.style.color = rgb(TINT.read)
 			c.append(runs(runsIn))
@@ -121,11 +132,16 @@ function one(b: Block): HTMLElement {
 		}
 		const thead = document.createElement('thead')
 		const hr = document.createElement('tr')
+		// Its own ground and a rule in the header's colour, so the head reads as a head
+		// even once the table has been scrolled sideways.
+		hr.className = 'border-b-2 bg-bg/50'
+		hr.style.borderBottomColor = rgb(TINT.read)
 		for (const [i, h] of b.head.entries()) hr.append(cell('th', h, b.align[i] ?? 'left'))
 		thead.append(hr)
 		const tbody = document.createElement('tbody')
-		for (const row of b.rows) {
+		for (const [n, row] of b.rows.entries()) {
 			const tr = document.createElement('tr')
+			if (n % 2) tr.className = 'bg-bg/35'
 			for (const [i, c] of row.entries()) tr.append(cell('td', c, b.align[i] ?? 'left'))
 			tbody.append(tr)
 		}
