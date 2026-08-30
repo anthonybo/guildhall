@@ -1178,3 +1178,42 @@ deduplication aid; sending is the product. The generator now falls back twice an
 return `null`, and a send with no key goes out as an ordinary send — degraded, never
 blocked. That property was missing in the version that shipped, and it is why a
 one-line failure took the whole feature down with it.
+
+---
+
+## A tappable row inside a scrolling list
+
+**Status: fixed on the third try.** The two failures were opposites, which is what makes
+this worth writing down: each fix was correct for the problem it was aimed at and caused
+the other one.
+
+| # | Change | Why it seemed right | What actually happened |
+|---|---|---|---|
+| 1 | `tap()` on each row | It is what every other control in this panel uses, and it exists because a click can be lost when the panel resizes under the finger | **The list could not be scrolled.** `tap` acts on `pointerdown` and cancels it: canceling stops the browser scrolling, and acting on the press picks whatever the finger first landed on. A drag failed to scroll AND inserted a command |
+| 2 | A plain `click` listener | A click is only delivered when a tap did not become a scroll, which is exactly the rule wanted, and the browser already knows it | **The rows could not be clicked.** `viewport.ts` re-measures the panel on `pointerdown`, and tapping a row starts dismissing the keyboard from the search field. The row moves between press and release, so the click is never delivered — the same failure already written up on the Send button |
+
+**The two rules are in direct conflict** and neither `tap` nor `click` can satisfy both:
+scrolling needs the press left alone, and a moving panel means press and release land on
+different elements.
+
+**What works is to decide on `pointerup`, against the row remembered at `pointerdown`.**
+`tapList` in `web/dom.ts`: it never cancels the press, so the list scrolls; it measures
+how far the pointer traveled and does nothing beyond about twelve pixels, so a scroll is
+not a tap; and it listens for `pointerup` on the WINDOW rather than the row, so the
+gesture completes even when the layout has shifted and the row that acts is the one that
+was touched rather than whatever is under the finger by then.
+
+### Measured, so do not re-measure
+
+The real `tapList`, bundled out of `web/dom.ts` and driven with synthetic pointer events
+in a browser:
+
+| gesture | result |
+|---|---|
+| tap with no movement | fires, correct row |
+| drag of 40px | does not fire |
+| wobble of 3-4px | fires, correct row |
+| **60px layout shift between down and up** | fires, still the correct row |
+
+**Do not "simplify" a list row back to `tap` or to `click`.** Both have been tried, both
+were reported within a day, and they fail in opposite directions.

@@ -92,3 +92,67 @@ function eatNextClick() {
 	addEventListener('click', eat, { capture: true, once: true })
 	setTimeout(() => removeEventListener('click', eat, { capture: true }), 400)
 }
+
+/**
+ * A tap in a SCROLLING list, which neither `tap` nor a plain click can do.
+ *
+ * `tap` acts on `pointerdown` and cancels it, so the browser cannot scroll and the row
+ * the finger first touched is chosen — a list becomes unscrollable and picks things
+ * nobody meant. A plain `click` scrolls correctly and then does not fire, because a
+ * click is only delivered when press and release land on the same element, and this
+ * panel re-measures itself on `pointerdown` (see viewport.ts) — so the row moves out
+ * from under the finger between the two halves of the tap. That is the same failure
+ * written up on the Send button, in a place where the fix for it cannot be used.
+ *
+ * So: remember the row and where the finger landed, let the browser do whatever it
+ * likes, and decide on `pointerup`.
+ *
+ *  - the pointer moved more than a few pixels: that was a scroll, do nothing
+ *  - it did not: run, against the row REMEMBERED at pointerdown
+ *
+ * Remembering the row is what makes it safe. `pointerup` is listened for on the window
+ * rather than the row, so it arrives even if the layout shifted, and the row that acts
+ * is the one that was touched rather than whatever is under the finger by then.
+ */
+export function tapList(el: HTMLElement, run: () => void) {
+	/** Beyond this, the finger was scrolling. Roughly a thumb's wobble. */
+	const SLOP = 12
+	let touched = false
+	el.addEventListener(
+		'pointerdown',
+		(e) => {
+			const pe = e as PointerEvent
+			if (pe.pointerType !== 'touch') return
+			touched = true
+			const sx = pe.clientX
+			const sy = pe.clientY
+			const id = pe.pointerId
+			const done = () => {
+				window.removeEventListener('pointerup', up)
+				window.removeEventListener('pointercancel', done)
+			}
+			const up = (ue: PointerEvent) => {
+				done()
+				if (ue.pointerId !== id) return
+				if (Math.hypot(ue.clientX - sx, ue.clientY - sy) > SLOP) return
+				// The compatibility click would otherwise land on whatever is under the
+				// finger once this row's list has closed.
+				eatNextClick()
+				run()
+			}
+			window.addEventListener('pointerup', up)
+			window.addEventListener('pointercancel', done)
+		},
+		// NOT cancelled: cancelling is what stops the list scrolling.
+		{ passive: true },
+	)
+	el.addEventListener('click', () => {
+		// Mouse and keyboard, which never set `touched`. A touch that got this far has
+		// already acted on pointerup.
+		if (touched) {
+			touched = false
+			return
+		}
+		run()
+	})
+}

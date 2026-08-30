@@ -147,6 +147,43 @@ function eatNextClick() {
   addEventListener("click", eat, { capture: true, once: true });
   setTimeout(() => removeEventListener("click", eat, { capture: true }), 400);
 }
+function tapList(el5, run2) {
+  const SLOP = 12;
+  let touched = false;
+  el5.addEventListener(
+    "pointerdown",
+    (e) => {
+      const pe = e;
+      if (pe.pointerType !== "touch") return;
+      touched = true;
+      const sx = pe.clientX;
+      const sy = pe.clientY;
+      const id = pe.pointerId;
+      const done = () => {
+        window.removeEventListener("pointerup", up);
+        window.removeEventListener("pointercancel", done);
+      };
+      const up = (ue) => {
+        done();
+        if (ue.pointerId !== id) return;
+        if (Math.hypot(ue.clientX - sx, ue.clientY - sy) > SLOP) return;
+        eatNextClick();
+        run2();
+      };
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", done);
+    },
+    // NOT cancelled: cancelling is what stops the list scrolling.
+    { passive: true }
+  );
+  el5.addEventListener("click", () => {
+    if (touched) {
+      touched = false;
+      return;
+    }
+    run2();
+  });
+}
 
 // src/data/select.ts
 function needsAttention(s) {
@@ -1320,7 +1357,7 @@ function chrome(name) {
         desc.textContent = c.description;
         row.append(desc);
       }
-      row.addEventListener("click", () => {
+      tapList(row, () => {
         input.value = `/${c.name} `;
         msgKey = null;
         closeMenu();

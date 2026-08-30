@@ -12,7 +12,7 @@
  * the behaviour a phone battery wants and a stream would not give.
  */
 import { type Grid, paint } from './grid.ts'
-import { tap } from './dom.ts'
+import { tap, tapList } from './dom.ts'
 import { openTranscript } from './transcript.ts'
 import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
 
@@ -587,7 +587,7 @@ function chrome(name: string) {
 			// down that list". A click is only delivered when a tap did NOT become a
 			// scroll, which is precisely the rule wanted here, and the browser already
 			// knows it.
-			row.addEventListener('click', () => {
+			tapList(row, () => {
 				// A trailing space, because a command almost always takes an argument and
 				// this is one fewer thing to do on a phone keyboard.
 				input.value = `/${c.name} `
