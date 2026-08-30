@@ -108,3 +108,83 @@ test('a quoted description is unquoted, and a long one is cut', () => {
 	assert.ok(!c!.description.startsWith('"'), 'the quotes were kept')
 	assert.ok(c!.description.length <= 160, `description was ${c!.description.length} characters`)
 })
+
+/** An installed, enabled plugin, laid out the way a real one is. */
+function plugin(key: string, at: string, skillName?: string, cmds: string[] = []) {
+	const root = path.join(HOME, at)
+	if (skillName) {
+		fs.mkdirSync(path.join(root, 'skills', skillName), { recursive: true })
+		fs.writeFileSync(path.join(root, 'skills', skillName, 'SKILL.md'), `---\nname: ${skillName}\ndescription: from a plugin\n---\n`)
+	}
+	for (const c of cmds) {
+		fs.mkdirSync(path.dirname(path.join(root, 'commands', c)), { recursive: true })
+		fs.writeFileSync(path.join(root, 'commands', c), '---\ndescription: a plugin command\n---\n')
+	}
+	fs.mkdirSync(path.join(HOME, '.claude', 'plugins'), { recursive: true })
+	const settings = path.join(HOME, '.claude', 'settings.json')
+	const now = fs.existsSync(settings) ? JSON.parse(fs.readFileSync(settings, 'utf8')) : {}
+	now.enabledPlugins = { ...(now.enabledPlugins ?? {}), [key]: true }
+	fs.writeFileSync(settings, JSON.stringify(now))
+	const reg = path.join(HOME, '.claude', 'plugins', 'installed_plugins.json')
+	const have = fs.existsSync(reg) ? JSON.parse(fs.readFileSync(reg, 'utf8')) : { version: 2, plugins: {} }
+	have.plugins[key] = [{ scope: 'user', installPath: root }]
+	fs.writeFileSync(reg, JSON.stringify(have))
+}
+
+test('a skill from an enabled plugin is offered', () => {
+	// This is the whole report: `/frontend-design` is a plugin skill and was missing
+	// entirely, because only ~/.claude/skills was being read.
+	plugin('frontend-design@official', 'installed/frontend-design', 'frontend-design')
+	const hit = commands().find((c) => c.name === 'frontend-design')
+	assert.ok(hit, 'a plugin skill was not offered')
+	assert.equal(hit.scope, 'plugin')
+	assert.equal(hit.description, 'from a plugin')
+})
+
+test('a plugin that is NOT enabled is not offered', () => {
+	// ~/.claude/plugins/marketplaces is a catalog of everything on offer. Listing it
+	// would put commands in the picker that are not installed and will not run — the
+	// same rule as a project's commands only counting inside that project.
+	plugin('on@official', 'installed/on', 'yes-please')
+	// present on disk, absent from settings
+	const off = path.join(HOME, 'installed/off')
+	fs.mkdirSync(path.join(off, 'skills', 'not-enabled'), { recursive: true })
+	fs.writeFileSync(path.join(off, 'skills', 'not-enabled', 'SKILL.md'), '---\nname: not-enabled\n---\n')
+	const names = commands().map((c) => c.name)
+	assert.ok(names.includes('yes-please'))
+	assert.ok(!names.includes('not-enabled'), 'a disabled plugin was offered')
+})
+
+test('a plugin turned off in settings is dropped even though it is installed', () => {
+	plugin('half@official', 'installed/half', 'half-on')
+	const settings = path.join(HOME, '.claude', 'settings.json')
+	const j = JSON.parse(fs.readFileSync(settings, 'utf8'))
+	j.enabledPlugins['half@official'] = false
+	fs.writeFileSync(settings, JSON.stringify(j))
+	assert.ok(!commands().some((c) => c.name === 'half-on'), 'a plugin set to false was still offered')
+})
+
+test('commands in subdirectories are namespaced rather than lost', () => {
+	// A folder is a namespace — `commands/frontend/audit.md` is `/frontend:audit`. A flat
+	// read silently dropped every command anybody had organised.
+	fs.mkdirSync(path.join(HOME, '.claude', 'commands', 'frontend'), { recursive: true })
+	fs.writeFileSync(path.join(HOME, '.claude', 'commands', 'frontend', 'audit.md'), '---\ndescription: nested\n---\n')
+	fs.writeFileSync(path.join(HOME, '.claude', 'commands', 'flat.md'), '---\ndescription: top level\n---\n')
+	assert.deepEqual(
+		commands().map((c) => c.name),
+		['flat', 'frontend:audit'],
+	)
+})
+
+test('a plugin missing from the install record is still found in the cache', () => {
+	// The registry and the cache can disagree; the cache layout is the fallback, so an
+	// enabled plugin is not dropped just because the bookkeeping is behind.
+	fs.mkdirSync(path.join(HOME, '.claude', 'plugins', 'cache', 'mkt', 'cached', 'skills', 'from-cache'), { recursive: true })
+	fs.writeFileSync(path.join(HOME, '.claude', 'plugins', 'cache', 'mkt', 'cached', 'skills', 'from-cache', 'SKILL.md'), '---\nname: from-cache\n---\n')
+	fs.mkdirSync(path.join(HOME, '.claude'), { recursive: true })
+	fs.writeFileSync(path.join(HOME, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'cached@mkt': true } }))
+	assert.ok(
+		commands().some((c) => c.name === 'from-cache'),
+		'an enabled plugin absent from the install record was dropped',
+	)
+})

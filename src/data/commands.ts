@@ -23,7 +23,7 @@ export type Command = {
 	name: string
 	description: string
 	/** Where it came from, so the picker can group and say so. */
-	scope: 'skill' | 'user' | 'project'
+	scope: 'skill' | 'user' | 'project' | 'plugin'
 }
 
 /** Enough for any real setup, and a ceiling on what a directory of junk can cost. */
@@ -69,25 +69,77 @@ function frontMatter(file: string): { name?: string; description?: string } {
 	return out
 }
 
-/** Every `*.md` in a commands directory, named by its file. */
-function commandsIn(dir: string, scope: 'user' | 'project'): Command[] {
-	let names: string[]
+/**
+ * Every `*.md` under a commands directory, INCLUDING subdirectories.
+ *
+ * A folder is a namespace: `commands/frontend/audit.md` is `/frontend:audit`, and a flat
+ * read misses every command anybody has organised. The first version read one level and
+ * reported a dozen where there were far more.
+ */
+function commandsIn(dir: string, scope: 'user' | 'project' | 'plugin', prefix = '', depth = 0): Command[] {
+	// Deep enough for any real arrangement, and a stop on a directory loop.
+	if (depth > 3) return []
+	let entries: fs.Dirent[]
 	try {
-		names = fs.readdirSync(dir)
+		entries = fs.readdirSync(dir, { withFileTypes: true })
 	} catch {
 		return []
 	}
 	const out: Command[] = []
-	for (const file of names) {
-		if (!file.endsWith('.md')) continue
-		const fm = frontMatter(path.join(dir, file))
-		out.push({ name: file.slice(0, -3), description: (fm.description ?? '').slice(0, DESC), scope })
+	for (const e of entries) {
+		const full = path.join(dir, e.name)
+		if (e.isDirectory()) {
+			out.push(...commandsIn(full, scope, `${prefix}${e.name}:`, depth + 1))
+			continue
+		}
+		if (!e.name.endsWith('.md')) continue
+		const fm = frontMatter(full)
+		out.push({ name: `${prefix}${e.name.slice(0, -3)}`, description: (fm.description ?? '').slice(0, DESC), scope })
 	}
 	return out
 }
 
+/**
+ * The plugins actually turned on, and where they are installed.
+ *
+ * A marketplace is a CATALOG — `~/.claude/plugins/marketplaces` holds every plugin on
+ * offer, and listing those would put commands in the picker that are not installed and
+ * will not run. `settings.json` says which are enabled and `installed_plugins.json` says
+ * where each one landed, so both are consulted rather than the directory being trusted.
+ */
+function enabledPlugins(h: string): string[] {
+	let enabled: Record<string, unknown> = {}
+	try {
+		enabled = (JSON.parse(fs.readFileSync(path.join(h, '.claude', 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, unknown> }).enabledPlugins ?? {}
+	} catch {
+		return []
+	}
+	let installed: Record<string, { installPath?: string }[]> = {}
+	try {
+		installed = (JSON.parse(fs.readFileSync(path.join(h, '.claude', 'plugins', 'installed_plugins.json'), 'utf8')) as { plugins?: typeof installed }).plugins ?? {}
+	} catch {
+		installed = {}
+	}
+	const roots: string[] = []
+	for (const [key, on] of Object.entries(enabled)) {
+		if (!on) continue
+		const where = installed[key]?.find((i) => i.installPath)?.installPath
+		if (where && fs.existsSync(where)) {
+			roots.push(where)
+			continue
+		}
+		// Not in the install record: fall back to the cache laid out as
+		// cache/<marketplace>/<plugin>, which is where an install puts it.
+		const [name, market] = key.split('@')
+		if (!name || !market) continue
+		const guess = path.join(h, '.claude', 'plugins', 'cache', market, name)
+		if (fs.existsSync(guess)) roots.push(guess)
+	}
+	return roots
+}
+
 /** Every skill directory holding a SKILL.md, named by its front matter or its folder. */
-function skills(dir: string): Command[] {
+function skills(dir: string, scope: 'skill' | 'plugin' = 'skill'): Command[] {
 	let entries: fs.Dirent[]
 	try {
 		entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -100,7 +152,7 @@ function skills(dir: string): Command[] {
 		const file = path.join(dir, e.name, 'SKILL.md')
 		if (!fs.existsSync(file)) continue
 		const fm = frontMatter(file)
-		out.push({ name: fm.name || e.name, description: (fm.description ?? '').slice(0, DESC), scope: 'skill' })
+		out.push({ name: fm.name || e.name, description: (fm.description ?? '').slice(0, DESC), scope })
 	}
 	return out
 }
@@ -113,10 +165,14 @@ function skills(dir: string): Command[] {
  */
 export function commands(cwd?: string): Command[] {
 	const h = home()
+	const plugins = enabledPlugins(h)
 	const all = [
 		...(cwd ? commandsIn(path.join(cwd, '.claude', 'commands'), 'project') : []),
 		...commandsIn(path.join(h, '.claude', 'commands'), 'user'),
 		...skills(path.join(h, '.claude', 'skills')),
+		// An installed plugin lays its skills and commands out the same way a project
+		// does, one level down. `frontend-design` lives here and was missing entirely.
+		...plugins.flatMap((root) => [...skills(path.join(root, 'skills'), 'plugin'), ...commandsIn(path.join(root, 'commands'), 'plugin')]),
 	]
 	// First definition of a name wins, which is why project comes first: it is the one
 	// that would actually run.
