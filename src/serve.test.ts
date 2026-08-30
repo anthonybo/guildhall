@@ -169,3 +169,58 @@ test('nothing is ever drawn wider than the terminal it is drawn into', () => {
 		}
 	}
 })
+
+/**
+ * What a phone actually downloads.
+ *
+ * The bundle is the biggest thing this serves and it went over the wire uncompressed —
+ * 172KB where 49KB would do. The size budget in tools/check-perf.mjs existed precisely
+ * because "a phone downloads it over a tailnet", so it was guarding a number three and a
+ * half times the cost anybody paid. These assert on the RESPONSE rather than on the
+ * function, because the response is the last step of that chain.
+ */
+test('a browser that takes gzip is sent gzip, and gets the real file back', async () => {
+	const { createServer } = await import('./serve.ts')
+	const { issue } = await import('./auth.ts')
+	const zlib = await import('node:zlib')
+	const srv = createServer({ port: 0, host: '127.0.0.1', demo: true, onSend: () => {} })
+	await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+	const port = (srv.address() as { port: number }).port
+	const cookie = `gh_sid=${issue()}`
+	try {
+		const res = await fetch(`http://127.0.0.1:${port}/app.js`, {
+			headers: { cookie, 'accept-encoding': 'gzip' },
+			// Node would otherwise decompress and hide the header being tested.
+			redirect: 'manual',
+		})
+		assert.equal(res.status, 200, 'the bundle was not served')
+		assert.equal(res.headers.get('content-encoding'), 'gzip', 'the bundle was sent uncompressed')
+		// A cache must not hand this body to a client that did not ask for it.
+		assert.match(res.headers.get('vary') ?? '', /accept-encoding/i)
+		// And it has to still BE the file: a wrong body is worse than a large one.
+		const got = Buffer.from(await res.arrayBuffer())
+		const want = fs.readFileSync(path.join(process.cwd(), 'web/app.js'))
+		// fetch may decompress transparently; accept either, but it must match the file.
+		const body = got.subarray(0, 2).equals(Buffer.from([0x1f, 0x8b])) ? zlib.gunzipSync(got) : got
+		assert.equal(body.length, want.length, 'the served bundle is not the file on disk')
+	} finally {
+		srv.close()
+	}
+})
+
+test('a client that cannot take gzip still gets the file', async () => {
+	// An older or stricter client must not be handed something it cannot read.
+	const { createServer } = await import('./serve.ts')
+	const { issue } = await import('./auth.ts')
+	const srv = createServer({ port: 0, host: '127.0.0.1', demo: true, onSend: () => {} })
+	await new Promise<void>((r) => srv.listen(0, '127.0.0.1', () => r()))
+	const port = (srv.address() as { port: number }).port
+	try {
+		const res = await fetch(`http://127.0.0.1:${port}/app.js`, { headers: { cookie: `gh_sid=${issue()}`, 'accept-encoding': 'identity' } })
+		assert.equal(res.status, 200)
+		assert.equal(res.headers.get('content-encoding'), null, 'gzip was sent to a client that did not ask for it')
+		assert.equal((await res.arrayBuffer()).byteLength, fs.readFileSync(path.join(process.cwd(), 'web/app.js')).length)
+	} finally {
+		srv.close()
+	}
+})

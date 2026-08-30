@@ -19,6 +19,7 @@
  */
 import http from 'node:http'
 import crypto from 'node:crypto'
+import zlib from 'node:zlib'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -652,7 +653,7 @@ export function createServer(opts: ServeOptions) {
 			return
 		}
 
-		serveStatic(res, url.pathname)
+		serveStatic(res, url.pathname, String(req.headers['accept-encoding'] ?? ''))
 	}
 
 	server.on('close', () => clearInterval(timer))
@@ -722,8 +723,19 @@ function clientStamp() {
 	return stamp
 }
 
+/**
+ * Text served compressed, keyed by the file and its mtime.
+ *
+ * The client asks for `no-store`, so without this the same 172KB would be gzipped on
+ * every page load. Small and bounded: there are a handful of files under web/.
+ */
+const squeezed = new Map<string, { at: number; body: Buffer }>()
+
+/** Worth compressing. A PNG is already compressed and gzip makes it very slightly bigger. */
+const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json'])
+
 /** Static files, confined to web/ and assets/ — never an arbitrary path. */
-function serveStatic(res: http.ServerResponse, pathname: string) {
+function serveStatic(res: http.ServerResponse, pathname: string, accepts = '') {
 	const rel = pathname === '/' ? '/index.html' : pathname
 	const roots = [path.join(ROOT, 'web'), path.join(ROOT, 'assets')]
 	for (const root of roots) {
@@ -732,7 +744,37 @@ function serveStatic(res: http.ServerResponse, pathname: string) {
 		if (!file.startsWith(root + path.sep)) continue
 		try {
 			const body = fs.readFileSync(file)
-			send(res, 200, MIME[path.extname(file)] ?? 'application/octet-stream', body)
+			const type = MIME[path.extname(file)] ?? 'application/octet-stream'
+			/**
+			 * Compressed when the client says it can take it.
+			 *
+			 * The browser bundle is 172KB and gzips to 49KB — measured — and this is a
+			 * phone pulling it over a tailnet, which is the whole reason there is a size
+			 * budget on it at all. Serving it raw meant the budget was guarding a number
+			 * three and a half times the cost anybody actually pays.
+			 *
+			 * Only here, in the static path. The event stream must never be compressed:
+			 * buffering a live feed turns it into a slideshow, which is the same reason
+			 * `x-accel-buffering: no` is set on it.
+			 */
+			if (COMPRESSIBLE.has(path.extname(file)) && /\bgzip\b/.test(accepts)) {
+				const stat = fs.statSync(file)
+				const had = squeezed.get(file)
+				const gz = had && had.at === stat.mtimeMs ? had.body : zlib.gzipSync(body, { level: 6 })
+				if (!had || had.at !== stat.mtimeMs) squeezed.set(file, { at: stat.mtimeMs, body: gz })
+				res
+					.writeHead(200, {
+						'content-type': type,
+						'content-encoding': 'gzip',
+						'cache-control': 'no-store',
+						// Caches and proxies must not hand a gzipped body to a client that
+						// did not ask for one.
+						vary: 'accept-encoding',
+					})
+					.end(gz)
+				return
+			}
+			send(res, 200, type, body)
 			return
 		} catch {}
 	}

@@ -1286,16 +1286,24 @@ function chrome(name) {
   labelWipe();
   const menu = document.createElement("div");
   menu.hidden = true;
-  menu.className = "max-h-64 overflow-auto overscroll-contain border-t border-line bg-panel";
+  menu.className = "flex max-h-72 flex-col border-t border-line bg-panel";
+  const find = document.createElement("input");
+  find.type = "search";
+  find.autocomplete = "off";
+  find.placeholder = "Search commands\u2026";
+  find.className = "m-2 min-h-11 shrink-0 rounded border border-muted/50 bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  find.addEventListener("input", () => paintMenu(find.value.replace(/^\//, "")));
+  const list = document.createElement("div");
+  list.className = "min-h-0 flex-1 overflow-y-auto overscroll-contain";
   const paintMenu = (filter) => {
     const q = filter.toLowerCase();
     const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
-    menu.replaceChildren();
+    list.replaceChildren();
     if (!hits.length) {
       const empty = document.createElement("div");
       empty.className = "px-3 py-2 text-[0.72rem] text-muted";
       empty.textContent = slash.length ? `nothing matching "${filter}"` : "no commands found on this machine";
-      menu.append(empty);
+      list.append(empty);
       return;
     }
     for (const c of hits) {
@@ -1312,27 +1320,33 @@ function chrome(name) {
         desc.textContent = c.description;
         row.append(desc);
       }
-      tap(row, () => {
+      row.addEventListener("click", () => {
         input.value = `/${c.name} `;
         msgKey = null;
         closeMenu();
         input.focus();
       });
-      menu.append(row);
+      list.append(row);
     }
   };
+  menu.append(find, list);
   const closeMenu = () => {
     menu.hidden = true;
     labelSlash();
   };
-  const openMenu = async () => {
+  const openMenu = async (focusSearch = false) => {
     menu.hidden = false;
     labelSlash();
     if (!slash.length) {
       const r = await api(`/api/commands${openId2 ? `?id=${encodeURIComponent(openId2)}` : ""}`);
       slash = Array.isArray(r.commands) ? r.commands : [];
     }
-    paintMenu(input.value.startsWith("/") ? input.value.slice(1).split(" ")[0] ?? "" : "");
+    const seed = input.value.startsWith("/") ? input.value.slice(1).split(" ")[0] ?? "" : "";
+    if (focusSearch) {
+      find.value = seed;
+      find.focus();
+    }
+    paintMenu(focusSearch ? seed : find.value || seed);
   };
   const slashBtn = document.createElement("button");
   slashBtn.type = "button";
@@ -1345,7 +1359,7 @@ function chrome(name) {
     slashBtn.className = `flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border bg-transparent text-[16px] font-bold ${open3 ? "border-gold text-gold" : "border-muted/50 text-muted"}`;
   }
   labelSlash();
-  tap(slashBtn, () => menu.hidden ? void openMenu() : closeMenu());
+  tap(slashBtn, () => menu.hidden ? void openMenu(true) : closeMenu());
   const note = document.createElement("p");
   note.id = "sendnote";
   note.hidden = true;

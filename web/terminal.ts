@@ -531,17 +531,37 @@ function chrome(name: string) {
 	 */
 	const menu = document.createElement('div')
 	menu.hidden = true
-	menu.className = 'max-h-64 overflow-auto overscroll-contain border-t border-line bg-panel'
+	// A column: the search field stays put and only the list scrolls under it. As one
+	// scrolling box the field scrolled away, which on a list of a dozen is the moment
+	// you want it.
+	menu.className = 'flex max-h-72 flex-col border-t border-line bg-panel'
+	/**
+	 * Its own search box.
+	 *
+	 * Filtering from the message box works and is not discoverable: it needs a leading
+	 * slash to engage, so somebody who opens the list with the button and types is
+	 * filtering nothing. Reported as not being able to search the list at all.
+	 */
+	const find = document.createElement('input')
+	find.type = 'search'
+	find.autocomplete = 'off'
+	find.placeholder = 'Search commands…'
+	// 16px for the same reason as the message box: anything smaller makes iOS zoom the
+	// whole page when it takes focus.
+	find.className = 'm-2 min-h-11 shrink-0 rounded border border-muted/50 bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
+	find.addEventListener('input', () => paintMenu(find.value.replace(/^\//, '')))
+	const list = document.createElement('div')
+	list.className = 'min-h-0 flex-1 overflow-y-auto overscroll-contain'
 	/** Draw the list, filtered by whatever follows the slash. */
 	const paintMenu = (filter: string) => {
 		const q = filter.toLowerCase()
 		const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40)
-		menu.replaceChildren()
+		list.replaceChildren()
 		if (!hits.length) {
 			const empty = document.createElement('div')
 			empty.className = 'px-3 py-2 text-[0.72rem] text-muted'
 			empty.textContent = slash.length ? `nothing matching "${filter}"` : 'no commands found on this machine'
-			menu.append(empty)
+			list.append(empty)
 			return
 		}
 		for (const c of hits) {
@@ -558,7 +578,16 @@ function chrome(name: string) {
 				desc.textContent = c.description
 				row.append(desc)
 			}
-			tap(row, () => {
+			// A plain `click`, NOT `tap()`.
+			//
+			// `tap` acts on `pointerdown` for touch and cancels the event, which is right
+			// for a lone button that disappears under the finger and catastrophic in a
+			// list: cancelling the press stops the browser scrolling, and acting on it
+			// picks whatever the finger first landed on. Reported as "I cannot scroll
+			// down that list". A click is only delivered when a tap did NOT become a
+			// scroll, which is precisely the rule wanted here, and the browser already
+			// knows it.
+			row.addEventListener('click', () => {
 				// A trailing space, because a command almost always takes an argument and
 				// this is one fewer thing to do on a phone keyboard.
 				input.value = `/${c.name} `
@@ -566,14 +595,15 @@ function chrome(name: string) {
 				closeMenu()
 				input.focus()
 			})
-			menu.append(row)
+			list.append(row)
 		}
 	}
+	menu.append(find, list)
 	const closeMenu = () => {
 		menu.hidden = true
 		labelSlash()
 	}
-	const openMenu = async () => {
+	const openMenu = async (focusSearch = false) => {
 		menu.hidden = false
 		labelSlash()
 		if (!slash.length) {
@@ -582,7 +612,16 @@ function chrome(name: string) {
 			const r = (await api(`/api/commands${openId ? `?id=${encodeURIComponent(openId)}` : ''}`)) as unknown as { commands?: typeof slash }
 			slash = Array.isArray(r.commands) ? r.commands : []
 		}
-		paintMenu(input.value.startsWith('/') ? input.value.slice(1).split(' ')[0] ?? '' : '')
+		// What is already half-typed in the message box seeds the search, so opening the
+		// list after typing `/imp` does not throw that away.
+		const seed = input.value.startsWith('/') ? (input.value.slice(1).split(' ')[0] ?? '') : ''
+		if (focusSearch) {
+			find.value = seed
+			// Focused only when the button was pressed. Focusing on every keystroke of
+			// type-ahead would move the caret out of the message box mid-word.
+			find.focus()
+		}
+		paintMenu(focusSearch ? seed : find.value || seed)
 	}
 	const slashBtn = document.createElement('button')
 	slashBtn.type = 'button'
@@ -597,7 +636,7 @@ function chrome(name: string) {
 		}`
 	}
 	labelSlash()
-	tap(slashBtn, () => (menu.hidden ? void openMenu() : closeMenu()))
+	tap(slashBtn, () => (menu.hidden ? void openMenu(true) : closeMenu()))
 
 	const note = document.createElement('p')
 	note.id = 'sendnote'
