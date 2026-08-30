@@ -78,6 +78,8 @@ let openId: string | null = null
 let openName = ''
 /** The idempotency key for the message currently in the box, if one has been sent. */
 let msgKey: string | null = null
+/** The slash commands this session takes, fetched once per open. */
+let slash: { name: string; description: string; scope: string }[] = []
 
 /**
  * A random key for one composed message.
@@ -422,7 +424,15 @@ function chrome(name: string) {
 	// The alternatives are worse. `maximum-scale=1` is ignored by iOS on purpose, and
 	// `touch-action: pan-y` does suppress it but takes pinch-zoom with it, which on a
 	// view whose whole problem is small text is the wrong thing to remove.
-	input.className = 'min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
+	// `min-w-0`, or Send goes off the edge.
+	//
+	// An input has an intrinsic width — about 20 characters — and `min-width: auto`
+	// means `flex-1` cannot shrink it below that. With four controls in this row it
+	// measured 220.5px however narrow the panel got, overflowing by 20.6px at 390 and
+	// 91px at 320, pushing Send past the edge. Exactly what clipped Close when the
+	// transcript button joined the bar; the rule is the same one and it has to be
+	// applied to inputs too, which is where it is least obvious.
+	input.className = 'min-h-11 w-0 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
 	const send = document.createElement('button')
 	send.type = 'submit'
 	send.textContent = 'Send'
@@ -498,14 +508,102 @@ function chrome(name: string) {
 	input.addEventListener('input', () => {
 		if (input.value) cleared = null
 		labelWipe()
+		// Type-ahead, but only while the line IS a command being written. Once there is
+		// a space the argument has started and a list of commands is in the way.
+		const typing = /^\/[^\s]*$/.test(input.value)
+		if (typing) void openMenu()
+		else if (!menu.hidden) closeMenu()
 	})
 	labelWipe()
+
+	/**
+	 * Picking a slash command instead of spelling it.
+	 *
+	 * Claude Code's own autocomplete cannot help here: guildhall sends a line and its
+	 * carriage return in ONE call, so the TUI never sees the keystrokes that would open
+	 * its menu. The name has to be right before it leaves the phone, and these names are
+	 * long — reported as "impossible to really add slash commands", with the name
+	 * misspelled twice in the report.
+	 *
+	 * Picking INSERTS rather than sends. You almost always want to add something after
+	 * the command, and a list where a mis-tap fires a command at a session is a worse
+	 * thing than a list where a mis-tap types six characters.
+	 */
+	const menu = document.createElement('div')
+	menu.hidden = true
+	menu.className = 'max-h-64 overflow-auto overscroll-contain border-t border-line bg-panel'
+	/** Draw the list, filtered by whatever follows the slash. */
+	const paintMenu = (filter: string) => {
+		const q = filter.toLowerCase()
+		const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40)
+		menu.replaceChildren()
+		if (!hits.length) {
+			const empty = document.createElement('div')
+			empty.className = 'px-3 py-2 text-[0.72rem] text-muted'
+			empty.textContent = slash.length ? `nothing matching "${filter}"` : 'no commands found on this machine'
+			menu.append(empty)
+			return
+		}
+		for (const c of hits) {
+			const row = document.createElement('button')
+			row.type = 'button'
+			row.className = 'flex min-h-11 w-full cursor-pointer flex-col justify-center gap-0.5 border-b border-line/60 px-3 py-1.5 text-left'
+			const name = document.createElement('span')
+			name.className = 'text-[0.8rem] font-bold text-gold'
+			name.textContent = `/${c.name}`
+			row.append(name)
+			if (c.description) {
+				const desc = document.createElement('span')
+				desc.className = 'line-clamp-2 text-[0.68rem] text-muted'
+				desc.textContent = c.description
+				row.append(desc)
+			}
+			tap(row, () => {
+				// A trailing space, because a command almost always takes an argument and
+				// this is one fewer thing to do on a phone keyboard.
+				input.value = `/${c.name} `
+				msgKey = null
+				closeMenu()
+				input.focus()
+			})
+			menu.append(row)
+		}
+	}
+	const closeMenu = () => {
+		menu.hidden = true
+		labelSlash()
+	}
+	const openMenu = async () => {
+		menu.hidden = false
+		labelSlash()
+		if (!slash.length) {
+			// `api()` describes the screen reply; this route answers something else, so it
+			// goes through `unknown` rather than pretending the shapes overlap.
+			const r = (await api(`/api/commands${openId ? `?id=${encodeURIComponent(openId)}` : ''}`)) as unknown as { commands?: typeof slash }
+			slash = Array.isArray(r.commands) ? r.commands : []
+		}
+		paintMenu(input.value.startsWith('/') ? input.value.slice(1).split(' ')[0] ?? '' : '')
+	}
+	const slashBtn = document.createElement('button')
+	slashBtn.type = 'button'
+	slashBtn.textContent = '/'
+	function labelSlash() {
+		const open = !menu.hidden
+		slashBtn.title = open ? 'Hide the commands' : 'Pick a slash command'
+		slashBtn.setAttribute('aria-label', 'Pick a slash command')
+		slashBtn.setAttribute('aria-expanded', String(open))
+		slashBtn.className = `flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border bg-transparent text-[16px] font-bold ${
+			open ? 'border-gold text-gold' : 'border-muted/50 text-muted'
+		}`
+	}
+	labelSlash()
+	tap(slashBtn, () => (menu.hidden ? void openMenu() : closeMenu()))
 
 	const note = document.createElement('p')
 	note.id = 'sendnote'
 	note.hidden = true
 	note.className = 'm-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold'
-	form.append(wipe, input, send)
+	form.append(wipe, slashBtn, input, send)
 
 	/**
 	 * The four keys a prompt needs.
@@ -634,7 +732,7 @@ function chrome(name: string) {
 		// forced back on them.
 	})
 
-	el.append(bar, pre, note, form)
+	el.append(bar, pre, note, menu, form)
 	return { pre, input }
 }
 

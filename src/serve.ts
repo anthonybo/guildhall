@@ -35,6 +35,7 @@ import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
 import { reach } from './cmuxreach.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
+import { commands } from './data/commands.ts'
 import { spawnable } from './data/projects.ts'
 import { usage } from './data/usage.ts'
 import type { Session } from './data.ts'
@@ -597,6 +598,28 @@ export function createServer(opts: ServeOptions) {
 			const page = historyPage(id, before)
 			if (!page) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
 			return send(res, 200, MIME['.json'], JSON.stringify(page))
+		}
+
+		/**
+		 * The slash commands this session would accept.
+		 *
+		 * Behind the control token because it exists to be typed with, and because it
+		 * names your skills and your project's own commands. Read on demand — this is
+		 * reached when somebody opens the picker, not on any poll.
+		 *
+		 * A session id is optional. Without one the answer is what is available
+		 * everywhere; with one it also includes that project's own commands, which are
+		 * the ones that would actually run there.
+		 */
+		if (url.pathname === '/api/commands') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			const waitCmd = controlLockedFor(addr)
+			if (waitCmd > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCmd / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			const forId = url.searchParams.get('id')
+			const cwd = forId ? sessions().find((s) => s.id === forId)?.cwd : undefined
+			return send(res, 200, MIME['.json'], JSON.stringify({ commands: commands(cwd) }))
 		}
 
 		/** Directories a session can be started in. Behind the control token because

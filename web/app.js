@@ -1070,6 +1070,7 @@ function repaintSoon() {
 var openId2 = null;
 var openName = "";
 var msgKey = null;
+var slash = [];
 function newKey() {
   try {
     const b = new Uint8Array(16);
@@ -1245,7 +1246,7 @@ function chrome(name) {
     form.requestSubmit();
   });
   for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
-  input.className = "min-h-11 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  input.className = "min-h-11 w-0 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
   const send = document.createElement("button");
   send.type = "submit";
   send.textContent = "Send";
@@ -1278,13 +1279,78 @@ function chrome(name) {
   input.addEventListener("input", () => {
     if (input.value) cleared = null;
     labelWipe();
+    const typing = /^\/[^\s]*$/.test(input.value);
+    if (typing) void openMenu();
+    else if (!menu.hidden) closeMenu();
   });
   labelWipe();
+  const menu = document.createElement("div");
+  menu.hidden = true;
+  menu.className = "max-h-64 overflow-auto overscroll-contain border-t border-line bg-panel";
+  const paintMenu = (filter) => {
+    const q = filter.toLowerCase();
+    const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
+    menu.replaceChildren();
+    if (!hits.length) {
+      const empty = document.createElement("div");
+      empty.className = "px-3 py-2 text-[0.72rem] text-muted";
+      empty.textContent = slash.length ? `nothing matching "${filter}"` : "no commands found on this machine";
+      menu.append(empty);
+      return;
+    }
+    for (const c of hits) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "flex min-h-11 w-full cursor-pointer flex-col justify-center gap-0.5 border-b border-line/60 px-3 py-1.5 text-left";
+      const name2 = document.createElement("span");
+      name2.className = "text-[0.8rem] font-bold text-gold";
+      name2.textContent = `/${c.name}`;
+      row.append(name2);
+      if (c.description) {
+        const desc = document.createElement("span");
+        desc.className = "line-clamp-2 text-[0.68rem] text-muted";
+        desc.textContent = c.description;
+        row.append(desc);
+      }
+      tap(row, () => {
+        input.value = `/${c.name} `;
+        msgKey = null;
+        closeMenu();
+        input.focus();
+      });
+      menu.append(row);
+    }
+  };
+  const closeMenu = () => {
+    menu.hidden = true;
+    labelSlash();
+  };
+  const openMenu = async () => {
+    menu.hidden = false;
+    labelSlash();
+    if (!slash.length) {
+      const r = await api(`/api/commands${openId2 ? `?id=${encodeURIComponent(openId2)}` : ""}`);
+      slash = Array.isArray(r.commands) ? r.commands : [];
+    }
+    paintMenu(input.value.startsWith("/") ? input.value.slice(1).split(" ")[0] ?? "" : "");
+  };
+  const slashBtn = document.createElement("button");
+  slashBtn.type = "button";
+  slashBtn.textContent = "/";
+  function labelSlash() {
+    const open3 = !menu.hidden;
+    slashBtn.title = open3 ? "Hide the commands" : "Pick a slash command";
+    slashBtn.setAttribute("aria-label", "Pick a slash command");
+    slashBtn.setAttribute("aria-expanded", String(open3));
+    slashBtn.className = `flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border bg-transparent text-[16px] font-bold ${open3 ? "border-gold text-gold" : "border-muted/50 text-muted"}`;
+  }
+  labelSlash();
+  tap(slashBtn, () => menu.hidden ? void openMenu() : closeMenu());
   const note = document.createElement("p");
   note.id = "sendnote";
   note.hidden = true;
   note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
-  form.append(wipe, input, send);
+  form.append(wipe, slashBtn, input, send);
   const keys = document.createElement("div");
   keys.id = "promptkeys";
   keys.hidden = !keypad;
@@ -1344,7 +1410,7 @@ ${pre.textContent}`;
     note.hidden = !r.note;
     refresh();
   });
-  el2.append(bar3, pre, note, form);
+  el2.append(bar3, pre, note, menu, form);
   return { pre, input };
 }
 var polling = false;
