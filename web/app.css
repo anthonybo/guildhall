@@ -331,12 +331,6 @@
   .ml-auto {
     margin-left: auto;
   }
-  .line-clamp-2 {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-  }
   .block {
     display: block;
   }
@@ -376,8 +370,8 @@
   .h-px {
     height: 1px;
   }
-  .max-h-72 {
-    max-height: calc(var(--spacing) * 72);
+  .max-h-\[60\%\] {
+    max-height: 60%;
   }
   .min-h-0 {
     min-height: 0px;
@@ -847,6 +841,9 @@
   }
   .pr-\[env\(safe-area-inset-right\)\] {
     padding-right: env(safe-area-inset-right);
+  }
+  .pb-1 {
+    padding-bottom: var(--spacing);
   }
   .pb-\[env\(safe-area-inset-bottom\)\] {
     padding-bottom: env(safe-area-inset-bottom);

@@ -534,7 +534,16 @@ function chrome(name: string) {
 	// A column: the search field stays put and only the list scrolls under it. As one
 	// scrolling box the field scrolled away, which on a list of a dozen is the moment
 	// you want it.
-	menu.className = 'flex max-h-72 flex-col border-t border-line bg-panel'
+	// 60% of the PANEL, not of the screen.
+	//
+	// It was a fixed 288px, which with 67px rows fitted 3.4 of them and made a list of
+	// thirteen read as five — "it still only shows like 5 options". 60% is the fix, but
+	// `60vh` is measured against the viewport, and the panel is shorter than the viewport
+	// whenever the keyboard is up: measured at 434px inside a 380px panel, which pushes
+	// the message box off the bottom. That is the failure this panel already has a note
+	// about. A percentage of the panel cannot outgrow it, and `min-h-0` lets it shrink
+	// further when there is genuinely no room.
+	menu.className = 'flex max-h-[60%] min-h-0 flex-col border-t border-line bg-panel'
 	/**
 	 * Its own search box.
 	 *
@@ -550,6 +559,8 @@ function chrome(name: string) {
 	// whole page when it takes focus.
 	find.className = 'm-2 min-h-11 shrink-0 rounded border border-muted/50 bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
 	find.addEventListener('input', () => paintMenu(find.value.replace(/^\//, '')))
+	const count = document.createElement('div')
+	count.className = 'shrink-0 px-3 pb-1 text-[0.62rem] tracking-wide text-muted'
 	const list = document.createElement('div')
 	list.className = 'min-h-0 flex-1 overflow-y-auto overscroll-contain'
 	/** Draw the list, filtered by whatever follows the slash. */
@@ -557,6 +568,9 @@ function chrome(name: string) {
 		const q = filter.toLowerCase()
 		const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40)
 		list.replaceChildren()
+		// How many, always. Somebody who can see four rows of a scrolling list has no way
+		// to know whether that is all of them.
+		count.textContent = slash.length ? (hits.length === slash.length ? `${slash.length} commands` : `${hits.length} of ${slash.length}`) : ''
 		if (!hits.length) {
 			const empty = document.createElement('div')
 			empty.className = 'px-3 py-2 text-[0.72rem] text-muted'
@@ -567,14 +581,16 @@ function chrome(name: string) {
 		for (const c of hits) {
 			const row = document.createElement('button')
 			row.type = 'button'
-			row.className = 'flex min-h-11 w-full cursor-pointer flex-col justify-center gap-0.5 border-b border-line/60 px-3 py-1.5 text-left'
+			row.className = 'flex min-h-11 w-full cursor-pointer flex-col justify-center border-b border-line/60 px-3 py-1 text-left'
 			const name = document.createElement('span')
 			name.className = 'text-[0.8rem] font-bold text-gold'
 			name.textContent = `/${c.name}`
 			row.append(name)
 			if (c.description) {
 				const desc = document.createElement('span')
-				desc.className = 'line-clamp-2 text-[0.68rem] text-muted'
+				// One line, not two. Two lines made a 67px row, which is a third of what fits
+				// on screen spent on a hint you are skimming past.
+				desc.className = 'truncate text-[0.68rem] text-muted'
 				desc.textContent = c.description
 				row.append(desc)
 			}
@@ -598,7 +614,7 @@ function chrome(name: string) {
 			list.append(row)
 		}
 	}
-	menu.append(find, list)
+	menu.append(find, count, list)
 	const closeMenu = () => {
 		menu.hidden = true
 		labelSlash()
