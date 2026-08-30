@@ -12,7 +12,7 @@
  * the behaviour a phone battery wants and a stream would not give.
  */
 import { type Grid, paint } from './grid.ts'
-import { tap, tapList } from './dom.ts'
+import { insertCommand, tap, tapList } from './dom.ts'
 import { openTranscript } from './transcript.ts'
 import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
 
@@ -604,12 +604,16 @@ function chrome(name: string) {
 			// scroll, which is precisely the rule wanted here, and the browser already
 			// knows it.
 			tapList(row, () => {
-				// A trailing space, because a command almost always takes an argument and
-				// this is one fewer thing to do on a phone keyboard.
-				input.value = `/${c.name} `
+				// INSERTED, never assigned. Assigning threw away whatever was already in the
+				// box, which is almost always something: the command tends to be the last
+				// thing added to a request rather than the first.
+				const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name)
+				input.value = value
 				msgKey = null
 				closeMenu()
 				input.focus()
+				// After focus, or the browser puts the caret at the end of its own accord.
+				input.setSelectionRange(caret, caret)
 			})
 			list.append(row)
 		}

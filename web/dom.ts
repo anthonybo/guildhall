@@ -156,3 +156,33 @@ export function tapList(el: HTMLElement, run: () => void) {
 		run()
 	})
 }
+
+/**
+ * Put a slash command into a box that already has something in it.
+ *
+ * The first version assigned `input.value`, which threw away whatever was being typed —
+ * "it clears the entire text box I am entering into, that should never happen". Almost
+ * every use has text already, because the command is usually the last thing added to a
+ * request rather than the first.
+ *
+ * Three cases, and the middle one is the reason this is not a plain insert:
+ *
+ *  - a partial command under the caret (`/imp`) is REPLACED, because the picker is
+ *    completing what is being typed rather than adding a second command
+ *  - a selection is replaced, which is what every other text box does
+ *  - anything else is inserted at the caret, leaving both sides alone
+ *
+ * Pure, and returns where the caret should end up, so it can be tested without a
+ * browser — the same split `links.ts` keeps.
+ */
+export function insertCommand(text: string, start: number, end: number, name: string): { value: string; caret: number } {
+	const piece = `/${name} `
+	const from = Math.max(0, Math.min(start, text.length))
+	const to = Math.max(from, Math.min(end, text.length))
+	// A partial command ends at the caret and begins at a slash that starts the line or
+	// follows a space. `/imp` becomes `/impeccable `, not `/imp/impeccable `.
+	const partial = /(?:^|\s)(\/[^\s]*)$/.exec(text.slice(0, from))
+	const cut = partial ? from - partial[1]!.length : from
+	const value = text.slice(0, cut) + piece + text.slice(to)
+	return { value, caret: cut + piece.length }
+}

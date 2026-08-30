@@ -184,6 +184,15 @@ function tapList(el5, run2) {
     run2();
   });
 }
+function insertCommand(text, start2, end, name) {
+  const piece = `/${name} `;
+  const from = Math.max(0, Math.min(start2, text.length));
+  const to = Math.max(from, Math.min(end, text.length));
+  const partial = /(?:^|\s)(\/[^\s]*)$/.exec(text.slice(0, from));
+  const cut3 = partial ? from - partial[1].length : from;
+  const value = text.slice(0, cut3) + piece + text.slice(to);
+  return { value, caret: cut3 + piece.length };
+}
 
 // src/data/select.ts
 function needsAttention(s) {
@@ -1361,10 +1370,12 @@ function chrome(name) {
         row.append(desc);
       }
       tapList(row, () => {
-        input.value = `/${c.name} `;
+        const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name);
+        input.value = value;
         msgKey = null;
         closeMenu();
         input.focus();
+        input.setSelectionRange(caret, caret);
       });
       list.append(row);
     }
