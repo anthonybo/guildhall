@@ -1,6 +1,6 @@
 {
 	"name": "guildhall",
-	"version": "0.13.5",
+	"version": "0.13.6",
 	"license": "MIT",
 	"private": true,
 	"type": "module",
