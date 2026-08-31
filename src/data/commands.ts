@@ -23,8 +23,45 @@ export type Command = {
 	name: string
 	description: string
 	/** Where it came from, so the picker can group and say so. */
-	scope: 'skill' | 'user' | 'project' | 'plugin'
+	scope: 'skill' | 'user' | 'project' | 'plugin' | 'built-in'
 }
+
+/**
+ * Claude Code's own commands, which are not files and cannot be discovered.
+ *
+ * Everything else here is read from disk. These are compiled into the CLI — a 333MB
+ * Mach-O binary — and are not recoverable from it: `status`, `clear` and `compact`
+ * appear at dozens of unrelated offsets in its strings while `pr-comments` and
+ * `migrate-installer` do not appear at all, so anything scraped would be part guesswork
+ * and part omission. That is worse than a written list, because it would look automatic.
+ *
+ * So this IS a hand-kept list and will drift when Claude Code changes. It is kept short
+ * and to the ones that are both long-standing and worth having from a phone — where the
+ * cost of a stale entry is Claude Code answering "unknown command", not a wrong action.
+ * `/quit` and `/login` are deliberately absent: ending or reauthenticating a session you
+ * are not sitting at is not a thing to make one tap away.
+ */
+const BUILT_IN: [string, string][] = [
+	['clear', 'Clear the conversation and free the context window'],
+	['compact', 'Summarize the conversation so far and keep going'],
+	['context', 'Show what is filling the context window'],
+	['cost', 'What this session has cost so far'],
+	['usage', 'Plan usage and limits'],
+	['model', 'Switch the model for this session'],
+	['status', 'Version, account, model and connectivity'],
+	['resume', 'Pick up an earlier conversation'],
+	['agents', 'Manage subagents'],
+	['memory', 'Edit the memory files this project loads'],
+	['review', 'Review a pull request'],
+	['todos', 'The current to-do list'],
+	['export', 'Export this conversation'],
+	['init', 'Write a CLAUDE.md for this project'],
+	['mcp', 'MCP server status and tools'],
+	['permissions', 'What this session is allowed to do'],
+	['config', 'Settings for this session'],
+	['doctor', 'Check the installation'],
+	['help', 'What the commands are'],
+]
 
 /** Enough for any real setup, and a ceiling on what a directory of junk can cost. */
 const MAX = 200
@@ -166,13 +203,16 @@ function skills(dir: string, scope: 'skill' | 'plugin' = 'skill'): Command[] {
 export function commands(cwd?: string): Command[] {
 	const h = home()
 	const plugins = enabledPlugins(h)
-	const all = [
+	const all: Command[] = [
 		...(cwd ? commandsIn(path.join(cwd, '.claude', 'commands'), 'project') : []),
 		...commandsIn(path.join(h, '.claude', 'commands'), 'user'),
 		...skills(path.join(h, '.claude', 'skills')),
 		// An installed plugin lays its skills and commands out the same way a project
 		// does, one level down. `frontend-design` lives here and was missing entirely.
 		...plugins.flatMap((root) => [...skills(path.join(root, 'skills'), 'plugin'), ...commandsIn(path.join(root, 'commands'), 'plugin')]),
+		// Last, so anything on disk with the same name wins: a command somebody wrote is
+		// the one that would actually run.
+		...BUILT_IN.map(([name, description]): Command => ({ name, description, scope: 'built-in' })),
 	]
 	// First definition of a name wins, which is why project comes first: it is the one
 	// that would actually run.
