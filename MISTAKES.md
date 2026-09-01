@@ -1217,3 +1217,40 @@ in a browser:
 
 **Do not "simplify" a list row back to `tap` or to `click`.** Both have been tried, both
 were reported within a day, and they fail in opposite directions.
+
+---
+
+## A running session vanished from the room
+
+**Status: fixed.** Reported as a session that was working and not shown, with the header counting
+six where there were seven.
+
+The session was alive, in the registry, with a transcript on disk. What dropped it was
+the guard in `registry.ts` against a REUSED PID: it compares what the registry says
+about when a process started against what `ps` says, and throws the entry out if they
+differ by more than five minutes.
+
+**It was comparing the wrong timestamp.** A registry entry carries both `procStart` —
+when the PROCESS began, stamped in UTC — and `startedAt`, when the SESSION began. The
+guard preferred `startedAt`, because it is a plain epoch and needs no timezone
+reasoning, which is a reason about convenience and not about correctness. Resume a
+session, or begin a new conversation inside a process that is already running, and the
+session starts long after the process did.
+
+### Measured, so do not re-measure
+
+Across all seven live sessions on this machine:
+
+| | agreement with `ps` |
+|---|---|
+| `procStart` | exact — 0.0 minutes on every one |
+| `startedAt` | 0.2–0.3 minutes on six, and **14.8 minutes** on the resumed one |
+
+Fourteen point eight against a five-minute threshold, so one working session disappeared
+and nothing anywhere said why. `procStart` is the right field because the guard is about
+the process; `startedAt` remains the fallback for older entries that lack it.
+
+**The failure is silent by construction**, which is what made it worth writing down: a
+dropped registry entry is indistinguishable from a session that was never there. If
+sessions are missing from the room again, compare `ps -o lstart=` against both fields
+before looking anywhere else.

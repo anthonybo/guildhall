@@ -160,9 +160,23 @@ function fromFiles(dir: string): Registry[] {
 		const lstart = starts.get(d.pid)
 		if (!lstart) return true // ps said nothing; do not drop a session over it
 		const psEpoch = Date.parse(lstart) // ps prints local time
-		// procStart is stamped in UTC, so never string-compare the two. startedAt
-		// is a plain epoch and needs no timezone reasoning at all.
-		const fileEpoch = d.startedAt || Date.parse(`${d.procStart} UTC`)
+		/**
+		 * `procStart` FIRST, because this guard is about the process.
+		 *
+		 * It used to prefer `startedAt` — a plain epoch, no timezone reasoning, which is
+		 * why it was reached for. But `startedAt` is when the SESSION began, and a
+		 * session can begin long after the process it runs in: resume one, or start a
+		 * new conversation in a process that was already up, and the two diverge. This
+		 * guard exists to catch a REUSED PID, so comparing anything other than the
+		 * process's own start time asks the wrong question.
+		 *
+		 * Measured across seven live sessions: `procStart` matched `ps` exactly on every
+		 * one, while `startedAt` was out by 14.8 minutes on a session resumed later —
+		 * over the five-minute threshold, so a working session vanished from the room
+		 * with nothing said. `procStart` is stamped in UTC, so it must never be
+		 * string-compared with what `ps` prints, which is local.
+		 */
+		const fileEpoch = d.procStart ? Date.parse(`${d.procStart} UTC`) : d.startedAt
 		if (!psEpoch || !fileEpoch || Number.isNaN(psEpoch) || Number.isNaN(fileEpoch)) return true
 		return Math.abs(psEpoch - fileEpoch) < 5 * 60_000
 	})

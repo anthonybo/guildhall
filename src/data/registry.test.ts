@@ -6,6 +6,7 @@
  * a session anybody had asked for.
  */
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -80,4 +81,67 @@ test('an interactive session is never judged by any of this', () => {
 		liveSessions(dir).map((s) => s.sessionId),
 		['terminal'],
 	)
+})
+
+/**
+ * The PID-reuse guard, and the thing it must not do: drop a session that is running.
+ *
+ * A working session vanished from the room with nothing said. It was alive, in the
+ * registry, with a transcript on disk — and the guard threw it away because it compared
+ * `startedAt`, which is when the SESSION began, against what `ps` reports, which is when
+ * the PROCESS began. Resume a session, or start a new conversation in a process that is
+ * already up, and those are different times. Measured on the real machine: 14.8 minutes
+ * apart, against a five-minute threshold.
+ *
+ * `process.pid` is used so `ps` reports a genuine start time and the comparison is real
+ * rather than mocked.
+ */
+const realStart = () => {
+	const lstart = execFileSync('ps', ['-o', 'lstart=', '-p', String(process.pid)], { encoding: 'utf8' }).trim()
+	return Date.parse(lstart)
+}
+
+/** A registry file for this very process, with the two timestamps set as given. */
+function stamped(dir: string, id: string, procStart: string | undefined, startedAt: number | undefined) {
+	fs.writeFileSync(
+		path.join(dir, `${process.pid}.json`),
+		JSON.stringify({ pid: process.pid, sessionId: id, cwd: '/tmp/guildhall-fixture/orchard', kind: 'interactive', status: 'busy', ...(procStart ? { procStart } : {}), ...(startedAt ? { startedAt } : {}) }),
+	)
+}
+
+test('a session resumed long after its process started is kept', () => {
+	// The exact shape of the session that was lost: procStart correct, startedAt
+	// fifteen minutes later because the session began later than the process did.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-reg-start-'))
+	const started = realStart()
+	const utc = new Date(started).toUTCString().replace('GMT', '').trim()
+	// `ps`-style UTC stamp, the format Claude Code writes
+	const procStart = new Date(started).toUTCString().replace(/^\w+, (\d+) (\w+) (\d+) /, '$2 $1 $3 ').replace(' GMT', '')
+	stamped(dir, 'resumed', new Date(started).toISOString().replace('T', ' ').replace(/\.\d+Z$/, ''), started + 15 * 60_000)
+	assert.ok(
+		liveSessions(dir).some((s) => s.sessionId === 'resumed'),
+		`a running session was dropped over its startedAt (procStart ${procStart}, utc ${utc})`,
+	)
+	fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('a pid that was reused is still dropped', () => {
+	// The guard has to keep working. A registry entry claiming a process start hours
+	// from what ps reports is a recycled pid, not a session.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-reg-reuse-'))
+	const wrong = new Date(realStart() - 6 * 60 * 60_000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+	stamped(dir, 'recycled', wrong, undefined)
+	assert.ok(!liveSessions(dir).some((s) => s.sessionId === 'recycled'), 'a reused pid was accepted')
+	fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test('an entry with no procStart falls back to startedAt', () => {
+	// Older entries have only the epoch, and must not be dropped for lacking a field.
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-reg-old-'))
+	stamped(dir, 'legacy', undefined, realStart())
+	assert.ok(
+		liveSessions(dir).some((s) => s.sessionId === 'legacy'),
+		'an entry without procStart was dropped',
+	)
+	fs.rmSync(dir, { recursive: true, force: true })
 })
