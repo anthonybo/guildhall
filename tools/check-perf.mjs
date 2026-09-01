@@ -196,7 +196,7 @@ checks.push({
 	unit: 'cpu-ms/frame',
 	budget: 20,
 	was: 9.9,
-	note: 'was 17.7; reads 16.2 at load 27, so the ceiling covers that',
+	note: 'was 17.7; reads 16.2 at load 27. Now measures a REAL room — see the note below',
 	measure: () =>
 		run(`
 			import { Canvas } from './src/canvas.ts'
@@ -204,14 +204,29 @@ checks.push({
 			import { Office } from './src/office.ts'
 			import { collect } from './src/data.ts'
 			const sessions = collect()
-			const off = new Office(104, 48)
+			// fit() is what BUILDS the room. Without it there are no pods, and therefore
+			// no desks, no monitors, no props and nobody sitting anywhere: this measured
+			// an empty floor for its whole life while claiming to be the room. The old
+			// call was new Office(104, 48), whose arguments the constructor does not even
+			// take — the real app calls new Office() and then fits it.
+			//
+			// placed was passed as an empty array for the same reason, so the characters
+			// were missing too. Measured on seven live sessions: 5.2 cpu-ms empty against
+			// 5.7 with the room actually in it. The point is not the 10 percent — it is
+			// that this gate was blind to monitors and people, which are exactly the
+			// sprites most likely to be added to.
+			//
+			// NOTE: no backticks in here. This whole body is a template literal.
+			const off = new Office()
 			const cv = new Canvas(104 * 4, 48 * 4)
+			off.fit(cv.w, cv.rows, sessions)
 			cv.clear([40, 38, 52])
-			off.draw(cv, sessions)
+			const placed = off.draw(cv, sessions)
+			if (!off.monitors.length) throw new Error('the room came up empty — fit() is not building pods any more')
 			const scene = { props: off.props, monitors: off.monitors, badges: off.badges, logos: off.logos, plates: [] }
-			for (let i = 0; i < 20; i++) renderRoom(cv, scene, [], 4, 8, 2)
+			for (let i = 0; i < 20; i++) renderRoom(cv, scene, placed, 4, 8, 2)
 			const c = process.cpuUsage(); const N = 60
-			for (let i = 0; i < N; i++) renderRoom(cv, scene, [], 4, 8, i % 4)
+			for (let i = 0; i < N; i++) renderRoom(cv, scene, placed, 4, 8, i % 4)
 			const u = process.cpuUsage(c)
 			console.log((u.user + u.system) / 1000 / N)
 		`),
