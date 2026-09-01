@@ -32,6 +32,8 @@ import {
 	upscale,
 } from './kitty.ts'
 import { collect as collectReal, mixedHarness, needsAttention, order, type Session } from './data.ts'
+import { drawBoard, focused } from './board.ts'
+import { glance } from './peek.ts'
 import { sweepGhosts as sweepCodexGhosts } from './data/codex.ts'
 import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
@@ -1037,6 +1039,15 @@ function draw() {
 			for (const b of office.badges) cv.blit(b.x, b.y, shrink(badgeFor(b, LEVEL_LOOK), TILE, TILE))
 			for (const l of office.logos) cv.blit(l.x, l.y, shrink(logo(l.agent, harnessColor(l.agent)), TILE, TILE))
 		}
+	}
+
+	// The wall display, drawn last so it sits over the floor rather than under it.
+	if (office.board) {
+		const pick = focused(visible())
+		// A token that moves when the session does. `turns` and `ctxUsed` only change when
+		// real work happens, so an idle session is never re-read — see peek.ts.
+		const screen = pick?.workspace ? glance(pick.workspace, `${pick.turns}:${pick.ctxUsed}:${pick.doing}`) : null
+		drawBoard(cv, office.board, TILE, pick, screen)
 	}
 
 	const body: string[] = [...townLines]

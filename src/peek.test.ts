@@ -193,3 +193,28 @@ test('two workspaces are read separately and do not share state', async () => {
 	assert.deepEqual(glance(OTHER, 't', 1000, reader).lines, ['theirs'])
 	assert.equal(calls, 2)
 })
+
+test('the status block is not what a small display gets spent on', () => {
+	// It is the least informative part of the screen, every value in it is already in the
+	// table, and it carries the day's spend — which this project's own rule says must not
+	// leave the machine, and the room gets rendered into committed images.
+	const screen = ['I have finished the audit and pushed it.', '', '❯', 'Opus 5 1M - ├ guildhall · main', '930k/1M ● ● ● ● ● Today $0 5hr ██░░░░', 'Weekly ████████░░ 84.0% 1hr 37m', '▶▶ auto mode on (shift+tab to cycle)'].join('\n')
+	const out = clean(screen)
+	assert.equal(out.at(-1), '❯', `kept the status block: ${JSON.stringify(out.slice(-3))}`)
+	assert.ok(
+		!out.some((l) => /Opus|Weekly|auto mode/.test(l)),
+		'status chrome survived',
+	)
+	assert.ok(
+		!out.some((l) => l.includes('$')),
+		'a spend figure survived onto the wall',
+	)
+	assert.ok(out.includes('I have finished the audit and pushed it.'), 'it threw away the actual content')
+})
+
+test('a dollar sign mid-conversation is not mistaken for the status bar', () => {
+	// Stripping only from the END is what makes the heuristic safe: content keeps its
+	// characters, and the worst case is losing one trailing line.
+	const out = clean(['it cost $4 to run', 'and then it finished'].join('\n'))
+	assert.deepEqual(out, ['it cost $4 to run', 'and then it finished'])
+})

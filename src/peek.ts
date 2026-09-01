@@ -129,6 +129,30 @@ export function clean(text: string): string[] {
 		)
 		.filter((l) => !/^[─│╭╮╰╯┌┐└┘━┃╔╗╚╝═║]+$/.test(l))
 	while (lines.length && !lines[lines.length - 1]) lines.pop()
+	// Drop the status block off the bottom.
+	//
+	// Two reasons, and the second is the important one. It is the least informative part
+	// of the screen — model, context percentage, mode — and all of it is already in the
+	// table below the room, so spending a small display on it says nothing twice. And it
+	// carries the DAY'S SPEND, which is not something to paint on a wall: this project's
+	// own rule is that no dollar figure leaves the machine, and `tools/make-docs-images`
+	// renders this room into images that get committed.
+	//
+	// THE PROMPT IS THE BOUNDARY. Everything below the last `❯` is chrome — model, gauges,
+	// mode — and everything above it is the conversation. That is a structural fact about
+	// the screen rather than a guess about its wording, so it does not rot when a model
+	// gets renamed or a gauge changes shape. Matching "Opus 5 1M" was the alternative, and
+	// a status line naming the model is exactly the sort of thing that changes.
+	//
+	// The prompt line itself is KEPT: a message sitting there unsent is one of the few
+	// things genuinely worth seeing from across a room.
+	const prompt = lines.findLastIndex((l) => /^[❯>]\s?/.test(l))
+	if (prompt >= 0) lines.length = prompt + 1
+	// No prompt found — an unrecognised screen. Fall back to stripping what the status
+	// block is made of, and keep it conservative: this only ever strips from the END, so a
+	// session that prints a dollar figure mid-conversation keeps it.
+	else while (lines.length && /[█░▓]|\$\d|\d+k\/\d+[MK]|auto mode|shift\+tab/i.test(lines[lines.length - 1]!)) lines.pop()
+	while (lines.length && !lines[lines.length - 1]) lines.pop()
 	return lines.slice(-PEEK_LINES)
 }
 

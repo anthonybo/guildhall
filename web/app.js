@@ -2329,6 +2329,7 @@ var FACILITIES = {
   }
 };
 var DROP_ORDER = ["couch", "pingpong", "kitchen"];
+var BOARD = { w: 12, h: 3, minCols: 18 };
 
 // src/office/plan.ts
 function planRoom(cols, rows, projects) {
@@ -2355,12 +2356,14 @@ function planRoom(cols, rows, projects) {
     workBottom: 1,
     zoneColor: /* @__PURE__ */ new Map(),
     hiddenCount: 0,
-    dropped: []
+    dropped: [],
+    board: null
   };
   room.zoneColor = projectColours(projects.map((p) => p.name));
   const bandRows = [];
   for (let r = 1; r + 3 < rows - 1; r += 4) bandRows.push(r);
   const band2 = seatProjects(room, projects, bandRows);
+  addBoard(room, bandRows, band2);
   const socialBands = addFacilities(room, bandRows, band2);
   addTalkArea(room, socialBands);
   addDecor(room, socialBands);
@@ -2424,6 +2427,21 @@ function seatProjects(room, projects, bandRows) {
   room.dropped = [];
   room.workBottom = room.pods.length ? Math.max(...room.pods.map((p) => p.seatRow)) + 1 : 1;
   return band2;
+}
+function addBoard(room, bandRows, firstFree) {
+  if (room.cols < BOARD.minCols) {
+    room.dropped.push("board");
+    return;
+  }
+  const row = bandRows[firstFree];
+  if (row === void 0 || row + BOARD.h > room.rows - 1) {
+    room.dropped.push("board");
+    return;
+  }
+  const w = Math.min(BOARD.w, room.cols - 6);
+  const col = Math.max(2, Math.floor((room.cols - w) / 2));
+  room.board = { col, row, w, h: BOARD.h };
+  for (let r = row; r < row + BOARD.h; r++) for (let c = col; c < col + w; c++) if (room.grid[r]?.[c] !== void 0) room.grid[r][c] = "solid";
 }
 function addFacilities(room, bandRows, firstFree) {
   const below = room.workBottom + 2;
@@ -2564,6 +2582,14 @@ var RoomBase = class {
   logos = [];
   /** static furniture image placements, in canvas pixels */
   props = [];
+  /**
+   * The wall display, in TILE coordinates, or null when the room cannot afford one.
+   *
+   * Placement only — the text is not the room's business. The office draws sessions; a
+   * live screen comes from cmux and belongs to whoever is rendering, which also keeps
+   * `peek.ts` out of the browser bundle and out of this class.
+   */
+  board = null;
   /** cell spans covered by an image, per cell row. Kitty draws images over text,
    *  so a label must not overlap one — but sharing the row is fine. */
   imageSpans = /* @__PURE__ */ new Map();
@@ -2616,6 +2642,7 @@ var RoomBase = class {
     this.zoneColor = room.zoneColor;
     this.hiddenCount = room.hiddenCount;
     this.dropped = room.dropped;
+    this.board = room.board;
   }
   /* ───────────────────── walkability & paths ───────────────────── */
   /** A spot tile is walkable only by whoever holds it, so nobody stands in

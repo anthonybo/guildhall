@@ -36,6 +36,14 @@ export class RoomBase {
 	logos: { x: number; y: number; agent: string }[] = []
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
+	/**
+	 * The wall display, in TILE coordinates, or null when the room cannot afford one.
+	 *
+	 * Placement only — the text is not the room's business. The office draws sessions; a
+	 * live screen comes from cmux and belongs to whoever is rendering, which also keeps
+	 * `peek.ts` out of the browser bundle and out of this class.
+	 */
+	board: { col: number; row: number; w: number; h: number } | null = null
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
 	 *  so a label must not overlap one — but sharing the row is fine. */
 	protected imageSpans = new Map<number, [number, number][]>()
@@ -93,6 +101,7 @@ export class RoomBase {
 		this.zoneColor = room.zoneColor
 		this.hiddenCount = room.hiddenCount
 		this.dropped = room.dropped
+		this.board = room.board
 	}
 
 	/* ───────────────────── walkability & paths ───────────────────── */

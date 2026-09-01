@@ -172,6 +172,29 @@ export const FACILITIES: Record<
 /** First to go when the room runs out of bands. */
 export const DROP_ORDER = ['couch', 'pingpong', 'kitchen'] as const
 
+/**
+ * The wall display: one screen in the room showing a real session's terminal.
+ *
+ * Sized in TILES. Why one board and not a screen per desk: a desk is 8 canvas columns,
+ * and both renderers draw one character per column, so a desk monitor holds EIGHT
+ * characters — measured, in the terminal and the browser alike. Reaching a readable
+ * width per desk would mean drawing at half the size of every other word in the room,
+ * which the terminal cannot do at all. One board at room scale holds 44 columns in a
+ * 90-column terminal and ~54 in the browser, which is a real viewport.
+ *
+ * WIDTH IS CAPPED BELOW THE ROOM'S. A full-width partition would cut the floor in two,
+ * and `findPath` has no connectivity check — `office.test.ts` asserts every spot is
+ * reachable from the door, and that test is the one that would catch it. Both ends stay
+ * open by construction.
+ *
+ * ALL THREE NUMBERS ARE TILES. The terminal builds `new Canvas(cols, townRows * 2)` from
+ * the terminal's own column count, so a 90-column terminal is a room about 22 tiles wide
+ * — not 104. A threshold written in canvas columns would have dropped this board on every
+ * real terminal there is, silently, because dropping is what it does when it does not
+ * fit. 18 tiles leaves the 12-tile board a clear margin either side.
+ */
+export const BOARD = { w: 12, h: 3, minCols: 18 } as const
+
 /** Stable hash for anything that must look varied but never move between frames. */
 export const hash = (s: string) => {
 	let h = 0
