@@ -1,103 +1,203 @@
 /**
- * A glance at what a session's screen is showing — cheap enough to do for several.
+ * A glance at what a session's screen is showing, for the room to draw.
  *
- * The terminal view reads a full styled grid: colour and exact position for every cell,
- * 58KB, which is right when you are reading one screen and absurd when you want a
- * glimpse of seven. This reads the last few lines as plain text instead: 1KB, measured.
+ * SYNCHRONOUS, and that is the shape of the whole file. Both renderers are synchronous —
+ * `draw()` in main.ts and `frame()` in web/room.ts — so a promise is useless to them: its
+ * value arrives after the frame that wanted it. This answers from cache immediately and
+ * refreshes behind the answer, which is what `data/usage.ts` already does for the same
+ * reason. The first version was `async` and could not be called by anything that draws.
  *
- * THE COST IS THE SPAWN, NOT THE BYTES. Measured on this machine: the styled grid costs
- * 0.09 cpu-s per call and the plain text 0.08, because both are dominated by starting a
- * cmux process. Seven sessions on a two-second poll would be 0.6 cpu-s per round — about
- * a third of a core, continuously, which is the exact shape of the cost this project has
- * a written apology for.
+ * THE COST IS THE SPAWN. Measured: a screen read costs ~0.08 cpu-s whether it returns 1KB
+ * of plain text or 58KB of styled grid, because both start a cmux process. Seven desks on
+ * a two-second timer is 0.28 cpu-s per second — a third of a core, continuously, which is
+ * the cost CLAUDE.md apologises for. So this does not run on a timer.
  *
- * So the payload is small and the CALLS are what is rationed:
+ * IT READS WHEN THE CONTENT MIGHT HAVE MOVED, not when a clock says so. The caller passes
+ * a `token` — anything that changes when the session does, and `collect()` already has
+ * one for free in the transcript size it stats for every digest. An idle session costs
+ * NOTHING: same token, no read, no process. A timer is wrong in both directions at once,
+ * re-reading a session that has done nothing and lagging one that is busy.
  *
- *  - a cache with a TTL, because several desks and several clients asking about the same
- *    session must cost one read, not one each
- *  - one read in flight per workspace, so a slow cmux cannot pile up spawns behind it
- *  - nothing here runs on the poll path; `collect()` has a 12 cpu-ms budget and this
- *    would eat it whole
+ * Deliberately does not import `control.ts`. That file's header exists so "is this still
+ * read-only?" has a one-file answer, and a module the room draws from should not widen
+ * it. This builds its own read-screen call over `runCmux`.
  */
-import { readScreen } from './control.ts'
+import { runCmux } from './cmuxreach.ts'
 
 /** Enough to see what a session is doing without being a terminal. */
 export const PEEK_LINES = 14
 
-/**
- * How long a glance stays fresh.
- *
- * The room redraws far more often than this. Two seconds matches the terminal view's own
- * poll, which is the fastest anything here reads a screen, and means a room full of
- * desks costs the same as one open terminal rather than one per desk.
- */
-const TTL = 2000
+/** A glance that takes longer than this is not a glance. */
+const TIMEOUT = 4000
 
-type Entry = { at: number; lines: string[]; pending?: Promise<string[]> }
+/**
+ * A backstop, for what the token cannot see.
+ *
+ * A long `bash` run streams output without the transcript growing, so the token sits
+ * still while the screen moves. Thirty seconds costs nothing on an idle room — one read
+ * per session per half minute at worst — and keeps a busy desk from going badly stale.
+ */
+const BACKSTOP = 30_000
+
+/**
+ * How long to wait after a failure.
+ *
+ * `usage.ts` says this in bold: it had no backoff and got its calls rate-limited. A cmux
+ * that cannot be reached at all — the launchd case in MISTAKES.md — would otherwise be
+ * asked again on every frame, forever.
+ */
+const AFTER_ERROR = 30_000
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+export type Glance = {
+	/** Newest last. Empty until the first read lands, which is not the same as blank. */
+	lines: string[]
+	/** When these lines were read, or 0 if they never were. */
+	at: number
+	/** A read is out right now. */
+	reading: boolean
+	/** The last attempt failed; `lines` is the last good text, or empty. */
+	error?: string
+}
+
+type Entry = {
+	lines: string[]
+	at: number
+	/** The token these lines were read for, so an unchanged session is not re-read. */
+	token: string
+	reading: boolean
+	error?: string
+	failedAt: number
+	/**
+	 * Bumped whenever an entry is dropped or replaced.
+	 *
+	 * A read landing after `resetPeek()` or `keepOnly()` used to write itself back and
+	 * resurrect a workspace nobody was watching — and two reads could end up in flight on
+	 * one workspace with the second silently discarded, which is the pile-up this file
+	 * claims cannot happen. The landing read checks this before writing.
+	 */
+	gen: number
+}
+
+const seen = new Map<string, Entry>()
+let generation = 0
+/** In-flight reads, so a test can wait for a refresh this synchronous API started. */
+const running = new Set<Promise<unknown>>()
+
+export function resetPeek() {
+	generation++
+	seen.clear()
+}
+export const peekSize = () => seen.size
+/** Test seam: the API is synchronous, so there is otherwise no way to await the refresh
+ *  it kicked off. */
+export async function whenQuiet() {
+	while (running.size) await Promise.allSettled([...running])
+}
 
 /**
  * How a screen is read.
  *
- * A parameter purely so a test can count the reads without a cmux on the machine — the
- * same seam `liveSessions(dir)` keeps, and for the same reason: what these tests are
- * about is HOW MANY TIMES this is called, which cannot be observed from outside.
- * ESM exports are read-only bindings, so there is nothing to stub in place.
+ * A parameter so a test can count the reads and answer without a cmux on the machine —
+ * the call count is the design here and cannot be observed from outside. Note this is NOT
+ * the `liveSessions(dir)` pattern, which is a path; there is no function-injection
+ * precedent in src/, so this one stands on its own reasoning.
  */
-export type Reader = (workspace: string, lines?: number) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
+export type Reader = (workspace: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
 
-const seen = new Map<string, Entry>()
-
-/** Test seam, and a way for a caller to drop everything when control is turned off. */
-export function resetPeek() {
-	seen.clear()
+const readScreen: Reader = async (workspace) => {
+	const r = await runCmux(['read-screen', '--workspace', workspace, '--lines', String(PEEK_LINES)], TIMEOUT)
+	return r.ok ? { ok: true, text: r.text } : { ok: false, error: r.error }
 }
 
-/** How many workspaces are being remembered, so a leak is visible rather than inferred. */
-export const peekSize = () => seen.size
+/**
+ * Tidy a screen into lines worth drawing.
+ *
+ * A TUI screen is mostly furniture: box rules, the gutters tool output is indented with,
+ * and a blank half below the prompt. None of it survives being drawn small, and all of it
+ * costs room somebody wants for words.
+ */
+export function clean(text: string): string[] {
+	const lines = text
+		.split('\n')
+		.map((l) =>
+			l
+				.replace(/^[\s│⎿]+/, '')
+				.replace(/\s+$/, '')
+				.replace(/[ \t]{3,}/g, '  '),
+		)
+		.filter((l) => !/^[─│╭╮╰╯┌┐└┘━┃╔╗╚╝═║]+$/.test(l))
+	while (lines.length && !lines[lines.length - 1]) lines.pop()
+	return lines.slice(-PEEK_LINES)
+}
 
 /**
- * The last few lines of a workspace's screen, from cache when it is fresh.
+ * What this workspace's screen was showing, and a refresh if it might have moved.
  *
- * Never throws and never returns partial nonsense: a read that fails gives back the last
- * good lines if there are any, and an empty list otherwise. A desk showing slightly old
- * text is better than a desk that goes blank every time cmux is busy.
+ * Returns immediately, always. `token` is anything that changes when the session does — a
+ * transcript size is ideal and free. Same token in, no read out.
  */
-export async function peek(workspace: string, now = Date.now(), read: Reader = readScreen): Promise<string[]> {
+export function glance(workspace: string, token: string, now = Date.now(), read: Reader = readScreen): Glance {
+	// Junk in, nothing out, and no entry minted for it. `runCmux` would refuse the id too,
+	// but only after paying for a process, and a caller passing rubbish in a loop would
+	// grow this map a key at a time.
+	if (!UUID.test(workspace)) return { lines: [], at: 0, reading: false, error: 'not a workspace id' }
 	const had = seen.get(workspace)
-	if (had && now - had.at < TTL) return had.lines
-	// Already being read. Join that read rather than starting a second one — this is the
-	// difference between one spawn per session and one per caller.
-	if (had?.pending) return had.pending
-	const pending = (async () => {
-		const r = await read(workspace, PEEK_LINES)
-		let lines: string[]
-		if (r.ok) {
-			lines = r.text.split('\n').map((l) => l.replace(/\s+$/, ''))
-			// Drop the trailing blanks outright. Most of a TUI screen below the prompt is
-			// empty, and carrying it means a desk drawing nothing but its own bottom edge.
-			while (lines.length && !lines[lines.length - 1]) lines.pop()
-			lines = lines.slice(-PEEK_LINES)
-		} else {
-			lines = seen.get(workspace)?.lines ?? []
+	// `slice()`, never the cached array itself: handing that out let one caller's `pop()`
+	// corrupt every other reader of the same session.
+	const state: Glance = had
+		? { lines: had.lines.slice(), at: had.at, reading: had.reading, ...(had.error !== undefined ? { error: had.error } : {}) }
+		: { lines: [], at: 0, reading: false }
+
+	if (had?.reading) return state
+	const moved = !had || had.token !== token
+	const old = !had || now - had.at >= BACKSTOP
+	const waiting = had?.error !== undefined && now - had.failedAt < AFTER_ERROR
+	if ((!moved && !old) || waiting) return state
+
+	const gen = generation
+	const before: Entry = {
+		lines: had?.lines ?? [],
+		at: had?.at ?? 0,
+		token,
+		reading: true,
+		failedAt: had?.failedAt ?? 0,
+		...(had?.error !== undefined ? { error: had.error } : {}),
+		gen,
+	}
+	seen.set(workspace, before)
+	state.reading = true
+
+	const job = (async () => {
+		let out: { ok: true; text: string } | { ok: false; error: string }
+		try {
+			out = await read(workspace)
+		} catch (e) {
+			// A reader that REJECTS rather than returning a Result. The first version left
+			// the pending promise in place, so every later call got the same rejection and
+			// the workspace never recovered short of a restart.
+			out = { ok: false, error: e instanceof Error ? e.message : 'read failed' }
 		}
-		// Stamped with WHEN IT WAS ASKED, not when it came back. Using the wall clock here
-		// meant the freshness window could not be reasoned about — a slow read made the
-		// entry look newer than the moment it describes, and an injected clock could not
-		// see the cache at all.
-		seen.set(workspace, { at: now, lines })
-		return lines
+		// Dropped or replaced while this was out: do not resurrect it.
+		if (generation !== gen || seen.get(workspace)?.gen !== gen) return
+		if (out.ok) seen.set(workspace, { lines: clean(out.text), at: now, token, reading: false, failedAt: 0, gen })
+		// The last good text is kept: a desk showing slightly old output beats one that
+		// blanks itself whenever cmux is busy.
+		else seen.set(workspace, { lines: before.lines, at: before.at, token, reading: false, error: out.error, failedAt: now, gen })
 	})()
-	seen.set(workspace, { at: had?.at ?? 0, lines: had?.lines ?? [], pending })
-	return pending
+	running.add(job)
+	void job.finally(() => running.delete(job))
+	return state
 }
 
-/**
- * Forget workspaces that are no longer on screen.
- *
- * Called with the set still in use. Without this the map grows for the life of a program
- * meant to run for days — the same rule `prune` follows for held names in settle.ts.
- */
+/** Forget workspaces no longer on screen, or the map grows for the life of a program meant
+ *  to run for days — the rule `prune` already follows for held names in settle.ts. */
 export function keepOnly(live: Iterable<string>) {
 	const keep = new Set(live)
-	for (const k of seen.keys()) if (!keep.has(k)) seen.delete(k)
+	for (const k of [...seen.keys()]) {
+		if (keep.has(k)) continue
+		generation++
+		seen.delete(k)
+	}
 }

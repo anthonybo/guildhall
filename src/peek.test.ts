@@ -1,94 +1,172 @@
 /**
  * Rationing the reads, which is the whole job.
  *
- * A glance at a screen costs a cmux process — 0.08 cpu-s, measured, and the same whether
- * it returns 1KB or 58KB. Seven desks asking every two seconds is a third of a core
- * continuously, which is the cost this project has a written apology for. So what these
- * tests assert is not that the text comes back; it is HOW MANY TIMES cmux is asked.
+ * A glance costs a cmux process — 0.08 cpu-s, measured, the same whether it returns 1KB
+ * or 58KB. Seven desks on a two-second timer is a third of a core continuously, the cost
+ * CLAUDE.md apologises for. So what most of these assert is not what comes back; it is
+ * HOW MANY TIMES cmux is asked, and whether an idle session costs anything at all.
+ *
+ * Several exist because a review found the bug first and no test could have caught it.
+ * Each of those says so.
  */
 import assert from 'node:assert/strict'
 import test, { beforeEach } from 'node:test'
-import { PEEK_LINES, type Reader, keepOnly, peek, peekSize, resetPeek } from './peek.ts'
+import { type Reader, clean, glance, keepOnly, peekSize, resetPeek, whenQuiet } from './peek.ts'
 
 const WS = 'aaaaaaaa-1111-2222-3333-444444444444'
 const OTHER = 'bbbbbbbb-1111-2222-3333-444444444444'
 
 let calls = 0
-let answer: () => Promise<{ ok: true; text: string } | { ok: false; error: string }>
-/** Counts every read, which is the thing under test. */
-const reader: Reader = async () => {
+let answer: (ws: string) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
+const reader: Reader = (ws) => {
 	calls++
-	return answer()
+	return answer(ws)
 }
 
 beforeEach(() => {
 	resetPeek()
 	calls = 0
-	answer = async () => ({ ok: true, text: 'one\ntwo\nthree\n' })
+	answer = async () => ({ ok: true, text: 'one\ntwo\n' })
 })
 
-test('a glance returns the lines, trailing blanks trimmed', async () => {
-	answer = async () => ({ ok: true, text: 'hello   \nworld\t\n\n\n' })
-	assert.deepEqual(await peek(WS, Date.now(), reader), ['hello', 'world'])
+/** Ask, wait for the refresh the synchronous call started, then ask again. */
+async function settle(ws: string, token: string, now: number, read: Reader = reader) {
+	glance(ws, token, now, read)
+	await whenQuiet()
+	return glance(ws, token, now, read)
+}
+
+test('the first look is empty and starts a read; the next has the lines', async () => {
+	const first = glance(WS, 't1', 1000, reader)
+	assert.deepEqual(first.lines, [], 'it should not block for the first read')
+	assert.equal(first.reading, true)
+	await whenQuiet()
+	const then = glance(WS, 't1', 1000, reader)
+	assert.deepEqual(then.lines, ['one', 'two'])
+	assert.equal(then.reading, false)
 	assert.equal(calls, 1)
 })
 
-test('a second glance inside the window costs nothing', async () => {
-	const t = 1_000_000
-	await peek(WS, t, reader)
-	await peek(WS, t + 500, reader)
-	await peek(WS, t + 1999, reader)
-	assert.equal(calls, 1, `cmux was asked ${calls} times for one window`)
+test('an idle session costs nothing at all', async () => {
+	// The whole reason the token exists. Same token, any number of frames, no process.
+	await settle(WS, 'size:900', 1000)
+	assert.equal(calls, 1)
+	for (let i = 0; i < 200; i++) glance(WS, 'size:900', 1000 + i, reader)
+	await whenQuiet()
+	assert.equal(calls, 1, `an idle desk cost ${calls - 1} extra reads`)
 })
 
-test('past the window it reads again', async () => {
-	const t = 2_000_000
-	await peek(WS, t, reader)
-	await peek(WS, t + 2001, reader)
+test('a session that moved is read again', async () => {
+	await settle(WS, 'size:900', 1000)
+	await settle(WS, 'size:1200', 1100)
 	assert.equal(calls, 2)
 })
 
-test('callers arriving together share one read', async () => {
-	// The case that matters: seven desks and two browsers all want the same session at
-	// the same moment. That is one spawn, not nine.
-	let release = () => {}
-	answer = () =>
-		new Promise((r) => {
-			release = () => r({ ok: true, text: 'shared\n' })
-		})
-	const all = Promise.all([peek(WS, 9e12, reader), peek(WS, 9e12, reader), peek(WS, 9e12, reader)])
-	release()
-	const [a, b, c] = await all
-	assert.equal(calls, 1, `three callers caused ${calls} reads`)
-	assert.deepEqual(a, ['shared'])
-	assert.deepEqual(b, c)
+test('a long backstop covers what the token cannot see', async () => {
+	// A bash run streams output without the transcript growing, so the token sits still
+	// while the screen moves.
+	await settle(WS, 'same', 1000)
+	glance(WS, 'same', 1000 + 29_000, reader)
+	await whenQuiet()
+	assert.equal(calls, 1, 'read again before the backstop')
+	glance(WS, 'same', 1000 + 31_000, reader)
+	await whenQuiet()
+	assert.equal(calls, 2, 'the backstop never fired')
 })
 
-test('different workspaces are read separately', async () => {
-	await peek(WS, Date.now(), reader)
-	await peek(OTHER, Date.now(), reader)
-	assert.equal(calls, 2)
+test('frames during a read do not start another one', async () => {
+	// The pile-up this file claims cannot happen: a slow cmux and sixty frames a second.
+	let release = (_: { ok: true; text: string }) => {}
+	answer = () => new Promise((r) => (release = r))
+	glance(WS, 't', 1000, reader)
+	for (let i = 0; i < 50; i++) glance(WS, 't', 1000 + i, reader)
+	assert.equal(calls, 1, `${calls} reads were started for one workspace`)
+	release({ ok: true, text: 'done\n' })
+	await whenQuiet()
+	assert.deepEqual(glance(WS, 't', 1000, reader).lines, ['done'])
 })
 
-test('a failed read keeps the last good lines rather than blanking the desk', async () => {
-	// A desk showing slightly old text is better than one that goes empty whenever cmux
-	// is busy — the room is glanced at, not studied.
-	const t = 3_000_000
-	answer = async () => ({ ok: true, text: 'good\n' })
-	assert.deepEqual(await peek(WS, t, reader), ['good'])
-	answer = async () => ({ ok: false, error: 'cmux said no' })
-	assert.deepEqual(await peek(WS, t + 3000, reader), ['good'], 'a failed read wiped the desk')
+test('a reader that REJECTS does not poison the workspace forever', async () => {
+	// Found by review, and nothing could have caught it: the rejected promise was left in
+	// place, so every later call got the same rejection and the session never recovered
+	// short of a restart. runCmux does not reject today — this is the seam, not the
+	// shipped path.
+	answer = async () => {
+		throw new Error('boom')
+	}
+	glance(WS, 't1', 1000, reader)
+	await whenQuiet()
+	const bad = glance(WS, 't1', 1000, reader)
+	assert.match(bad.error ?? '', /boom/)
+	assert.deepEqual(bad.lines, [], 'a failure with nothing cached should be empty')
+	// and it recovers once cmux does
+	answer = async () => ({ ok: true, text: 'back\n' })
+	const after = await settle(WS, 't2', 1000 + 31_000)
+	assert.deepEqual(after.lines, ['back'], 'the workspace never recovered')
+	assert.equal(after.error, undefined)
 })
 
-test('a failure with nothing cached is empty, not undefined', async () => {
-	answer = async () => ({ ok: false, error: 'nope' })
-	assert.deepEqual(await peek(WS, Date.now(), reader), [])
+test('a failure keeps the last good text rather than blanking the desk', async () => {
+	await settle(WS, 't1', 1000)
+	answer = async () => ({ ok: false, error: 'cmux is busy' })
+	const after = await settle(WS, 't2', 2000)
+	assert.deepEqual(after.lines, ['one', 'two'], 'a failed read wiped the desk')
+	assert.match(after.error ?? '', /busy/)
+})
+
+test('a failure backs off instead of asking again every frame', async () => {
+	// usage.ts says this in bold: no backoff is what got its calls rate-limited. An
+	// unreachable cmux would otherwise be asked once per frame, forever.
+	answer = async () => ({ ok: false, error: 'no cmux here' })
+	await settle(WS, 't1', 1000)
+	assert.equal(calls, 1)
+	for (let i = 0; i < 100; i++) glance(WS, `t${i}`, 1000 + i * 100, reader)
+	await whenQuiet()
+	assert.equal(calls, 1, `a broken cmux was asked ${calls} times inside the backoff`)
+	glance(WS, 'later', 1000 + 31_000, reader)
+	await whenQuiet()
+	assert.equal(calls, 2, 'it never tried again after the backoff')
+})
+
+test('a read landing after the entry was dropped does not resurrect it', async () => {
+	// Found by review. keepOnly did not actually bound the map while reads were out.
+	let release = (_: { ok: true; text: string }) => {}
+	answer = () => new Promise((r) => (release = r))
+	glance(WS, 't', 1000, reader)
+	resetPeek()
+	assert.equal(peekSize(), 0)
+	release({ ok: true, text: 'ghost\n' })
+	await whenQuiet()
+	assert.equal(peekSize(), 0, 'a landing read resurrected a dropped workspace')
+
+	resetPeek()
+	glance(OTHER, 't', 1000, reader)
+	keepOnly([])
+	release({ ok: true, text: 'ghost\n' })
+	await whenQuiet()
+	assert.equal(peekSize(), 0, 'keepOnly does not bound the map while a read is out')
+})
+
+test('the caller cannot corrupt the cache through the array it is handed', async () => {
+	// Found by review: the cached array was returned by reference, so one caller's pop()
+	// changed what every other desk saw.
+	await settle(WS, 't', 1000)
+	const mine = glance(WS, 't', 1000, reader)
+	mine.lines.push('INJECTED')
+	mine.lines.reverse()
+	assert.deepEqual(glance(WS, 't', 1000, reader).lines, ['one', 'two'], 'the cache was mutated from outside')
+})
+
+test('a junk workspace id is refused without minting an entry or a process', () => {
+	const r = glance('not-a-uuid', 't', 1000, reader)
+	assert.equal(r.error, 'not a workspace id')
+	assert.equal(calls, 0, 'a process was started for a junk id')
+	assert.equal(peekSize(), 0, 'a junk id grew the map')
 })
 
 test('workspaces that leave the room are forgotten', async () => {
-	// Or the map grows for the life of a program meant to run for days.
-	await peek(WS, Date.now(), reader)
-	await peek(OTHER, Date.now(), reader)
+	await settle(WS, 't', 1000)
+	await settle(OTHER, 't', 1000)
 	assert.equal(peekSize(), 2)
 	keepOnly([WS])
 	assert.equal(peekSize(), 1)
@@ -96,14 +174,22 @@ test('workspaces that leave the room are forgotten', async () => {
 	assert.equal(peekSize(), 0)
 })
 
-test('it asks for a glance, not a screenful', async () => {
-	// Reading 120 lines would be the terminal view's job and its cost.
-	let asked = -1
-	const spy: Reader = async (_ws, lines) => {
-		asked = lines ?? -1
-		return { ok: true as const, text: 'x\n' }
-	}
-	await peek(WS, Date.now(), spy)
-	assert.equal(asked, PEEK_LINES)
-	assert.ok(PEEK_LINES <= 20, 'a glance should stay small')
+test('clean strips the furniture and keeps at most a glance', () => {
+	// This was untested: removing the length cap left every test passing.
+	assert.deepEqual(clean('a\n\n\n'), ['a'], 'trailing blanks kept')
+	assert.deepEqual(clean('────────\nreal\n'), ['real'], 'a box rule survived')
+	assert.deepEqual(clean('  ⎿  indented\n'), ['indented'], 'the gutter survived')
+	assert.deepEqual(clean('a     b\n'), ['a  b'], 'a run of spaces survived')
+	const many = clean(Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n'))
+	assert.equal(many.length, 14, `kept ${many.length} lines`)
+	assert.equal(many.at(-1), 'line 59', 'it kept the wrong end — the newest lines matter')
+})
+
+test('two workspaces are read separately and do not share state', async () => {
+	answer = async (ws) => ({ ok: true, text: ws === WS ? 'mine\n' : 'theirs\n' })
+	await settle(WS, 't', 1000)
+	await settle(OTHER, 't', 1000)
+	assert.deepEqual(glance(WS, 't', 1000, reader).lines, ['mine'])
+	assert.deepEqual(glance(OTHER, 't', 1000, reader).lines, ['theirs'])
+	assert.equal(calls, 2)
 })
