@@ -195,8 +195,10 @@ checks.push({
 	name: 'renderRoom @ browser scale',
 	unit: 'cpu-ms/frame',
 	budget: 20,
-	was: 9.9,
-	note: 'was 17.7; reads 16.2 at load 27. Now measures a REAL room — see the note below',
+	// No `was:` here on purpose. The old figures were produced by the version of this
+	// benchmark that rendered an empty floor, so quoting them beside a real-room reading
+	// compares two different things — the same trap one level down.
+	note: 'a real room: 7 sessions read 4.8-5.6 cpu-ms, the sprites being ~6% of it',
 	measure: () =>
 		run(`
 			import { Canvas } from './src/canvas.ts'
@@ -219,10 +221,21 @@ checks.push({
 			// NOTE: no backticks in here. This whole body is a template literal.
 			const off = new Office()
 			const cv = new Canvas(104 * 4, 48 * 4)
-			off.fit(cv.w, cv.rows, sessions)
+			// cv.h, not cv.rows. fit() divides by TILE to get tiles, and a canvas is two
+			// pixels per terminal row — every other caller passes cv.h, and web/room.ts
+			// carries a comment warning about this exact unit confusion. Measured as
+			// harmless at 7 to 40 sessions (identical pods, monitors, props and people),
+			// which is precisely why it would have sat here unnoticed.
+			off.fit(cv.w, cv.h, sessions)
 			cv.clear([40, 38, 52])
 			const placed = off.draw(cv, sessions)
-			if (!off.monitors.length) throw new Error('the room came up empty — fit() is not building pods any more')
+			// Sessions but no monitors means fit() has stopped building pods, which is the
+			// silent failure this benchmark had for its whole life. NO sessions means the
+			// machine simply has none running — a normal thing, and not something to fail
+			// a commit over. The first version threw on both and blamed fit() for both:
+			// quitting your sessions would have blocked every commit, with an error
+			// asserting a cause that was not true.
+			if (sessions.length && !off.monitors.length) throw new Error('fit() built no pods from ' + sessions.length + ' sessions')
 			const scene = { props: off.props, monitors: off.monitors, badges: off.badges, logos: off.logos, plates: [] }
 			for (let i = 0; i < 20; i++) renderRoom(cv, scene, placed, 4, 8, 2)
 			const c = process.cpuUsage(); const N = 60
