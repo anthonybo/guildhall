@@ -31,6 +31,10 @@ struct Config {
 	var host = "127.0.0.1"
 	var labels = "vertical"
 	var awakeDisplay = true
+	/// How hard to hold the machine awake: "off", "working" or "always".
+	/// One key rather than two booleans, so this menu can offer all three states —
+	/// a single switch could force it on and had no way to turn holding off.
+	var awakeMode = "working"
 	var control = false
 	var codex = false
 
@@ -67,6 +71,7 @@ struct Config {
 		c.host = o["host"] as? String ?? c.host
 		c.labels = o["labels"] as? String ?? c.labels
 		c.awakeDisplay = o["awakeDisplay"] as? Bool ?? c.awakeDisplay
+		if let m = o["awakeMode"] as? String, ["off", "working", "always"].contains(m) { c.awakeMode = m }
 		c.control = o["control"] as? Bool ?? c.control
 		c.codex = o["codex"] as? Bool ?? c.codex
 		return c
@@ -90,6 +95,7 @@ struct Config {
 		o["host"] = host
 		o["labels"] = labels
 		o["awakeDisplay"] = awakeDisplay
+		o["awakeMode"] = awakeMode
 		o["control"] = control
 		o["codex"] = codex
 		let data = try JSONSerialization.data(withJSONObject: o, options: [.prettyPrinted, .sortedKeys])

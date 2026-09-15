@@ -65,12 +65,28 @@ test('the footer names the action, never the current state', () => {
 	const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
 	const whenOn = strip(footer(120, 0, false, 'split', { armed: true, holding: false }))
 	const whenOff = strip(footer(120, 0, false, 'split', { armed: false, holding: false }))
+	const whenAlways = strip(footer(120, 0, false, 'split', { armed: true, holding: true, always: true }))
 
-	assert.match(whenOn, /a ◐ allow sleep/, 'armed should offer to allow sleep')
+	// `a` cycles three states, so each hint names the NEXT one round: off offers to hold
+	// while sessions work, armed offers to hold regardless, always offers to stop.
 	assert.match(whenOff, /a ○ keep awake/, 'disarmed should offer to keep awake')
+	assert.match(whenOn, /a ◐ never sleep/, 'armed should offer to hold the machine regardless')
+	assert.match(whenAlways, /a ◉ allow sleep/, 'forced should offer to let it sleep')
 	// the hint must never assert a state, which is what caused the confusion
-	assert.doesNotMatch(whenOn, /awake on|awake off/)
-	assert.doesNotMatch(whenOff, /awake on|awake off/)
+	for (const line of [whenOn, whenOff, whenAlways]) assert.doesNotMatch(line, /awake on|awake off/)
+})
+
+test('a machine that will never sleep says so in its own glyph', () => {
+	// The state worth seeing: `always` outlives a restart, so if it looked the same as an
+	// ordinary hold it would be a laptop quietly never sleeping with nothing on screen
+	// saying why. It has to be distinguishable from `holding`, which is the same pixel
+	// count and a different fact.
+	const strip = (s: string) => s.replace(/\x1b\[[0-9;]*m/g, '')
+	const holding = strip(footer(120, 0, false, 'split', { armed: true, holding: true }))
+	const always = strip(footer(120, 0, false, 'split', { armed: true, holding: true, always: true }))
+	assert.notEqual(holding, always, 'forced awake is indistinguishable from an ordinary hold')
+	assert.match(holding, /a ● /)
+	assert.match(always, /a ◉ /)
 })
 
 test('the footer carries the state colour, since that is where the key is', () => {
@@ -78,4 +94,36 @@ test('the footer carries the state colour, since that is where the key is', () =
 	const off = footer(120, 0, false, 'split', { armed: false, holding: false })
 	assert.match(holding, /38;2;95;175;95/, 'holding is not green in the footer')
 	assert.match(off, /38;2;215;175;95/, 'off is not amber in the footer')
+})
+
+test('forced awake holds with nobody working, and an empty room', async () => {
+	// The whole point. `shouldHold` is false here — no session is working — and the
+	// ordinary armed state would release. Forced must not.
+	const { configure, isAlways, wants } = await import('./awake.ts')
+	try {
+		// `wants`, not the flags: the first version of this test asserted `isAlways()` and
+		// passed with the force taken out of the condition altogether. Mutation caught it.
+		configure(true, false, true)
+		assert.equal(shouldHold([]), false, 'the room is idle, which is the case that matters')
+		assert.equal(wants([]), true, 'forced awake did not hold an idle room')
+		assert.equal(wants([s('a', 'parked')]), true, 'forced awake did not hold a room of parked sessions')
+		// and disarming must not release it: with `always` set, armed is irrelevant
+		configure(false, false, true)
+		assert.equal(isAlways(), true, 'disarming cancelled a setting that says never sleep')
+		assert.equal(wants([]), true, 'disarming let an idle machine sleep despite the force')
+	} finally {
+		configure(true, true, false)
+	}
+})
+
+test('turning forced awake off leaves the ordinary hold alone', async () => {
+	const { configure, isAlways, isArmed } = await import('./awake.ts')
+	try {
+		configure(true, true, true)
+		configure(true, true, false)
+		assert.equal(isAlways(), false)
+		assert.equal(isArmed(), true, 'dropping the force also disarmed the conditional hold')
+	} finally {
+		configure(true, true, false)
+	}
 })

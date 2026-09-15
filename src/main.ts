@@ -561,7 +561,18 @@ const IMAGES = supportsImages() && !ONCE && !GUARD
 // --once and --bench never hold anything; --demo arms it purely so the
 // documentation image shows the state you actually run in, and the demo never
 // reaches sync() to spawn anything
-awake.configure(!process.argv.includes('--no-awake') && !BENCH && (!ONCE || DEMO), cfg.awakeDisplay)
+// `--no-awake` pins off for the whole run, outranking the file — it is the flag
+// somebody reaches for precisely because something looks wrong.
+/**
+ * `--no-awake` pins the mode off for the whole run, outranking the file.
+ *
+ * Same rule `--no-codex` already follows: a one-run flag is what somebody reaches for
+ * precisely because something looks wrong, and a poll two seconds later that quietly
+ * restored the file's value would undo it.
+ */
+const AWAKE_PINNED = process.argv.includes('--no-awake') || BENCH || (ONCE && !DEMO)
+if (AWAKE_PINNED) cfg.awakeMode = 'off'
+awake.configure(cfg.awakeMode !== 'off', cfg.awakeDisplay, cfg.awakeMode === 'always')
 
 
 /* ── sprites: transmit each creature once, then place it by id every frame ── */
@@ -746,7 +757,7 @@ const shareInfo = () => {
 	return { on: !!server, port: cfg.port, token: passcode(), lan: net.lan, vpn: net.vpn, pin, pinNote, portEntry, portNote, others: othersNote() }
 }
 const controlInfo = () => ({ on: cfg.control, isSet: hasControlPass(), typing: ctlPass, note: ctlNote })
-const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), labels: cfg.labels, codex: cfg.codex })
+const envInfo = () => ({ awakeArmed: awake.isArmed(), awakeHolding: awake.isHolding(), awakeAlways: awake.isAlways(), labels: cfg.labels, codex: cfg.codex })
 
 /**
  * The three toggles, extracted so the help panel and the global keys run the same
@@ -760,10 +771,31 @@ function toggleShare() {
 	syncServe()
 	cfgStore.save(cfg)
 }
+/**
+ * `a` cycles three states, not two: hold when working -> hold always -> off.
+ *
+ * A separate key was the alternative and is worse. These are three points on one
+ * question — how hard to hold the machine awake — and splitting them across two keys
+ * means the footer has to explain two switches whose combinations include one that means
+ * nothing ("off, but always"). Cycling keeps it one control with one glyph.
+ *
+ * "Always" is persisted; "armed" is not, because armed is the default every run starts
+ * from and forcing the machine never to sleep is a decision that should survive a restart
+ * rather than being silently forgotten.
+ */
+/** The one place a mode becomes the two flags `awake` holds, so the key, the config file
+ *  and the menu bar cannot disagree about what a mode means. */
+function applyAwake(mode: cfgStore.Config['awakeMode']) {
+	awake.configure(mode !== 'off', cfg.awakeDisplay, mode === 'always')
+}
+
 function toggleAwake() {
-	// Toggling off drops any assertion immediately rather than waiting for the next
-	// poll — the point of reaching for this is usually "let it sleep now".
-	awake.configure(!awake.isArmed())
+	// Off drops any assertion immediately rather than waiting for the next poll — the
+	// point of reaching for this is usually "let it sleep now".
+	const next = cfg.awakeMode === 'off' ? 'working' : cfg.awakeMode === 'working' ? 'always' : 'off'
+	cfg.awakeMode = next
+	cfgStore.save(cfg)
+	applyAwake(next)
 	awake.sync(sessions)
 }
 function toggleLabels() {
@@ -823,6 +855,20 @@ function adoptDiskSettings() {
 	// for precisely because something looks wrong.
 	if (!CODEX_PINNED) cfg.codex = disk.codex
 	cfg.control = disk.control
+	/**
+	 * The awake settings, so the menu bar toggle reaches a room that is already open.
+	 *
+	 * `saveNow()` in the menu bar restarts the headless service only when it is SERVING,
+	 * so without this a machine told never to sleep would keep sleeping until something
+	 * restarted — the port lesson above, with a different setting. Applied through
+	 * `configure` rather than by assignment because a live assertion has its flags baked
+	 * into the running caffeinate and has to be dropped for them to change.
+	 */
+	if (present && !AWAKE_PINNED && (disk.awakeMode !== cfg.awakeMode || disk.awakeDisplay !== awake.holdsDisplay())) {
+		cfg.awakeMode = disk.awakeMode
+		cfg.awakeDisplay = disk.awakeDisplay
+		applyAwake(disk.awakeMode)
+	}
 }
 function toggleCodex() {
 	cfg.codex = !cfg.codex
@@ -1027,7 +1073,7 @@ function draw() {
 		paint(
 			[
 				...H.panel(cols, rows + 1, shareInfo(), controlInfo(), helpScroll, envInfo(), helpOpen),
-				entry ?? T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding() }),
+				entry ?? T.footer(cols, 0, faultsOnly, mode, { armed: awake.isArmed(), holding: awake.isHolding(), always: awake.isAlways() }),
 			],
 			'',
 		)
@@ -1146,7 +1192,7 @@ function draw() {
 	const remote = cfg.control && remoteLog.length ? T.remoteLine(remoteLog[0], cols) : null
 	if (remote) body.pop()
 	while (body.length < rows) body.push('')
-	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding() }
+	const awakeState = { armed: awake.isArmed(), holding: awake.isHolding(), always: awake.isAlways() }
 	// `server.listening`, not `!!server`: a socket that exists but has not bound yet is
 	// not sharing, and reporting it as such is the other half of the flash above.
 	const shareState = { on: !!server?.listening, port: cfg.port, error: serveError, handover: serveHandover }

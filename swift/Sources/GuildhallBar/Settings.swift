@@ -387,6 +387,21 @@ struct SettingsView: View {
 
 			Divider()
 
+			// A PICKER, not a switch. There are three answers and a switch can only carry
+			// two: with one "never sleep" toggle you could force it on and had no way to
+			// turn holding off at all, because the middle state was runtime-only.
+			Picker("Keep awake", selection: Binding(
+				get: { config.awakeMode },
+				set: { config.awakeMode = $0; saveNow() }
+			)) {
+				Text("never — sleeps normally").tag("off")
+				Text("while sessions work").tag("working")
+				Text("always").tag("always")
+			}
+			.frame(width: 260)
+			Text("\"While sessions work\" releases the machine as soon as the last turn ends. \"Always\" holds it whatever the room is doing, so the browser view stays reachable — at the cost of a machine that never sleeps.")
+				.font(.caption).foregroundStyle(.secondary)
+				.fixedSize(horizontal: false, vertical: true)
 			SwitchRow(title: "Hold the screen on while sessions work", caption: nil, isOn: Binding(
 				get: { config.awakeDisplay },
 				set: { config.awakeDisplay = $0; saveNow() }

@@ -166,14 +166,19 @@ export function detail(s: Session | undefined, total: number) {
  * OFF is amber, not grey: it is the state in which you can lose an overnight
  * build, which is worth noticing rather than hiding.
  */
-export function awakeBadge({ armed, holding }: { armed: boolean; holding: boolean }, compact = false) {
+export function awakeBadge({ armed, holding, always }: { armed: boolean; holding: boolean; always?: boolean }, compact = false) {
 	if (compact) {
 		// glyph and one word. The full sentence is a luxury of a wide terminal; the
 		// state itself still reads, and the panel spells it out.
+		if (always) return `${fg(C.gold)}◉ ${bold}never${R}`
 		if (holding) return `${fg(C.fillOk)}● ${bold}awake${R}`
 		if (armed) return `${fg(C.screenEdit)}◐ awake${R}`
 		return `${fg(C.fillWarn)}○ sleeps${R}`
 	}
+	// FORCED is its own state and outranks the rest, because it is the one that outlives
+	// a restart: a laptop that will never sleep until somebody changes a setting should
+	// say so, not read as an ordinary hold that will end when the work does.
+	if (always) return `${fg(C.gold)}◉${fg(C.label)} ${bold}never sleeps${R}${fg(C.gold)} · held whatever the room is doing${R}`
 	// The rule, not the switch position. "awake ON" invited the reading that the
 	// machine would never sleep, when what it actually promises is narrower: sleep
 	// is blocked WHILE something is working, and released the moment it stops.
@@ -294,16 +299,20 @@ export function footer(
 	hidden: number,
 	faultsOnly: boolean,
 	mode: string,
-	awake: { armed: boolean; holding: boolean } = { armed: true, holding: false },
+	awake: { armed: boolean; holding: boolean; always?: boolean } = { armed: true, holding: false },
 	desks = false,
 ) {
 	// `a awake on` read as a claim that awake WAS on, when it meant "press this to
 	// turn it on" — the exact opposite of the truth. Every other hint here names an
 	// action, so this one does too, and it carries the state colour because the
 	// footer is where you are looking when you reach for the key.
-	const dot = awake.holding ? C.fillOk : awake.armed ? C.screenEdit : C.fillWarn
-	const glyph = awake.holding ? '●' : awake.armed ? '◐' : '○'
-	const verb = awake.armed ? 'allow sleep' : 'keep awake'
+	// FOUR states, because "always" is a different fact from "holding right now" and the
+	// one you most need to see: a machine that will never sleep should never be a silent
+	// setting. `◉` is filled-with-a-ring, so it reads as more than `●` at a glance.
+	const dot = awake.always ? C.gold : awake.holding ? C.fillOk : awake.armed ? C.screenEdit : C.fillWarn
+	const glyph = awake.always ? '◉' : awake.holding ? '●' : awake.armed ? '◐' : '○'
+	// Names the next state, like every other hint on this line.
+	const verb = awake.always ? 'allow sleep' : awake.armed ? 'never sleep' : 'keep awake'
 	const awakeHint = `${fg(C.faint)}a ${fg(dot)}${glyph} ${verb}${R}`
 
 	// `?` comes FIRST, in gold. The line is clipped from the right, so anything at

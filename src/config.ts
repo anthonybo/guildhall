@@ -32,6 +32,22 @@ export type Config = {
 	 *  sleep timer, which on battery is usually two minutes and usually locks. */
 	awakeDisplay: boolean
 	/**
+	 * How hard to hold the machine awake. Three states, because there are three answers.
+	 *
+	 *  - `off`      — sleeps normally, never held
+	 *  - `working`  — held while a session is working, released when the last turn ends
+	 *  - `always`   — held whatever the room is doing
+	 *
+	 * ONE KEY RATHER THAN TWO BOOLEANS. `working` was runtime-only, so a menu bar with a
+	 * single "never sleep" switch could set one of the three states and not the others —
+	 * you could force it on, and you could not turn it off. A mode is what both surfaces
+	 * can show completely.
+	 *
+	 * Orthogonal to `awakeDisplay`: holding the screen on is a separate decision, and
+	 * forcing both all day is a real battery cost.
+	 */
+	awakeMode: 'off' | 'working' | 'always'
+	/**
 	 * Let a browser read a session's terminal and type into it.
 	 *
 	 * Its own switch, independent of `serve`, because it is a different kind of
@@ -59,7 +75,7 @@ export type Config = {
  * else can, and sharing is a deliberate change to `the network` in the menu bar
  * settings or this file.
  */
-const DEFAULTS: Config = { serve: false, port: DEFAULT_PORT, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, control: false, codex: false }
+const DEFAULTS: Config = { serve: false, port: DEFAULT_PORT, host: '127.0.0.1', labels: 'vertical', awakeDisplay: true, awakeMode: 'working', control: false, codex: false }
 
 /**
  * A port this program will accept, in one place.
@@ -86,6 +102,10 @@ export function load(): Config {
 			host: typeof raw.host === 'string' && raw.host ? raw.host : DEFAULTS.host,
 			labels: raw.labels === 'horizontal' ? 'horizontal' : DEFAULTS.labels,
 			awakeDisplay: typeof raw.awakeDisplay === 'boolean' ? raw.awakeDisplay : DEFAULTS.awakeDisplay,
+			// `working` unless the file says otherwise: that is what every run did before
+			// this key existed, and neither "never sleeps" nor "never wakes" is a state a
+			// missing key should choose for somebody.
+			awakeMode: raw.awakeMode === 'off' || raw.awakeMode === 'always' ? raw.awakeMode : DEFAULTS.awakeMode,
 			control: raw.control === true,
 			// Off unless asked for. An upgrade must not start showing sessions from a
 			// second harness, and a regression in reading them must be switchable off by

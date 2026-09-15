@@ -40,16 +40,34 @@ export const holders = (sessions: Session[]) => sessions.filter((s) => BUSY.has(
 let assertion: ChildProcess | null = null
 let armed = true
 let holdDisplay = true
+/**
+ * Hold the machine awake whether or not anyone is working.
+ *
+ * `armed` is conditional by design — it means "hold it WHEN a session is working" — so the
+ * assertion drops the moment the last turn ends. That is right for a build you walked away
+ * from and wrong for a machine you want reachable: a session that is merely waiting for
+ * you keeps nothing awake, so the laptop sleeps and the browser view goes with it.
+ *
+ * Separate from `armed` rather than a third value of it, because they answer different
+ * questions and the footer has to be able to say which is true. Forcing it on does not
+ * disarm the conditional hold; it only makes the condition irrelevant.
+ */
+let always = false
 
 /** `--no-awake` at launch, or the `a` key at runtime. Turning it off releases any
  *  assertion at once rather than waiting for the next poll. */
-export function configure(on: boolean, display = holdDisplay) {
+export function configure(on: boolean, display = holdDisplay, force = always) {
 	const flagsChanged = display !== holdDisplay
 	armed = on
 	holdDisplay = display
+	always = force
 	// A live assertion has its flags baked into the running caffeinate, so changing
 	// them has to drop it; the next sync raises a fresh one with the new set.
-	if (!on || flagsChanged) release()
+	//
+	// `!on` alone is not the release condition any more: with `always` set, disarming
+	// changes nothing about whether the machine should be held, and dropping the
+	// assertion there would let it sleep against the one setting that says never.
+	if ((!on && !always) || flagsChanged) release()
 }
 
 /** Whether the display is held awake too, not just the machine. */
@@ -58,6 +76,8 @@ export const holdsDisplay = () => holdDisplay
 /** Armed to hold when someone works — distinct from holding right now. */
 export const isArmed = () => armed
 export const isHolding = () => assertion !== null
+/** Holding regardless of what the room is doing. */
+export const isAlways = () => always
 
 function release() {
 	if (!assertion) return
@@ -70,8 +90,18 @@ function release() {
  * poll: it only acts on a change, so a working session does not respawn
  * caffeinate every two seconds.
  */
+/**
+ * The decision, separated from the act of making it.
+ *
+ * `sync()` spawns a process and returns early off darwin, so a test of it asserts either a
+ * real `caffeinate` or nothing at all — and a test written against the flags instead
+ * passed with the force removed from the condition entirely. This is the line the feature
+ * changed, so this is the line that gets asserted.
+ */
+export const wants = (sessions: Session[]) => always || (armed && shouldHold(sessions))
+
 export function sync(sessions: Session[]) {
-	const want = armed && shouldHold(sessions)
+	const want = wants(sessions)
 	if (want === isHolding()) return false
 	if (!want) {
 		release()
