@@ -43,20 +43,71 @@ const screen = (over: Partial<Screen> = {}): Screen => ({ lines: [], at: 0, read
 test('it draws a bezel and glass, so text does not float on the floor', () => {
 	const { cv, rects } = surface()
 	drawBoard(cv, AT, TILE, session(), screen({ lines: ['hello'], at: 1 }))
-	assert.equal(rects.length, 2, 'expected a frame and a screen')
 	const [bezel, glass] = rects
 	assert.ok(glass!.w < bezel!.w && glass!.h < bezel!.h, 'the glass is not inset in the bezel')
 	assert.equal(bezel!.x, AT.col * TILE)
 	assert.equal(bezel!.w, AT.w * TILE)
+	// Two pixels of frame, not one. At one pixel the bezel is a single pixel against a floor
+	// eight values away from it, which is invisible at any real scale — a row of screens read
+	// as rectangular holes cut in the floor. Verified by rendering and looking.
+	assert.ok(glass!.x - bezel!.x >= 2, `the bezel is only ${glass!.x - bezel!.x}px thick and will not be seen`)
+	// Free-standing, it stands on something, in the row below the glass the planner keeps clear.
+	const below = rects.filter((r) => r.y >= bezel!.y + bezel!.h)
+	assert.ok(below.length > 0, 'a free-standing board has no stand, so it floats')
+})
+
+test('a screen sitting on a desk is not given a stand', () => {
+	// The worktop is directly beneath it. The stand was drawn INTO the desk, which read as a
+	// gap between the two and made every screen look like it was hovering over its desk.
+	const { cv, rects } = surface()
+	drawBoard(cv, AT, TILE, session(), screen({ lines: ['hello'], at: 1 }), true)
+	const bezel = rects[0]!
+	const below = rects.filter((r) => r.y >= bezel.y + bezel.h)
+	assert.deepEqual(below, [], `a desk screen drew ${below.length} rects below itself`)
 })
 
 test('the newest lines are the ones kept', () => {
 	// A screen grows downward, so the last line is the one you want. When the glass is
 	// short it is the TOP that must be sacrificed.
+	//
+	// MORE LINES THAN SLOTS, deliberately. The fixture used to be three lines into four
+	// slots, so keeping the OLDEST end passed this test just as well — a review caught it
+	// by mutation, not by the suite.
 	const { cv, lines } = surface()
-	drawBoard(cv, AT, TILE, session(), screen({ lines: ['oldest', 'middle', 'newest'], at: 1 }))
+	const many = ['l0', 'l1', 'l2', 'l3', 'l4', 'l5', 'l6', 'l7', 'l8', 'l9']
+	drawBoard(cv, AT, TILE, session(), screen({ lines: many, at: 1 }))
 	const drawn = lines()
-	assert.ok(drawn.some((l) => l.includes('newest')), `the newest line was dropped: ${JSON.stringify(drawn)}`)
+	assert.ok(
+		drawn.some((l) => l.includes('l9')),
+		`the newest line was dropped: ${JSON.stringify(drawn)}`,
+	)
+	assert.ok(
+		!drawn.some((l) => l.includes('l0')),
+		`the oldest line was kept, so it filled from the wrong end: ${JSON.stringify(drawn)}`,
+	)
+})
+
+test('every line lands inside the glass, not on the bezel or the floor', () => {
+	// Vertical geometry had NO coverage: the stub records writes and nothing asserted where
+	// they went, so putting text on the top bezel passed, and so did three rows of it below
+	// the board on the floor. The real defect it hid was subtler — the last row `rows`
+	// allowed spanned the final glass row and the bezel under it, so the frame's bottom
+	// edge vanished under the words.
+	for (const at of [AT, { col: 2, row: 1, w: 8, h: 3 }, { col: 6, row: 9, w: 12, h: 4 }]) {
+		const { cv, written } = surface()
+		drawBoard(cv, at, TILE, session(), screen({ lines: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'], at: 1 }))
+		const x = at.col * TILE
+		const y = at.row * TILE
+		// The glass is the bezel inset by two pixels on every side.
+		const top = y + 2
+		const bottom = y + at.h * TILE - 3
+		for (const w of written) {
+			assert.ok(2 * w.row >= top, `a row was drawn on the top bezel at ${at.w}x${at.h}: canvas row ${w.row}`)
+			assert.ok(2 * w.row + 1 <= bottom, `a row overran the bottom bezel at ${at.w}x${at.h}: canvas row ${w.row} reaches pixel ${2 * w.row + 1}, glass ends at ${bottom}`)
+			assert.ok(w.col >= x + 2, `a line started on the left bezel: col ${w.col}`)
+			assert.ok(w.col + w.s.length <= x + at.w * TILE - 2, `a line ran into the right bezel: col ${w.col} + ${w.s.length}`)
+		}
+	}
 })
 
 test('every empty reason says which one it is', () => {
@@ -86,11 +137,31 @@ test('it names the session it is showing', () => {
 
 test('nothing is drawn wider than the glass', () => {
 	// The room is a fixed grid: a line that overruns writes over the wall beside it.
+	//
+	// The bound is the GLASS, `w * TILE - 4`, not the board's full width. Checking against
+	// the full width let a truncation four columns too generous pass — which is an overrun
+	// through the bezel into the wall.
 	const { cv, written } = surface()
 	const long = 'x'.repeat(300)
 	drawBoard(cv, AT, TILE, session({ proj: long }), screen({ lines: [long, long], at: 1 }))
-	const room = AT.w * TILE
-	for (const w of written) assert.ok(w.s.length <= room, `a line was ${w.s.length} wide in ${room} columns`)
+	const room = AT.w * TILE - 6
+	for (const w of written) assert.ok(w.s.length <= room, `a line was ${w.s.length} wide in ${room} columns of glass`)
+})
+
+test('a failed read says so instead of passing off old text as current', () => {
+	// The error branch used to be unreachable once anything had been read: with a 30s
+	// backoff the board could sit on minutes-old text and read as a quiet session.
+	const { cv, lines } = surface()
+	drawBoard(cv, AT, TILE, session(), screen({ lines: ['the last good line'], at: 1, error: 'cmux would not answer' }))
+	const drawn = lines()
+	assert.ok(
+		drawn.some((l) => l.includes('the last good line')),
+		'it blanked the glass rather than keeping the last good text',
+	)
+	assert.ok(
+		drawn.some((l) => /cmux would not answer/.test(l)),
+		`it showed stale text with no warning: ${JSON.stringify(drawn)}`,
+	)
 })
 
 test('focused prefers what needs you, then what is working', () => {

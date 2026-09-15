@@ -35,6 +35,9 @@ export const C = {
 	wallLip: [128, 122, 152] as RGB,
 	deskTop: [138, 96, 62] as RGB,
 	deskEdge: [104, 70, 44] as RGB,
+	/** the case of a monitor standing on a desk — darker than the floor and unlike the
+	 *  worktop, so a screen reads as a machine rather than as a hole or as more desk */
+	deskCase: [46, 48, 62] as RGB,
 	deskPaper: [232, 228, 214] as RGB,
 	monitorCase: [40, 42, 54] as RGB,
 	screenOn: [120, 226, 200] as RGB,
