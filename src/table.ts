@@ -295,6 +295,7 @@ export function footer(
 	faultsOnly: boolean,
 	mode: string,
 	awake: { armed: boolean; holding: boolean } = { armed: true, holding: false },
+	desks = false,
 ) {
 	// `a awake on` read as a claim that awake WAS on, when it meant "press this to
 	// turn it on" — the exact opposite of the truth. Every other hint here names an
@@ -308,7 +309,12 @@ export function footer(
 	// `?` comes FIRST, in gold. The line is clipped from the right, so anything at
 	// the tail is what a narrow terminal loses — and the hint for "how do I find
 	// out what any of this means" is the last thing that should disappear.
-	const bits = ['↑↓ move', '⏎ jump to tab', `f ${faultsOnly ? 'all' : 'faults'}`, `tab ${mode}`]
+	// `w` names what it gives you, not what it toggles off: from the wall the way back is
+	// the same key, and "w room" would read as "press w for the room" while standing in it.
+	// `w` names what it gives you, not what it toggles off: from the wall the way back is
+	// the same key, and "w room" would read as "press w for the room" while standing in it.
+	// `m` is the same idea for the desk-screens room, which is a view rather than a mode.
+	const bits = ['↑↓ move', '⏎ jump to tab', `f ${faultsOnly ? 'all' : 'faults'}`, `m ${desks ? 'pods' : 'desks'}`, mode === 'screens' ? 'w room' : 'w screens', `tab ${mode}`]
 	const tailBits = ['r redraw', 'q quit']
 	const line =
 		` ${bold}${fg(C.gold)}? help${R}${fg(C.faint)}  ·  ${bits.join('  ·  ')}  ·  ${R}${awakeHint}${fg(C.faint)}  ·  ${tailBits.join('  ·  ')}${R}`

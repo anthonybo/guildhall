@@ -32,8 +32,10 @@ import {
 	upscale,
 } from './kitty.ts'
 import { collect as collectReal, mixedHarness, needsAttention, order, type Session } from './data.ts'
-import { drawBoard, focused } from './board.ts'
-import { glance } from './peek.ts'
+import { drawBoard } from './board.ts'
+import { screenFits, screenImage } from './deskscreen.ts'
+import { glance, keepOnly } from './peek.ts'
+import { paneFor, wall } from './wall.ts'
 import { sweepGhosts as sweepCodexGhosts } from './data/codex.ts'
 import { demoSessions } from './demo.ts'
 import { Canvas } from './canvas.ts'
@@ -699,9 +701,17 @@ function raiseCmux() {
 }
 
 /* ── state ── */
-type Mode = 'town' | 'split' | 'table'
+type Mode = 'town' | 'split' | 'table' | 'screens'
 let mode: Mode = 'split'
 let faultsOnly = false
+/**
+ * The desk-screens room: every desk carries a screen showing its own live terminal.
+ *
+ * OFF by default and toggled with `m`. It is a different room — a different pitch, no
+ * project nameplates, no monitor sprites — so it is a view you choose rather than a change
+ * to the one that was already there. The layout lives in office/desks.ts.
+ */
+let deskScreens = false
 /** All labels on, or only the ones that need you plus the selection. */
 let labels = true
 /** the help panel, which suppresses the image layer while it is up */
@@ -904,7 +914,7 @@ let timers: NodeJS.Timeout[] = []
 // — never rebuilt — or everyone would jump back to the doorway.
 const office = new Office()
 let cv = new Canvas(80, 40)
-let geom = { cols: 0, rows: 0, townRows: 0, tableRows: 0 }
+let geom = { cols: 0, rows: 0, townRows: 0, tableRows: 0, deskScreens: false }
 let lastTick = 0
 let screenFrame = 0
 let screenClock = 0
@@ -962,14 +972,24 @@ function layout() {
 	// the town is the hero, so the table is capped at roughly a third and the
 	// town keeps the rest; press tab for a full-screen table when you want detail
 	const wantTable = Math.min(list.length + 4, Math.max(6, Math.floor(rows * 0.34)))
-	const tableRows = mode === 'town' ? 0 : mode === 'table' ? rows : wantTable
+	const tableRows = mode === 'town' || mode === 'screens' ? 0 : mode === 'table' ? rows : wantTable
 	const townRows = rows - tableRows
 
-	if (cols !== geom.cols || townRows !== geom.townRows) {
+	/**
+	 * Re-plan on a size change OR a view change.
+	 *
+	 * The view was missing from this condition, so pressing `m` set the flag, redrew, and
+	 * changed nothing: `fit` is the only thing that plans a room and it was never reached.
+	 * `fit` has its own signature guard, so calling it when nothing has actually changed
+	 * costs a string compare — the reason to name the view here rather than to widen that.
+	 */
+	if (cols !== geom.cols || townRows !== geom.townRows || deskScreens !== geom.deskScreens) {
 		cv = new Canvas(cols, Math.max(2, townRows) * 2)
-		office.fit(cv.w, cv.h, list)
+		// Only the desk-screens view wants a screen footprint per desk; the classic room is
+		// the default and is planned exactly as it always was.
+		office.fit(cv.w, cv.h, list, deskScreens)
 	}
-	geom = { cols, rows, townRows, tableRows }
+	geom = { cols, rows, townRows, tableRows, deskScreens }
 	office.assign(list)
 	// Only the first time. A re-layout must never re-settle: it would teleport
 	// everyone mid-stride every time the window changed size.
@@ -1017,19 +1037,68 @@ function draw() {
 	let townLines: string[] = []
 	let images = ''
 	sentinelUsed = false
-	if (townRows > 0) {
+	if (mode === 'screens') {
+		/**
+		 * The wall of terminals, which is text and nothing else.
+		 *
+		 * No canvas and no images: this view is the one that has to show real lines of real
+		 * terminal, and a kitty image drawn over text is exactly what would cover them. It
+		 * also means the view works in a terminal with no image support at all.
+		 *
+		 * `wallScreens` is what spends the cmux processes, and it spends them only for the
+		 * sessions with a pane on screen — see peek.ts for why that matters.
+		 */
+		townLines = wall(list, cols, townRows, wallScreens(list, true), true)
+	} else if (townRows > 0) {
 		// set before draw(), which is what decides whether to emit plate placements
 		office.vertical = cfg.labels === 'vertical' && IMAGES
 		const placed = office.draw(cv, list)
+		// Workspaces whose screen is on the wall this frame, so `keepOnly` can forget the rest.
+		const watched: string[] = []
 		if (!IMAGES)
 			for (const p of placed) {
 				const g = frameOf(p.s.palette, p.s.hueShift, p.facing, p.pose, p.step, tierOf(p.s.level).color)
 				cv.blit(p.x, p.y, shrink(g, CHAR_W, CHAR_H))
 			}
 		office.overlay(cv, placed, selectedId ?? undefined, labels)
+		/**
+		 * The wall display, BEFORE `cv.render()`.
+		 *
+		 * This sat twenty lines below, after the canvas had already been serialized into
+		 * strings, so every cell it wrote was discarded and `office.draw()`'s `cv.clear()`
+		 * wiped the overlay on the next frame. The board was never on screen once.
+		 *
+		 * It looked as though it worked because the scratch harness read `cv.overlay`
+		 * directly after calling this — one step past where the frame was already turned
+		 * into text. That is `$?` after a pipe, with a canvas: a real reading answering a
+		 * different question. Confirm this one by looking for the text in what the app
+		 * PRINTS, never in the canvas it printed from.
+		 */
+		/**
+		 * EVERY DESK'S OWN TERMINAL, on the screen standing on it.
+		 *
+		 * This replaced a single wall display showing one auto-picked session, which was
+		 * reported — three times — as a random big screen in the middle of the room. The ask
+		 * was always each monitor showing its own session, and the reason it took three tries
+		 * is that the desks were two tiles apart: eight canvas columns, and text is one
+		 * character per column. The room's pitch is now a screen wide, so there is something
+		 * to read on each one.
+		 */
+		// ONLY without image support. With it, `drawDeskScreens` draws the same screens in a
+		// font measured in pixels rather than in cells — and kitty draws images over text, so
+		// this would be terminal-sized text rendered underneath a picture that hides it.
+		const byId = new Map(list.map((s) => [s.id, s]))
+		if (!IMAGES)
+			for (const sc of office.screens) {
+				const s = sc.id ? byId.get(sc.id) : undefined
+				// A token that moves when the session does — see peek.ts.
+				const screen = s?.workspace ? glance(s.workspace, `${s.turns}:${s.ctxUsed}:${s.doing}`) : null
+				drawBoard(cv, sc, TILE, s, screen, true)
+				if (s?.workspace) watched.push(s.workspace)
+			}
 		townLines = cv.render()
 		// furniture first, then monitors, then people on top of both
-		if (IMAGES) images = drawProps() + drawPlates() + drawMonitors() + drawImages(placed)
+		if (IMAGES) images = drawProps() + drawPlates() + drawMonitors() + drawImages(placed) + drawDeskScreens(list, watched)
 		else {
 			for (const pr of office.props) {
 				const size = PROP_SIZE[pr.kind]
@@ -1039,15 +1108,11 @@ function draw() {
 			for (const b of office.badges) cv.blit(b.x, b.y, shrink(badgeFor(b, LEVEL_LOOK), TILE, TILE))
 			for (const l of office.logos) cv.blit(l.x, l.y, shrink(logo(l.agent, harnessColor(l.agent)), TILE, TILE))
 		}
-	}
-
-	// The wall display, drawn last so it sits over the floor rather than under it.
-	if (office.board) {
-		const pick = focused(visible())
-		// A token that moves when the session does. `turns` and `ctxUsed` only change when
-		// real work happens, so an idle session is never re-read — see peek.ts.
-		const screen = pick?.workspace ? glance(pick.workspace, `${pick.turns}:${pick.ctxUsed}:${pick.doing}`) : null
-		drawBoard(cv, office.board, TILE, pick, screen)
+		// Forget workspaces nothing on screen is reading. AFTER both draw paths, because
+		// each adds its own: pruning before the images pass would drop every screen's
+		// session on the frame it was read and re-read it on the next, which is a cmux
+		// process per frame for a cache that never hits.
+		keepOnly(watched)
 	}
 
 	const body: string[] = [...townLines]
@@ -1093,7 +1158,7 @@ function draw() {
 			T.summary(sessions, cols, awakeState, build(), shareState),
 			...body.slice(0, rows - (remote ? 1 : 0)),
 			...(remote ? [remote] : []),
-			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState),
+			T.footer(cols, office.hiddenCount, faultsOnly, mode, awakeState, deskScreens),
 		],
 		images,
 	)
@@ -1167,6 +1232,54 @@ function drawPlates() {
 			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
 		}
 		out += cursorTo((p.y >> 1) + 2, p.x + 1) + place(id, PLATE_COLS, PLATE_ROWS, pid++, 2, loudOnce())
+	}
+	return pre.join('') + out
+}
+
+/**
+ * The screen lookup the wall draws from, and the only place it spends anything.
+ *
+ * Built once per frame rather than per pane so `keepOnly` sees exactly the set that has a
+ * pane — a session that scrolls off the wall stops being read on the same frame it stops
+ * being shown.
+ */
+function wallScreens(list: Session[], all: boolean) {
+	const shown = paneFor(list, all)
+	keepOnly(shown.flatMap((s) => (s.workspace ? [s.workspace] : [])))
+	return (s: Session) => (s.workspace ? glance(s.workspace, `${s.turns}:${s.ctxUsed}:${s.doing}`) : { lines: [], reading: false })
+}
+
+/**
+ * The desk screens, as images, which is what lets their text be sized in pixels.
+ *
+ * Keyed on the CONTENT, so a screen is re-transmitted when its terminal moves and not
+ * otherwise. Built at exactly `cols * cell.w` by `rows * cell.h` and transmitted 1:1 — see
+ * deskscreen.ts on what supersampling does to a one-pixel stem.
+ */
+function drawDeskScreens(list: Session[], watched: string[]) {
+	const pre: string[] = []
+	let out = ''
+	let pid = 900
+	const byId = new Map(list.map((s) => [s.id, s]))
+	for (const sc of office.screens) {
+		const s = sc.id ? byId.get(sc.id) : undefined
+		const scr = s?.workspace ? glance(s.workspace, `${s.turns}:${s.ctxUsed}:${s.doing}`) : null
+		if (s?.workspace) watched.push(s.workspace)
+		const cols = sc.w * TILE
+		const rows = (sc.h * TILE) >> 1
+		const wPx = cols * cell.w
+		const hPx = rows * cell.h
+		const fit = screenFits(wPx, hPx)
+		const lines = (scr?.lines ?? []).slice(-Math.max(1, fit.rows - 1)).map((l) => l.slice(0, fit.cols))
+		const beat = screenFrame % 2
+		const { id, fresh } = idFor(`ds:${wPx}x${hPx}:${s?.id ?? '-'}:${s?.state ?? '-'}:${beat}:${scr?.reading ? 'r' : ''}${scr?.error ?? ''}:${lines.join('')}`)
+		if (fresh) {
+			const g = screenImage(wPx, hPx, s, lines, !!scr?.reading, scr?.error, screenFrame)
+			// factor 1, deliberately — the scaling is inside the drawing, at integer steps
+			const up = upscale(g.grid, 1)
+			pre.push(transmit(id, encodePNG(up.rgba, up.w, up.h)))
+		}
+		out += cursorTo(((sc.row * TILE) >> 1) + 2, sc.col * TILE + 1) + place(id, cols, rows, pid++, 2, loudOnce())
 	}
 	return pre.join('') + out
 }
@@ -1489,7 +1602,7 @@ function onKey(b: Buffer) {
 		const s = sessions.find((x) => x.id === selectedId)
 		if (s?.tab) jump(s.tab)
 	} else if (k === '\t') {
-		mode = mode === 'split' ? 'town' : mode === 'town' ? 'table' : 'split'
+		mode = mode === 'split' ? 'town' : mode === 'town' ? 'table' : mode === 'table' ? 'screens' : 'split'
 		prev = []
 		eraseDisplay()
 		layout()
@@ -1511,6 +1624,22 @@ function onKey(b: Buffer) {
 		eraseDisplay()
 	} else if (k === 'l') {
 		labels = !labels
+	} else if (k === 'm') {
+		// The desk-screens room. A re-plan is required, not just a redraw: the two layouts
+		// have different pitches, so `fit` has to run again — its signature includes the flag
+		// for exactly this reason.
+		deskScreens = !deskScreens
+		prev = []
+		eraseDisplay()
+		layout()
+	} else if (k === 'w') {
+		// The wall of terminals, on its own key rather than three presses into the `tab`
+		// cycle: it is the reason somebody opens this program with sessions running, and a
+		// view you reach by cycling past two others is a view nobody finds.
+		mode = mode === 'screens' ? 'split' : 'screens'
+		prev = []
+		eraseDisplay()
+		layout()
 	} else if (k === 's') {
 		toggleShare()
 	} else if (k === 'a') {
