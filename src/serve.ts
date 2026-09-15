@@ -37,6 +37,7 @@ import { reach } from './cmuxreach.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { commands } from './data/commands.ts'
+import { closedSessions } from './data/closed.ts'
 import { spawnable } from './data/projects.ts'
 import { usage } from './data/usage.ts'
 import type { Session } from './data.ts'
@@ -430,16 +431,26 @@ export function createServer(opts: ServeOptions) {
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { dir?: string }
+			let body: { dir?: string; resume?: string }
 			try {
 				body = JSON.parse(await readBody(req))
 			} catch {
 				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
 			}
-			const out = await spawn(String(body.dir ?? ''))
+			/**
+			 * `resume` reopens a session you closed instead of starting an empty one.
+			 *
+			 * The same endpoint and the same gate, because it is the same act: a process
+			 * started in a directory this machine offered. What it is NOT is a second writer
+			 * on a live conversation — a session with a process attached is not in the closed
+			 * list, so the id can only ever name one nothing is holding.
+			 */
+			const resume = body.resume ? String(body.resume) : undefined
+			const dir = String(body.dir ?? '')
+			const out = await spawn(dir, resume ? 'reopened' : 'new session', resume)
 			// Announced on the machine's own screen like a send. Starting a session
 			// remotely is possible; doing it unseen is not.
-			opts.onSend?.(path.basename(String(body.dir ?? '')), 'started a new session', out.ok)
+			opts.onSend?.(path.basename(dir), resume ? 'reopened a closed session' : 'started a new session', out.ok)
 			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, workspace: out.text } : { error: out.error }))
 		}
 
@@ -631,6 +642,22 @@ export function createServer(opts: ServeOptions) {
 			if (cmuxRefusal(res)) return
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			return send(res, 200, MIME['.json'], JSON.stringify({ projects: spawnable() }))
+		}
+
+		/**
+		 * Sessions you closed, which you can open again.
+		 *
+		 * Behind the control gate like `/api/projects`, and for a stronger reason than that
+		 * one: this lists the directories and opening prompts of past work, which is the
+		 * kind of thing that has no business being readable by anyone who can reach the
+		 * port. The list itself changes nothing — reopening goes through `/api/spawn`.
+		 */
+		if (url.pathname === '/api/closed') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (cmuxRefusal(res)) return
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			return send(res, 200, MIME['.json'], JSON.stringify({ closed: closedSessions() }))
 		}
 
 		if (url.pathname === '/api/stream') {

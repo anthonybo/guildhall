@@ -21,6 +21,17 @@ const KEY = 'guildhall.control'
 const token = () => sessionStorage.getItem(KEY) ?? ''
 
 type Project = { dir: string; label: string; live: boolean }
+/** A session with a transcript and no process — see src/data/closed.ts. */
+type Closed = { id: string; cwd: string; proj: string; at: number; title: string }
+
+/** "3m", "4h", "6d" — the same shape the table uses, so one glance reads the same way. */
+function ago(ms: number): string {
+	const s = Math.max(0, Math.round(ms / 1000))
+	if (s < 60) return `${s}s`
+	if (s < 3600) return `${Math.round(s / 60)}m`
+	if (s < 86_400) return `${Math.round(s / 3600)}h`
+	return `${Math.round(s / 86_400)}d`
+}
 
 let el: HTMLElement
 let onPick: (dir: string) => void = () => {}
@@ -117,7 +128,9 @@ export async function show() {
 	open = true
 	el.hidden = false
 	lockPage('newsession')
-	el.replaceChildren(bar('Start a session'))
+	// "Open", not "Start": this panel now leads with the sessions you closed, and a heading
+	// that only promises a new one is how a feature ends up shipped and unfindable.
+	el.replaceChildren(bar('Open a session'))
 	const body = document.createElement('div')
 	body.className = 'min-h-0 flex-1 overflow-auto overscroll-contain'
 	el.append(body)
@@ -139,9 +152,72 @@ export async function show() {
 		return
 	}
 
+	/**
+	 * The sessions you closed, offered FIRST.
+	 *
+	 * Closing a session on the machine used to mean losing the way back to it from
+	 * anywhere else: this panel could only start an empty one, which is a different thing
+	 * and drops the conversation. Reopening is the more likely intent of the two — you
+	 * closed it to free the machine up, not to be done with it — so it goes at the top.
+	 *
+	 * Fetched separately and allowed to fail on its own: a broken transcript should not
+	 * take the "start something new" list down with it.
+	 */
+	let closed: Closed[] = []
+	let closedWhy = ''
+	try {
+		const res = await fetch('/api/closed', { headers: { 'x-guildhall-control': token() }, signal: AbortSignal.timeout(15_000) })
+		if (res.ok) closed = (await res.json()).closed ?? []
+		// A SERVER THAT PREDATES THIS FEATURE, said out loud.
+		//
+		// This was a bare `catch {}`, and the result was indistinguishable from having no
+		// closed sessions: the panel rendered the project list and nothing hinted that half
+		// of it was missing. The browser talks to whichever guildhall is serving the port,
+		// and that process is not restarted by rebuilding — measured, a server three hours
+		// older than the build was answering 404 here and the panel just looked unchanged.
+		else if (res.status === 404) closedWhy = 'This guildhall is older than the app — restart it to reopen closed sessions.'
+		else closedWhy = `Could not list closed sessions (${res.status}).`
+	} catch {
+		closedWhy = 'Could not list closed sessions.'
+	}
+
 	body.replaceChildren()
-	if (!projects.length) return void say(body, 'No projects found to start in.')
-	say(body, 'Pick where it runs. The session opens empty — type your idea into it and it will name itself.')
+	if (!projects.length && !closed.length && !closedWhy) return void say(body, 'No projects found to start in.')
+	if (closedWhy) say(body, closedWhy, 'text-gold')
+
+	if (closed.length) {
+		say(body, 'Reopen one you closed. It picks up the same conversation, where it left off.')
+		const back = document.createElement('ul')
+		back.className = 'm-0 list-none p-0'
+		for (const c of closed) {
+			const li = document.createElement('li')
+			const b = document.createElement('button')
+			b.type = 'button'
+			b.className = 'flex min-h-12 w-full cursor-pointer flex-col items-start justify-center gap-0.5 border-0 border-b border-line bg-transparent px-3 py-2 text-left hover:bg-line/40'
+			const top = document.createElement('span')
+			top.className = 'flex w-full items-baseline gap-2'
+			const name = document.createElement('span')
+			name.className = 'shrink-0 text-[0.86rem] text-label'
+			name.textContent = c.proj
+			const when = document.createElement('span')
+			when.className = 'ml-auto shrink-0 text-[0.72rem] text-faint'
+			when.textContent = ago(Date.now() - c.at)
+			top.append(name, when)
+			// The opening prompt is what tells one closed session from another — a project
+			// name alone does not, because several of them share one.
+			const what = document.createElement('span')
+			what.className = 'line-clamp-2 w-full text-[0.76rem]/[1.35] text-faint'
+			what.textContent = c.title
+			b.append(top, what)
+			b.addEventListener('click', () => start({ dir: c.cwd, label: c.proj, live: false }, body, b, c.id))
+			li.append(b)
+			back.append(li)
+		}
+		body.append(back)
+	}
+
+	if (!projects.length) return
+	say(body, closed.length ? 'Or start a new one.' : 'Pick where it runs. The session opens empty — type your idea into it and it will name itself.')
 
 	const list = document.createElement('ul')
 	list.className = 'm-0 list-none p-0'
@@ -169,15 +245,18 @@ export async function show() {
 	body.append(list)
 }
 
-async function start(p: Project, body: HTMLElement, btn: HTMLButtonElement) {
+async function start(p: Project, body: HTMLElement, btn: HTMLButtonElement, resume?: string) {
 	btn.disabled = true
 	const was = btn.textContent
-	btn.textContent = `Starting in ${p.label}…`
+	// `replaceChildren` rather than `textContent`, because a reopen button holds two lines
+	// and assigning text would collapse them into one before the request even returns.
+	btn.replaceChildren()
+	btn.textContent = resume ? `Reopening ${p.label}…` : `Starting in ${p.label}…`
 	try {
 		const res = await fetch('/api/spawn', {
 			method: 'POST',
 			headers: { 'x-guildhall-control': token(), 'content-type': 'application/json' },
-			body: JSON.stringify({ dir: p.dir }),
+			body: JSON.stringify(resume ? { dir: p.dir, resume } : { dir: p.dir }),
 			// Starting a session runs `claude`, which is slower than a send; the server
 			// also waits to see whether a trust prompt came up before answering.
 			signal: AbortSignal.timeout(30_000),

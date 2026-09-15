@@ -240,8 +240,33 @@ export function inputBox(screen: string) {
  * first message goes through the same guarded path as every other message, and
  * Claude Code names the session from it exactly as it does normally.
  */
-export async function spawn(dir: string, title = 'new session'): Promise<Result> {
+/**
+ * The durable id behind a positional ref.
+ *
+ * `workspace list --json` carries `id` and `ref` on the same row, so this is a lookup
+ * rather than an inference — the distinction that matters in this file, where matching a
+ * session to a tab by anything approximate has gone wrong before.
+ */
+async function uuidOfRef(ref: string): Promise<string | null> {
+	const listed = await run(['workspace', 'list', '--json'])
+	if (!listed.ok) return null
+	try {
+		const parsed: unknown = JSON.parse(listed.text)
+		const rows = (Array.isArray(parsed) ? parsed : ((parsed as { workspaces?: unknown[] })?.workspaces ?? [])) as { id?: unknown; ref?: unknown }[]
+		const hit = rows.find((w) => w.ref === ref)
+		return typeof hit?.id === 'string' && UUID.test(hit.id) ? hit.id : null
+	} catch {
+		return null
+	}
+}
+
+export async function spawn(dir: string, title = 'new session', resume?: string): Promise<Result> {
 	if (!spawnAllowed(dir)) return { ok: false, error: 'not a directory this machine offered' }
+	// A session id, or nothing. Validated to a UUID before it can reach a command line for
+	// the same reason `ask` validates a workspace: this string becomes an argument to a
+	// process, and the one rule this file has is that nothing the browser sends is trusted
+	// as a path or as an argument.
+	if (resume !== undefined && !UUID.test(resume)) return { ok: false, error: 'not a session id' }
 	// A title cmux will accept as a tab name and nothing more. The session renames
 	// itself once the conversation has a subject, which is the point.
 	const name = title.replace(/[^\w .-]/g, '').slice(0, 40) || 'new session'
@@ -263,15 +288,28 @@ export async function spawn(dir: string, title = 'new session'): Promise<Result>
 	//
 	// Predicting it from `~/.claude.json` was tried first and does not work either;
 	// the flag disagrees with reality in both directions. See data/projects.ts.
-	// `--id-format both` so the UUID comes back, not just a `workspace:N` ref. The
-	// ref is positional and cmux's own help warns those are not in tab order; the
-	// UUID is the only durable handle, and it is what gets remembered below.
-	const made = await run(['workspace', 'create', '--name', name, '--cwd', dir, '--command', 'claude', '--focus', 'false', '--id-format', 'both'])
+	// The UUID is the only durable handle — a `workspace:N` ref is positional and cmux's
+	// own help warns those are not in tab order — but cmux no longer offers a way to ask
+	// for one at creation. `--id-format both` was passed here and is not a flag any more:
+	// `workspace create --help` does not list it, cmux ignores the unknown argument, and
+	// the reply is `OK workspace:19` with no UUID in it. The regex below then found
+	// nothing and this function reported failure for a tab it had just successfully
+	// created — measured on a scratch workspace. The ref is resolved through
+	// `workspace list --json`, which carries `id` and `ref` side by side.
+	// `--resume <id>` picks up the conversation that transcript belongs to, rather than
+	// starting an empty one. This is the whole difference between "open a session" and
+	// "open THAT session", and it is why closing one on the machine no longer means losing
+	// your way back to it from a phone.
+	const cmd = resume ? `claude --resume ${resume}` : 'claude'
+	const made = await run(['workspace', 'create', '--name', name, '--cwd', dir, '--command', cmd, '--focus', 'false'])
 	if (!made.ok) return made
 	// Remember the exact tab, so the session that appears in this directory half a
 	// minute from now can be matched to it. cmux will never record the link itself
 	// for a CLI-created workspace — see data/spawned.ts.
-	const uuid = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/.exec(made.text)?.[0]
+	// A UUID if a future cmux prints one, else the ref it does print, resolved.
+	const direct = /[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}/.exec(made.text)?.[0]
+	const ref = /workspace:\d+/.exec(made.text)?.[0]
+	const uuid = direct ?? (ref ? await uuidOfRef(ref) : null)
 	if (!uuid) return { ok: false, error: 'cmux did not report which workspace it made' }
 	// The UUID goes back to the caller, and that is the whole safety story for the
 	// browser: it waits for the row carrying THIS workspace, never for "a row in
