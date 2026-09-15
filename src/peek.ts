@@ -24,8 +24,18 @@
  */
 import { runCmux } from './cmuxreach.ts'
 
-/** Enough to see what a session is doing without being a terminal. */
-export const PEEK_LINES = 14
+/**
+ * How much of a screen to keep.
+ *
+ * Was 14, which was sized for a four-line wall display. A desk screen drawn as an image
+ * holds seven rows or more, and after `clean()` strips the box rules, the blank half below
+ * the prompt and the spinner, fourteen raw lines routinely became three — so the screen
+ * filled a third of itself and the rest was dark glass.
+ *
+ * Reading more costs nothing: measured, a screen read is ~0.08 cpu-s whether it returns 1KB
+ * or 58KB, because the cost is starting the cmux process and not the bytes it hands back.
+ */
+export const PEEK_LINES = 40
 
 /** A glance that takes longer than this is not a glance. */
 const TIMEOUT = 4000
@@ -112,6 +122,62 @@ const readScreen: Reader = async (workspace) => {
 }
 
 /**
+ * The prompt, which is the boundary everything else here hangs off.
+ *
+ * `❯` is measured: it is what a live session's input line actually starts with, and it is
+ * not a character that markdown, `diff` or a REPL produces, so it can be trusted anywhere.
+ *
+ * `>` cannot. It is a blockquote, a diff marker and a Python prompt as well as an older
+ * input line, and treating it as a boundary truncated 14 lines to ONE when a wrapped quote
+ * opened the window. It is accepted only with nothing but chrome below it — which is where
+ * a real prompt sits and where none of the four false positives ever are.
+ */
+const PROMPT = /^❯\s?/
+const OLD_PROMPT = /^>\s?/
+
+/**
+ * The status block below the prompt: gauges, model, context, mode.
+ *
+ * Used to CUT FROM THE FIRST MATCH rather than pop from the end. Popping stopped at the
+ * first line that matched nothing, and a background-agent line (`◯ general-purpose
+ * Running … ↓ 122.3k tokens`) sits in the middle of the block — so the pop stopped there
+ * and the whole status block below it survived, spend included.
+ */
+const CHROME = /[█░▓]{3,}|Today\s+\$|\d+k\/\d+[MK]|auto mode|shift\+tab|^Weekly\b|\d+hr\s+\d+m/i
+
+/**
+ * The day's spend, and the context gauge that sits with it.
+ *
+ * Dropped wherever it appears, not just off the end — the ONE unconditional rule in this
+ * file, because it is the one whose failure cannot be undone: `tools/make-docs-images`
+ * renders this room into images that get committed to a public repo. Measured leaking
+ * through the fallback branch below before this existed.
+ *
+ * Deliberately narrow. `$` alone is not a spend figure — a session discussing what
+ * something cost keeps its words — so this matches only the two shapes the status bar
+ * produces and nothing a person writes.
+ */
+const SPEND = /Today\s+\$\s*[\d.]|\d+k\/\d+[MK]\b/
+
+/**
+ * The trailer ABOVE the prompt.
+ *
+ * A spinner, an update notice, a token counter, a bare prompt. Measured across seven live
+ * sessions: after the prompt boundary ran, FIVE of them had nothing but this in the last
+ * four lines — the board drew a spinner, "Update installed", and an empty `❯`, which is a
+ * display of the terminal's furniture rather than of the session.
+ *
+ * Removed only when something else survives, so a session that has just started still
+ * shows its spinner rather than claiming there is nothing on screen.
+ */
+const TRAILER = /^[✢✻✳✽✶✷✸✹⏺◯●*]\s|Update installed|Restart to update|↓\s*[\d.]+k tokens|esc to interrupt|ctrl\+b to run in background|^Tip:\s/
+
+/** A prompt carrying an unsent message — worth seeing from across a room. A bare one is
+ *  not, and it costs a quarter of the board. */
+const TYPED = /^[❯>]\s*\S/
+const BARE_PROMPT = /^[❯>]\s*$/
+
+/**
  * Tidy a screen into lines worth drawing.
  *
  * A TUI screen is mostly furniture: box rules, the gutters tool output is indented with,
@@ -125,9 +191,18 @@ export function clean(text: string): string[] {
 			l
 				.replace(/^[\s│⎿]+/, '')
 				.replace(/\s+$/, '')
+				// A rule with something on the end of it.
+				//
+				// The filter below only drops a line made ENTIRELY of box characters, so
+				// `─────────────  waiting` survived and spent a THIRD of a three-line glass on a
+				// horizontal line. Seen on the board in a live session, which is the only reason
+				// it was noticed — nothing about it is visible in a test fixture.
+				.replace(/^[─━═]{3,}\s*/, '')
+				.replace(/\s*[─━═]{3,}$/, '')
 				.replace(/[ \t]{3,}/g, '  '),
 		)
-		.filter((l) => !/^[─│╭╮╰╯┌┐└┘━┃╔╗╚╝═║]+$/.test(l))
+		// Blank lines go too. On a display this short a blank is a third of the content.
+		.filter((l) => l && !/^[─│╭╮╰╯┌┐└┘━┃╔╗╚╝═║]+$/.test(l))
 	while (lines.length && !lines[lines.length - 1]) lines.pop()
 	// Drop the status block off the bottom.
 	//
@@ -144,16 +219,36 @@ export function clean(text: string): string[] {
 	// gets renamed or a gauge changes shape. Matching "Opus 5 1M" was the alternative, and
 	// a status line naming the model is exactly the sort of thing that changes.
 	//
-	// The prompt line itself is KEPT: a message sitting there unsent is one of the few
-	// things genuinely worth seeing from across a room.
-	const prompt = lines.findLastIndex((l) => /^[❯>]\s?/.test(l))
+	// See PROMPT for why the two markers are not treated alike.
+	let prompt = lines.findLastIndex((l) => PROMPT.test(l))
+	if (prompt < 0) {
+		const old = lines.findLastIndex((l) => OLD_PROMPT.test(l))
+		if (old >= 0 && lines.slice(old + 1).every((l) => CHROME.test(l))) prompt = old
+	}
 	if (prompt >= 0) lines.length = prompt + 1
-	// No prompt found — an unrecognised screen. Fall back to stripping what the status
-	// block is made of, and keep it conservative: this only ever strips from the END, so a
-	// session that prints a dollar figure mid-conversation keeps it.
-	else while (lines.length && /[█░▓]|\$\d|\d+k\/\d+[MK]|auto mode|shift\+tab/i.test(lines[lines.length - 1]!)) lines.pop()
-	while (lines.length && !lines[lines.length - 1]) lines.pop()
-	return lines.slice(-PEEK_LINES)
+	// Then sweep the tail for status chrome regardless of whether a prompt was found. A
+	// screen whose prompt has been pushed out of the window is the case that leaked, and
+	// cutting from the FIRST match takes the interleaved agent lines with it.
+	const tail = Math.max(0, lines.length - PEEK_LINES)
+	for (let i = tail; i < lines.length; i++) {
+		if (!CHROME.test(lines[i]!)) continue
+		lines.length = i
+		break
+	}
+	// The backstop. Everything above is structural and could be defeated by a screen shape
+	// nobody has seen; this is a flat refusal to draw the two shapes only the status bar
+	// makes, wherever they turn up.
+	let out = lines.filter((l) => !SPEND.test(l))
+	// An empty prompt goes unconditionally: it is a quarter of the board spent saying the
+	// session has an input box. A prompt carrying an unsent message stays — see TYPED.
+	out = out.filter((l) => TYPED.test(l) || !BARE_PROMPT.test(l))
+	// The furniture immediately above it goes only if something else survives — a session
+	// that has just started is better served by its spinner than by "nothing on screen
+	// yet", which reads as broken rather than as busy.
+	const said = out.filter((l) => l && !TRAILER.test(l))
+	if (said.length) out = said
+	while (out.length && !out[out.length - 1]) out.pop()
+	return out.slice(-PEEK_LINES)
 }
 
 /**
@@ -221,7 +316,11 @@ export function keepOnly(live: Iterable<string>) {
 	const keep = new Set(live)
 	for (const k of [...seen.keys()]) {
 		if (keep.has(k)) continue
-		generation++
+		// Deleting is enough, and bumping the GLOBAL generation here was actively wrong: it
+		// invalidated the in-flight read of every other workspace too, and this now runs on
+		// every frame, so one session leaving the room would throw away everyone's read. A
+		// landing read already refuses to write when its entry is gone — `seen.get()` returns
+		// undefined and the gen comparison fails — which is exactly the case this is.
 		seen.delete(k)
 	}
 }

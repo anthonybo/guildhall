@@ -11,7 +11,7 @@
  */
 import assert from 'node:assert/strict'
 import test, { beforeEach } from 'node:test'
-import { type Reader, clean, glance, keepOnly, peekSize, resetPeek, whenQuiet } from './peek.ts'
+import { PEEK_LINES, type Reader, clean, glance, keepOnly, peekSize, resetPeek, whenQuiet } from './peek.ts'
 
 const WS = 'aaaaaaaa-1111-2222-3333-444444444444'
 const OTHER = 'bbbbbbbb-1111-2222-3333-444444444444'
@@ -180,9 +180,12 @@ test('clean strips the furniture and keeps at most a glance', () => {
 	assert.deepEqual(clean('────────\nreal\n'), ['real'], 'a box rule survived')
 	assert.deepEqual(clean('  ⎿  indented\n'), ['indented'], 'the gutter survived')
 	assert.deepEqual(clean('a     b\n'), ['a  b'], 'a run of spaces survived')
-	const many = clean(Array.from({ length: 60 }, (_, i) => `line ${i}`).join('\n'))
-	assert.equal(many.length, 14, `kept ${many.length} lines`)
-	assert.equal(many.at(-1), 'line 59', 'it kept the wrong end — the newest lines matter')
+	// Against the CONSTANT, not a literal: the cap moved from 14 to 40 when desk screens
+	// started showing seven rows, and a hard-coded 14 here would have to be edited every
+	// time rather than simply holding the rule that there IS a cap.
+	const many = clean(Array.from({ length: PEEK_LINES + 40 }, (_, i) => `line ${i}`).join('\n'))
+	assert.equal(many.length, PEEK_LINES, `kept ${many.length} lines`)
+	assert.equal(many.at(-1), `line ${PEEK_LINES + 39}`, 'it kept the wrong end — the newest lines matter')
 })
 
 test('two workspaces are read separately and do not share state', async () => {
@@ -200,7 +203,6 @@ test('the status block is not what a small display gets spent on', () => {
 	// leave the machine, and the room gets rendered into committed images.
 	const screen = ['I have finished the audit and pushed it.', '', '❯', 'Opus 5 1M - ├ guildhall · main', '930k/1M ● ● ● ● ● Today $0 5hr ██░░░░', 'Weekly ████████░░ 84.0% 1hr 37m', '▶▶ auto mode on (shift+tab to cycle)'].join('\n')
 	const out = clean(screen)
-	assert.equal(out.at(-1), '❯', `kept the status block: ${JSON.stringify(out.slice(-3))}`)
 	assert.ok(
 		!out.some((l) => /Opus|Weekly|auto mode/.test(l)),
 		'status chrome survived',
@@ -209,7 +211,62 @@ test('the status block is not what a small display gets spent on', () => {
 		!out.some((l) => l.includes('$')),
 		'a spend figure survived onto the wall',
 	)
-	assert.ok(out.includes('I have finished the audit and pushed it.'), 'it threw away the actual content')
+	assert.deepEqual(out, ['I have finished the audit and pushed it.'], 'it threw away the actual content')
+})
+
+test('a bare prompt is dropped and a typed one is kept', () => {
+	// Changed deliberately. An empty `❯` is a quarter of the board spent saying the
+	// session has an input box; a message sitting there unsent is one of the few things
+	// genuinely worth seeing from across a room.
+	assert.deepEqual(clean('the answer is 4\n❯\n'), ['the answer is 4'], 'a bare prompt took a row')
+	assert.deepEqual(clean('the answer is 4\n❯ and then this\n'), ['the answer is 4', '❯ and then this'], 'an unsent message was dropped')
+})
+
+test('the trailer above the prompt is not what gets shown', () => {
+	// Measured on seven live sessions: five rendered as spinner / update notice / bare
+	// prompt and NOTHING else, because the prompt boundary only strips downward. This is
+	// one of those screens, verbatim.
+	const screen = ['I read the file and the cause is the render order.', '', '✢ Pouncing… (18m 51s · ↓ 29.2k tokens)', '                              ✔ Update installed · Restart to update', '──────────────────────────────', '❯ ', '──────────────────────────────', '  Opus 5 1M - ├ guildhall · desk-screens    XHigh  Effort', '  100k/1M ● ○ ○ ○ ○   Today $0     5hr ██████░░░░ 59.0% 2hr 35m'].join('\n')
+	const out = clean(screen)
+	assert.deepEqual(out, ['I read the file and the cause is the render order.'], `drew the furniture: ${JSON.stringify(out)}`)
+})
+
+test('a screen with nothing but a spinner still shows the spinner', () => {
+	// The trailer strip must not turn a just-started session into "nothing on screen yet",
+	// which would read as broken rather than as busy.
+	const out = clean('✢ Pouncing… (3s)\n❯\n')
+	assert.deepEqual(out, ['✢ Pouncing… (3s)'])
+})
+
+test('the day spend cannot reach the wall even when the prompt is gone', () => {
+	// The measured leak. With --lines 14 the prompt can be pushed out of the window
+	// entirely, and the old fallback popped from the end and stopped at the first line
+	// that matched nothing — a background-agent line sitting inside the status block.
+	// `$0`, not the figure this was found with: the point is the SHAPE of the status line,
+	// and a real spend in a fixture is the thing this test exists to stop leaving the
+	// machine. check:personal refuses it, correctly.
+	const screen = ['960k/1M ● ● ● ● ●  Today $0  5hr █████░░░░░ 51.0% 2hr 55m', '◯ general-purpose  Running … ↓ 122.3k tokens', 'Weekly █████████░ 89.0% 55m', '⏵⏵ auto mode on (shift+tab to cycle)'].join('\n')
+	const out = clean(screen)
+	assert.ok(
+		!out.some((l) => l.includes('$')),
+		`a spend figure reached the wall: ${JSON.stringify(out)}`,
+	)
+	assert.ok(
+		!out.some((l) => /122\.3k|Weekly|auto mode/.test(l)),
+		`status chrome survived the fallback: ${JSON.stringify(out)}`,
+	)
+})
+
+test('a quote is not mistaken for the prompt', () => {
+	// `>` is a markdown blockquote, a diff marker and a Python REPL as well as a prompt.
+	// Truncating at the LAST one anywhere in the window turned 14 lines into 1; the fix is
+	// to look for it only near the bottom, where a prompt actually lives.
+	const quoted = ['> the user asked for the monitors to show real terminals', 'so I measured what a desk can hold:', 'eight characters, in both renderers', 'which is why there is one board instead of seven', 'and it is drawn on the back wall'].join('\n')
+	const out = clean(quoted)
+	assert.equal(out.length, 5, `a quote truncated the screen to ${out.length} lines: ${JSON.stringify(out)}`)
+	// A Python session, where the marker is the transcript itself.
+	const repl = ['>>> len(rows)', '14', 'and the traceback below it', 'IndexError: list index out of range', 'so the cap was the bug'].join('\n')
+	assert.equal(clean(repl).length, 5, 'a REPL transcript was truncated at its own prompt')
 })
 
 test('a dollar sign mid-conversation is not mistaken for the status bar', () => {
@@ -217,4 +274,14 @@ test('a dollar sign mid-conversation is not mistaken for the status bar', () => 
 	// characters, and the worst case is losing one trailing line.
 	const out = clean(['it cost $4 to run', 'and then it finished'].join('\n'))
 	assert.deepEqual(out, ['it cost $4 to run', 'and then it finished'])
+})
+
+test('a rule with text on the end of it does not spend a line', () => {
+	// Seen on the board in a live session: the glass is three lines and one of them was a
+	// horizontal rule. The entirely-box-characters filter cannot catch this, because the
+	// line is not entirely box characters.
+	assert.deepEqual(clean('the real answer\n──────────────────────  waiting\n'), ['the real answer', 'waiting'])
+	assert.deepEqual(clean('──────────────\nkept\n'), ['kept'], 'a plain rule survived')
+	// and a blank line is a third of the display, so it goes as well
+	assert.deepEqual(clean('one\n\ntwo\n'), ['one', 'two'])
 })
