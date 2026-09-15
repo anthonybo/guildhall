@@ -39,10 +39,10 @@ export function session(id: string, proj: string, state: State): Session {
 	}
 }
 
-export const room = (list: Session[], w = 88, h = 76) => {
+export const room = (list: Session[], w = 88, h = 76, wantBoard = false) => {
 	const cv = new Canvas(w, h)
 	const office = new Office(seeded())
-	office.fit(cv.w, cv.h, list)
+	office.fit(cv.w, cv.h, list, wantBoard)
 	office.assign(list)
 	return { cv, office }
 }

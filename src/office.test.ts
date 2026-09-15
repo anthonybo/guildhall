@@ -599,3 +599,70 @@ test('a desk that is lit and animating always has somebody sitting at it', () =>
 	}
 	assert.ok(longest <= 1, `a desk was lit with nobody at it for ${longest} consecutive ticks — ${worst}`)
 })
+
+
+
+
+
+test('the desk-screens room strands nobody, even with no aisle between bands', () => {
+	// A workstation band is [screen, screen, screen, worktop, seat] — no aisle, which is what
+	// buys a fourth band and nearly doubles the width of every screen. The seat row is then
+	// the only way across, so this is the check that the trade did not wall anybody in.
+	for (const [w, h] of [
+		[67, 94],
+		[139, 94],
+		[89, 60],
+		[200, 120],
+	] as const) {
+		const list = Array.from({ length: 7 }, (_, i) => session(`s${i}`, `p${i}`, i < 2 ? 'working' : 'parked'))
+		const { office } = room(list, w, h, true)
+		assert.ok(office.screens.length > 0, `no screens planned at ${w}x${h}`)
+		const open = new Set<string>()
+		const start = { col: 1, row: office.rows - 2 }
+		let frontier = [start]
+		open.add(`${start.col},${start.row}`)
+		while (frontier.length) {
+			const next: typeof frontier = []
+			for (const t of frontier)
+				for (const [dc, dr] of [
+					[0, -1],
+					[1, 0],
+					[0, 1],
+					[-1, 0],
+				] as const) {
+					const c = t.col + dc
+					const r = t.row + dr
+					if (open.has(`${c},${r}`) || !office.isOpen(c, r)) continue
+					open.add(`${c},${r}`)
+					next.push({ col: c, row: r })
+				}
+			frontier = next
+		}
+		for (const spot of office.spots.values()) {
+			const reachable = [
+				[0, -1],
+				[1, 0],
+				[0, 1],
+				[-1, 0],
+			].some(([dc, dr]) => open.has(`${spot.col + dc},${spot.row + dr}`))
+			assert.ok(reachable || open.has(`${spot.col},${spot.row}`), `${spot.id} at ${spot.col},${spot.row} is walled in at ${w}x${h}`)
+		}
+	}
+})
+
+test('a desk screen is never stamped over a seat or another screen', () => {
+	// The ghost desk in MISTAKES.md, reached the other way round: a footprint over a seat
+	// leaves its occupant unable to path home and standing wherever it happened to be.
+	const list = Array.from({ length: 9 }, (_, i) => session(`s${i}`, `p${i % 4}`, 'working'))
+	const { office } = room(list, 139, 94, true)
+	const claimed = new Set<string>()
+	for (const sc of office.screens) {
+		for (let r = sc.row; r < sc.row + sc.h; r++) {
+			for (let c = sc.col; c < sc.col + sc.w; c++) {
+				assert.ok(!claimed.has(`${c},${r}`), `two screens overlap at ${c},${r}`)
+				claimed.add(`${c},${r}`)
+			}
+		}
+	}
+	for (const spot of office.spots.values()) assert.ok(!claimed.has(`${spot.col},${spot.row}`), `${spot.id} is under a screen at ${spot.col},${spot.row}`)
+})

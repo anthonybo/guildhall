@@ -13,7 +13,8 @@
  */
 import { projectColours, type RGB } from '../theme.ts'
 import { PROP_SIZE, type PropKind } from '../props.ts'
-import { BOARD, DROP_ORDER, FACILITIES, MAX_RUN, TILE, type Dir, type Kind, type Pod, type Spot } from './model.ts'
+import { DROP_ORDER, FACILITIES, MAX_RUN, TILE, type Dir, type Kind, type Pod, type Spot } from './model.ts'
+import { BAND, seatWorkstations } from './desks.ts'
 
 export type Room = {
 	cols: number
@@ -31,11 +32,11 @@ export type Room = {
 	/** seats that did not fit, reported rather than silently discarded */
 	hiddenCount: number
 	dropped: string[]
-	/** the wall display, in tiles, or null when the room cannot afford one */
-	board: { col: number; row: number; w: number; h: number } | null
+	/** one live terminal per desk, in tiles; `desk` is the spot id it belongs to */
+	screens: { col: number; row: number; w: number; h: number; desk: string }[]
 }
 
-export function planRoom(cols: number, rows: number, projects: { name: string; seats: number }[]): Room {
+export function planRoom(cols: number, rows: number, projects: { name: string; seats: number }[], wantScreens = false): Room {
 	const grid: Kind[][] = Array.from({ length: rows }, () => new Array<Kind>(cols).fill('floor'))
 	const zoneOf: (string | null)[][] = Array.from({ length: rows }, () => new Array<string | null>(cols).fill(null))
 	for (let c = 0; c < cols; c++) {
@@ -61,17 +62,21 @@ export function planRoom(cols: number, rows: number, projects: { name: string; s
 		zoneColor: new Map(),
 		hiddenCount: 0,
 		dropped: [],
-			board: null,
+		screens: [],
 	}
 	room.zoneColor = projectColours(projects.map((p) => p.name))
 
 	// Row 1 is a gutter carrying each front-row occupant's head and status label,
 	// so nothing may ever be placed there.
 	const bandRows: number[] = []
-	for (let r = 1; r + 3 < rows - 1; r += 4) bandRows.push(r)
+	// Two layouts, two pitches. A pod band is [monitor, worktop, seat, aisle]; a workstation
+	// band is [screen x3, worktop, seat]. The pod pitch is untouched, so the browser and the
+	// committed images draw byte-for-byte what they drew before this existed.
+	const pitch = wantScreens ? BAND : 4
+	for (let r = 1; r + pitch - 1 < rows - 1; r += pitch) bandRows.push(r)
 
-	const band = seatProjects(room, projects, bandRows)
-	addBoard(room, bandRows, band)
+	// The workstation layout lives in its own module — see desks.ts for why.
+	const band = wantScreens ? seatWorkstations(room, wishlistOf(projects), bandRows) : seatProjects(room, projects, bandRows)
 	const socialBands = addFacilities(room, bandRows, band)
 	addTalkArea(room, socialBands)
 	addDecor(room, socialBands)
@@ -81,9 +86,9 @@ export function planRoom(cols: number, rows: number, projects: { name: string; s
 	return room
 }
 
-/** Desk pods, packed left to right along each band. Returns the first free band. */
-function seatProjects(room: Room, projects: { name: string; seats: number }[], bandRows: number[]) {
-	// a project wider than MAX_RUN spills into a second pod rather than one long row
+/** A project wider than MAX_RUN spills into a second pod rather than one long row. Shared,
+ *  because both layouts seat the same people in the same order. */
+export function wishlistOf(projects: { name: string; seats: number }[]) {
 	const wishlist: { proj: string; seats: number }[] = []
 	for (const p of projects) {
 		let left = p.seats
@@ -93,7 +98,12 @@ function seatProjects(room: Room, projects: { name: string; seats: number }[], b
 			left -= take
 		}
 	}
+	return wishlist
+}
 
+/** Desk pods, packed left to right along each band. Returns the first free band. */
+function seatProjects(room: Room, projects: { name: string; seats: number }[], bandRows: number[]) {
+	const wishlist = wishlistOf(projects)
 	let band = 0
 	let n = 0
 	for (let i = 0; i < wishlist.length; ) {
@@ -132,7 +142,6 @@ function seatProjects(room: Room, projects: { name: string; seats: number }[], b
 		}
 		band++
 	}
-
 	// anyone who could not be seated is counted, never silently dropped
 	for (const w of wishlist) {
 		const seated = room.pods.filter((p) => p.proj === w.proj).reduce((a, p) => a + (p.c1 - p.c0 + 1), 0)
@@ -148,47 +157,6 @@ function seatProjects(room: Room, projects: { name: string; seats: number }[], b
 }
 
 /** Kitchen, couches and ping-pong, anchored low so the gap becomes a corridor. */
-/**
- * The wall display, in the first free band below the desks.
- *
- * That band is the seam between the work zone and the breakout area, which the plan
- * currently only implies — so the partition gives the middle of the room a reason to
- * exist as well as somewhere to put a screen.
- *
- * Centred, and never wider than BOARD.w tiles, so the floor is not cut in two. `findPath`
- * has no connectivity check and `office.test.ts` asserts every spot is reachable from the
- * door; a full-width partition would fail it, and correctly.
- *
- * Dropped rather than squeezed when the room is narrow. Below BOARD.minCols there is no
- * width to hold a line of terminal worth reading, and half a screen of clipped text is
- * worse than the pixel-art monitors the desks already have.
- */
-function addBoard(room: Room, bandRows: number[], firstFree: number) {
-	if (room.cols < BOARD.minCols) {
-		room.dropped.push('board')
-		return
-	}
-	const row = bandRows[firstFree]
-	// No free band: every band is desks. The room is full, which is a good problem, and
-	// the display is the thing to give up rather than a seat.
-	if (row === undefined || row + BOARD.h > room.rows - 1) {
-		room.dropped.push('board')
-		return
-	}
-	const w = Math.min(BOARD.w, room.cols - 6)
-	const col = Math.max(2, Math.floor((room.cols - w) / 2))
-	room.board = { col, row, w, h: BOARD.h }
-	// Solid to walkers: a character routed through the screen would walk over the one
-	// thing in the room somebody is reading.
-	//
-	// `solid`, not `desk`. `desk` is a DRAWING instruction — office.ts paints desk
-	// furniture on those tiles — so marking the board's footprint as desks put a row of
-	// worktops behind the screen, including in the committed docs images, where nothing
-	// draws the board over them. `solid` blocks pathing and draws as floor, which is what
-	// a footprint wants to be.
-	for (let r = row; r < row + BOARD.h; r++) for (let c = col; c < col + w; c++) if (room.grid[r]?.[c] !== undefined) room.grid[r][c] = 'solid'
-}
-
 function addFacilities(room: Room, bandRows: number[], firstFree: number) {
 	const below = room.workBottom + 2
 	const socialBands = bandRows

@@ -88,6 +88,7 @@ export class Office extends SimBase {
 		const harness = new Map<string, string>()
 		const levels = new Map<string, number>()
 		const asking = new Set<string>()
+		const seatOwner = new Map<string, string>()
 		for (const sp of this.spots.values()) {
 			if (sp.kind !== 'desk' || !sp.taken) continue
 			const s = byId.get(sp.taken)
@@ -108,19 +109,40 @@ export class Office extends SimBase {
 			// Only Codex is set, and Claude Code is still positively identified, because
 			// the thing it draws is a desktop monitor rather than the absence of anything.
 			if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent)
+			// Whose desk this is, so a renderer can put THAT session's screen on THIS monitor.
+			if (s) seatOwner.set(`${sp.col},${sp.row}`, s.id)
 		}
+		/**
+		 * Each desk's screen, and whose session is on it.
+		 *
+		 * Registered as an image span for the same reason the board was: `blocked()` is what
+		 * stops a status label being written across a screen, and it reads that map. With one
+		 * screen per desk there are now seven of them to protect rather than one.
+		 */
+		for (const sc of this.screens) {
+			const spot = this.spots.get(sc.desk)
+			sc.id = spot?.taken ?? undefined
+			block(sc.col * TILE, sc.row * TILE, sc.w * TILE, (sc.h * TILE) >> 1)
+		}
+
 		// a monitor stands on the row above its worktop, clear of its occupant
 		for (const pod of this.pods)
 			// step 2: desks sit on alternate columns, so only those get a monitor
 			for (let c = pod.c0; c <= pod.c1; c += 2) {
-				this.monitors.push({
-					x: c * TILE,
-					y: pod.monitorRow * TILE,
-					lit: lit.has(`${c},${pod.seatRow}`),
-					seed: c + pod.monitorRow,
-					kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
-					agent: harness.get(`${c},${pod.seatRow}`),
-				})
+				// NO monitor sprite where a text screen stands. Kitty draws images OVER text, so
+				// the sprite would land on the bottom row of the very terminal it used to
+				// represent and cover it. The screen replaces it; the worktop below is still
+				// drawn into the canvas by `drawDesk`.
+				if (!this.screens.length)
+					this.monitors.push({
+						x: c * TILE,
+						y: pod.monitorRow * TILE,
+						lit: lit.has(`${c},${pod.seatRow}`),
+						seed: c + pod.monitorRow,
+						kind: lit.get(`${c},${pod.seatRow}`) ?? 'think',
+						agent: harness.get(`${c},${pod.seatRow}`),
+						id: seatOwner.get(`${c},${pod.seatRow}`),
+					})
 				block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS)
 				// A light sliding along the floor under a desk somebody is working at, so
 				// who is active reads from across the room without looking at any screen.
@@ -174,8 +196,14 @@ export class Office extends SimBase {
 				const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0
 				const wants = asking.has(`${c},${pod.seatRow}`)
 				if (lvl || wants) {
-					this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: wants })
-					block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2)
+					// In the desk-screens room both marks go to the RIGHT END of the worktop,
+					// together. Sitting either side of the desk put the occupant between them, so
+					// they read as two unrelated things scattered along a plank rather than as a
+					// pair of labels belonging to one workstation.
+					const sc = this.screens.find((v) => c >= v.col && c < v.col + v.w)
+					const bx = sc ? (sc.col + sc.w - 1) * TILE : c * TILE + TILE
+					this.badges.push({ x: bx, y: pod.deskRow * TILE, level: lvl, asking: wants })
+					block(bx, pod.deskRow * TILE, TILE, TILE / 2)
 				}
 				/**
 				 * The harness logo, in the gap column one slot below the level badge.
@@ -202,15 +230,27 @@ export class Office extends SimBase {
 				 * character can reach it. It is the only one of the three that is reliable.
 				 */
 				const who = harness.get(`${c},${pod.seatRow}`) ?? 'claude'
+				// The harness sign. With a screen standing on the desk the monitor row IS the
+				// bottom row of the terminal, so it moves down onto the WORKTOP — the far side of
+				// the desk from the level badge, where the wide surface leaves room for both.
+				// Dropping it entirely was tried first and lost the one mark that says what kind
+				// of agent a desk belongs to, which is the question it exists to answer.
 				if (lvl && hasLogo(who)) {
-					this.logos.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, agent: who })
-					block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2)
+					const seat = this.screens.find((v) => c >= v.col && c < v.col + v.w)
+					const x = (this.screens.length ? (seat ? seat.col + seat.w - 2 : c - 1) : c + 1) * TILE
+					const y = (this.screens.length ? pod.deskRow : pod.monitorRow) * TILE
+					this.logos.push({ x, y, agent: who })
+					block(x, y, TILE, TILE / 2)
 				}
 			}
 		// Nameplates, as images beside each pod. `block` is what keeps the status
 		// labels off them — the same mechanism furniture already uses — which is why
 		// this no longer needs the "draw plates last" ordering hack.
-		if (this.vertical) {
+		// NOT when a screen stands on the desk. The screen's header already names the
+		// project, and a plate is PLATE_ROWS of IMAGE anchored at the monitor row — which is
+		// now the screen's bottom row — so it was drawn straight across the last line of the
+		// terminal. Kitty draws images over text, so the plate won every time.
+		if (this.vertical && !this.screens.length) {
 			const named = new Set<string>()
 			for (const pod of this.pods) {
 				if (named.has(pod.proj)) continue
@@ -232,6 +272,20 @@ export class Office extends SimBase {
 				if (k === 'desk') drawDesk(cv, c * TILE, r * TILE, lit.has(`${c},${r + 1}`))
 				else if (k === 'solid') cv.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark)
 			}
+		// A CHAIR at every seat, which the room has never had — the occupant simply stood on
+		// its tile. Drawn into the canvas rather than as a prop image because a character is
+		// drawn OVER it: a chair back above the seat would be hidden by whoever is in it, so
+		// what shows is the base and the two feet either side of them.
+		// Desk-screens room only: the classic room is what the README pictures show, and a
+		// chair there changes every committed image for a view that was not asked to change.
+		for (const sp of this.screens.length ? this.spots.values() : []) {
+			if (sp.kind !== 'desk') continue
+			const x = sp.col * TILE
+			const y = sp.row * TILE
+			cv.rect(x, y + TILE - 2, TILE, 1, C.deskEdge)
+			cv.rect(x, y + TILE - 1, 1, 1, C.deskCase)
+			cv.rect(x + TILE - 1, y + TILE - 1, 1, 1, C.deskCase)
+		}
 
 		// ping-pong ball: one pixel arcing between the two players
 		for (const g of new Set([...this.spots.values()].filter((x) => x.kind === 'pingpong').map((x) => x.group))) {

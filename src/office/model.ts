@@ -51,6 +51,25 @@ export const CHAT_RADIUS = 10
 export const SCREEN_HOLD = 25_000
 export const MAX_RUN = 6 // widest desk pod before a project spills into a second one
 
+/**
+ * The screen standing on each desk, in TILES.
+ *
+ * This is the room's whole purpose now: every desk shows its own session's live terminal,
+ * so the layout is decided by how wide a screen has to be to be worth reading rather than
+ * by how many desks can be crammed in.
+ *
+ * `h` of 3 is the floor. Text is drawn one character per canvas column and a tile is two
+ * canvas ROWS tall, so a screen of h tiles carries `2h - 2` lines after its frame: h=3 is a
+ * header and three lines, h=2 is a header and one.
+ *
+ * `widths` is tried widest-first and the first one that seats everybody wins — so a wide
+ * window spends its space on readable screens and a narrow one on fitting everybody. A
+ * screen of w tiles holds `4w - 6` characters: 14 at w=5, 26 at w=8, 42 at w=12.
+ */
+export const SCREEN = { h: 3, widths: [12, 10, 8, 6, 5, 4] } as const
+/** Rows a band needs: the screen, the worktop, the seat, and an aisle to walk in. */
+export const BAND = SCREEN.h + 3
+
 export type Kind = 'void' | 'floor' | 'wall' | 'desk' | 'solid'
 export type Dir = Facing
 export type SpotKind = 'desk' | 'kitchen' | 'pingpong' | 'couch' | 'talk' | 'window'
@@ -179,7 +198,7 @@ export const DROP_ORDER = ['couch', 'pingpong', 'kitchen'] as const
  * and both renderers draw one character per column, so a desk monitor holds EIGHT
  * characters — measured, in the terminal and the browser alike. Reaching a readable
  * width per desk would mean drawing at half the size of every other word in the room,
- * which the terminal cannot do at all. One board at room scale holds 44 columns in a
+ * which the terminal cannot do at all. One board at room scale holds 42 columns in a
  * 90-column terminal and ~54 in the browser, which is a real viewport.
  *
  * WIDTH IS CAPPED BELOW THE ROOM'S. A full-width partition would cut the floor in two,
@@ -193,7 +212,16 @@ export const DROP_ORDER = ['couch', 'pingpong', 'kitchen'] as const
  * real terminal there is, silently, because dropping is what it does when it does not
  * fit. 18 tiles leaves the 12-tile board a clear margin either side.
  */
-export const BOARD = { w: 12, h: 3, minCols: 18 } as const
+/**
+ * The wall display, in TILES — except `minGlass`, which is in characters.
+ *
+ * The minimum is stated as the width of the GLASS rather than of the room, because the
+ * glass is the thing that either holds a line of terminal or does not. Stated as a room
+ * width it demanded 18 tiles — a 73-column terminal — before it would place anything, and
+ * a 68-column window got no board and no explanation. Thirty characters is the floor: a
+ * 10-tile board carries 34, which is a readable line.
+ */
+export const BOARD = { w: 12, h: 3, minGlass: 30 } as const
 
 /** Stable hash for anything that must look varied but never move between frames. */
 export const hash = (s: string) => {

@@ -27,7 +27,11 @@ export class RoomBase {
 	hiddenCount = 0
 	dropped: string[] = []
 	/** where to place a monitor image this frame, and whether it is lit */
-	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind']; agent?: string }[] = []
+	/** `id` is the session sitting at this desk, so a renderer that can read a screen knows
+	 *  WHOSE screen to put on this monitor. Optional because an empty desk has no session,
+	 *  and carried here rather than looked up by position because position is exactly what
+	 *  the tripled-nameplate bug got wrong. */
+	monitors: { x: number; y: number; lit: boolean; seed: number; kind: Session['toolKind']; agent?: string; id?: string; screen?: string[] }[] = []
 	/** project nameplates, drawn rotated as images beside each pod */
 	plates: { x: number; y: number; proj: string; colour: RGB }[] = []
 	/** level badges, in the gap column beside each occupied desk */
@@ -37,13 +41,12 @@ export class RoomBase {
 	/** static furniture image placements, in canvas pixels */
 	props: { kind: PropKind; x: number; y: number }[] = []
 	/**
-	 * The wall display, in TILE coordinates, or null when the room cannot afford one.
+	 * One live terminal per desk, in TILE coordinates.
 	 *
-	 * Placement only — the text is not the room's business. The office draws sessions; a
-	 * live screen comes from cmux and belongs to whoever is rendering, which also keeps
-	 * `peek.ts` out of the browser bundle and out of this class.
+	 * The placement is the room's business; the text is not. A renderer that can read a
+	 * screen fills these in, which is what keeps peek.ts out of the browser bundle.
 	 */
-	board: { col: number; row: number; w: number; h: number } | null = null
+	screens: { col: number; row: number; w: number; h: number; desk: string; id?: string }[] = []
 	/** cell spans covered by an image, per cell row. Kitty draws images over text,
 	 *  so a label must not overlap one — but sharing the row is fine. */
 	protected imageSpans = new Map<number, [number, number][]>()
@@ -86,8 +89,8 @@ export class RoomBase {
 	 * this is the only place its output becomes state, which keeps the geometry
 	 * reasoning testable on its own and out of the simulation.
 	 */
-	private plan(cols: number, rows: number, projects: { name: string; seats: number }[]) {
-		const room = planRoom(cols, rows, projects)
+	private plan(cols: number, rows: number, projects: { name: string; seats: number }[], wantScreens: boolean) {
+		const room = planRoom(cols, rows, projects, wantScreens)
 		this.cols = room.cols
 		this.rows = room.rows
 		this.grid = room.grid
@@ -101,7 +104,7 @@ export class RoomBase {
 		this.zoneColor = room.zoneColor
 		this.hiddenCount = room.hiddenCount
 		this.dropped = room.dropped
-		this.board = room.board
+		this.screens = room.screens
 	}
 
 	/* ───────────────────── walkability & paths ───────────────────── */
@@ -169,7 +172,18 @@ export class RoomBase {
 	/* ───────────────────── population ───────────────────── */
 
 	/** Re-plan only when the viewport or the project mix actually changes. */
-	fit(wPx: number, hPx: number, sessions: Session[]) {
+	/**
+	 * Lay the room out.
+	 *
+	 * `wantBoard` is opt-in, and it is opt-in because the FOOTPRINT and the DRAWING live in
+	 * different places. `plan.ts` is in the browser bundle, so stamping a board's footprint
+	 * happens everywhere the room is planned, while only a renderer that calls `drawBoard`
+	 * puts anything on it. Defaulting it on shipped a 12x3 slab of dark floor into the
+	 * browser and into the committed README image — the harness-mark mistake with the sides
+	 * swapped, and exactly what board.test.ts's own header calls indistinguishable from a
+	 * bug. A renderer asks for the footprint when it intends to draw on it.
+	 */
+	fit(wPx: number, hPx: number, sessions: Session[], wantScreens = false) {
 		const cols = Math.max(12, Math.min(Math.floor(wPx / TILE), Math.floor(wPx / TILE)))
 		const rows = Math.max(8, Math.floor(hPx / TILE))
 		const byProj = new Map<string, number>()
@@ -177,10 +191,15 @@ export class RoomBase {
 		const projects = [...byProj.entries()]
 			.map(([name, seats]) => ({ name, seats }))
 			.sort((a, b) => b.seats - a.seats || a.name.localeCompare(b.name))
-		const sig = `${cols}x${rows}|${projects.map((p) => `${p.name}:${p.seats}`).join(',')}`
+		// `wantBoard` belongs in the signature. It changes the LAYOUT — the footprint takes
+		// tiles out of the floor — so a room fitted once without it and again with it would
+		// match this key and skip the re-plan, leaving a board that never appears or never
+		// goes away. No caller toggles it today, and that is exactly the sort of thing that
+		// is true until it is not.
+		const sig = `${cols}x${rows}|${wantScreens ? 's' : '-'}|${projects.map((p) => `${p.name}:${p.seats}`).join(',')}`
 		if (sig === this.signature) return
 		this.signature = sig
-		this.plan(cols, rows, projects)
+		this.plan(cols, rows, projects, wantScreens)
 		/**
 		 * Every seat claim is void, because the ids just changed meaning.
 		 *
