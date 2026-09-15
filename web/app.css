@@ -331,6 +331,12 @@
   .ml-auto {
     margin-left: auto;
   }
+  .line-clamp-2 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
   .block {
     display: block;
   }
@@ -880,6 +886,10 @@
   .text-\[0\.72rem\]\/\[1\.4\] {
     font-size: 0.72rem;
     line-height: 1.4;
+  }
+  .text-\[0\.76rem\]\/\[1\.35\] {
+    font-size: 0.76rem;
+    line-height: 1.35;
   }
   .text-\[0\.78rem\]\/\[1\.4\] {
     font-size: 0.78rem;

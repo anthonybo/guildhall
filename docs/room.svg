@@ -181,7 +181,6 @@
 <text x="319.20" y="953.40" fill="#6e7681" xml:space="preserve">orchard · ⌘4 · lv15 veteran · 480 turns · 104k/200k context</text>
 <text x="0.00" y="970.20" fill="#8a8a8a" xml:space="preserve">  Should the importer skip malformed rows or fail loudly?</text>
 <text x="8.40" y="987.00" fill="#ffd65c" font-weight="700" xml:space="preserve">? help</text>
-<text x="58.80" y="987.00" fill="#6e7681" xml:space="preserve">  ·  ↑↓ move  ·  ⏎ jump to tab  ·  f faults  ·  tab split  ·  a </text>
-<text x="596.40" y="987.00" fill="#5faf5f" xml:space="preserve">● allow sleep</text>
-<text x="705.60" y="987.00" fill="#6e7681" xml:space="preserve">  ·  r redraw  ·</text>
+<text x="58.80" y="987.00" fill="#6e7681" xml:space="preserve">  ·  ↑↓ move  ·  ⏎ jump to tab  ·  f faults  ·  m desks  ·  w screens  ·  tab split  ·  a </text>
+<text x="814.80" y="987.00" fill="#5faf5f" xml:space="preserve">● a</text>
 </svg>

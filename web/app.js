@@ -27,6 +27,9 @@ var C = {
   wallLip: [128, 122, 152],
   deskTop: [138, 96, 62],
   deskEdge: [104, 70, 44],
+  /** the case of a monitor standing on a desk — darker than the floor and unlike the
+   *  worktop, so a screen reads as a machine rather than as a hole or as more desk */
+  deskCase: [46, 48, 62],
   deskPaper: [232, 228, 214],
   monitorCase: [40, 42, 54],
   screenOn: [120, 226, 200],
@@ -2273,6 +2276,8 @@ var DONE_BUBBLE_SEC = 8;
 var CHAT_RADIUS = 10;
 var SCREEN_HOLD = 25e3;
 var MAX_RUN = 6;
+var SCREEN = { h: 3, widths: [12, 10, 8, 6, 5, 4] };
+var BAND = SCREEN.h + 3;
 var DWELL = {
   desk: [0, 0],
   kitchen: [8, 20],
@@ -2329,10 +2334,73 @@ var FACILITIES = {
   }
 };
 var DROP_ORDER = ["couch", "pingpong", "kitchen"];
-var BOARD = { w: 12, h: 3, minCols: 18 };
+
+// src/office/desks.ts
+var BAND2 = SCREEN.h + 2;
+function slotWidth(cols, bands, seats) {
+  const usable = cols - 4;
+  for (const w of SCREEN.widths) {
+    if (Math.floor(usable / w) * bands >= seats) return w;
+  }
+  return SCREEN.widths[SCREEN.widths.length - 1];
+}
+function seatWorkstations(room, wishlist, bandRows) {
+  let band2 = 0;
+  let n = 0;
+  const seats = wishlist.reduce((a, w) => a + w.seats, 0);
+  const slotW = slotWidth(room.cols, bandRows.length, seats);
+  const perBand = Math.max(1, Math.floor((room.cols - 4) / slotW));
+  let slot = 0;
+  for (const want of wishlist) {
+    for (let k = 0; k < want.seats; k++) {
+      if (band2 >= bandRows.length) break;
+      const screenTop = bandRows[band2];
+      const monitorRow = screenTop + SCREEN.h - 1;
+      const deskRow = monitorRow + 1;
+      const seatRow = monitorRow + 2;
+      const inBand = Math.max(1, Math.min(perBand, seats - band2 * perBand));
+      const share = (room.cols - 4) / inBand;
+      const c0 = 2 + Math.round(slot * share + (share - slotW) / 2);
+      const w = Math.min(slotW, room.cols - 2 - c0);
+      const c = c0 + (w - 1 >> 1);
+      if (w >= 3 && room.grid[deskRow]?.[c] !== void 0) {
+        room.grid[deskRow][c] = "desk";
+        const id = `d${n++}`;
+        room.spots.set(id, {
+          id,
+          kind: "desk",
+          group: want.proj,
+          col: c,
+          row: seatRow,
+          facing: "up",
+          posture: "sit",
+          zone: want.proj,
+          taken: null
+        });
+        room.seatTiles.add(`${c},${seatRow}`);
+        for (let x = c0; x < c0 + w; x++) if (room.grid[deskRow]?.[x] === "floor") room.grid[deskRow][x] = "desk";
+        for (let r = screenTop; r <= seatRow; r++) for (let x = c0; x < c0 + w; x++) room.zoneOf[r]?.[x] === null && (room.zoneOf[r][x] = want.proj);
+        room.pods.push({ proj: want.proj, c0: c, c1: c, seatRow, deskRow, monitorRow });
+        room.screens.push({ col: c0, row: screenTop, w, h: SCREEN.h, desk: id });
+        for (let r = screenTop; r < screenTop + SCREEN.h; r++) {
+          for (let x = c0; x < c0 + w; x++) {
+            if (room.grid[r]?.[x] === "floor") room.grid[r][x] = "solid";
+          }
+        }
+      }
+      slot++;
+      if (slot >= perBand) {
+        slot = 0;
+        band2++;
+      }
+    }
+  }
+  if (slot > 0) band2++;
+  return band2;
+}
 
 // src/office/plan.ts
-function planRoom(cols, rows, projects) {
+function planRoom(cols, rows, projects, wantScreens = false) {
   const grid = Array.from({ length: rows }, () => new Array(cols).fill("floor"));
   const zoneOf = Array.from({ length: rows }, () => new Array(cols).fill(null));
   for (let c = 0; c < cols; c++) {
@@ -2357,13 +2425,13 @@ function planRoom(cols, rows, projects) {
     zoneColor: /* @__PURE__ */ new Map(),
     hiddenCount: 0,
     dropped: [],
-    board: null
+    screens: []
   };
   room.zoneColor = projectColours(projects.map((p) => p.name));
   const bandRows = [];
-  for (let r = 1; r + 3 < rows - 1; r += 4) bandRows.push(r);
-  const band2 = seatProjects(room, projects, bandRows);
-  addBoard(room, bandRows, band2);
+  const pitch = wantScreens ? BAND2 : 4;
+  for (let r = 1; r + pitch - 1 < rows - 1; r += pitch) bandRows.push(r);
+  const band2 = wantScreens ? seatWorkstations(room, wishlistOf(projects), bandRows) : seatProjects(room, projects, bandRows);
   const socialBands = addFacilities(room, bandRows, band2);
   addTalkArea(room, socialBands);
   addDecor(room, socialBands);
@@ -2371,7 +2439,7 @@ function planRoom(cols, rows, projects) {
     for (let c = 0; c < cols; c++) if (grid[r][c] === "floor") room.walkable.push({ col: c, row: r });
   return room;
 }
-function seatProjects(room, projects, bandRows) {
+function wishlistOf(projects) {
   const wishlist = [];
   for (const p of projects) {
     let left = p.seats;
@@ -2381,6 +2449,10 @@ function seatProjects(room, projects, bandRows) {
       left -= take;
     }
   }
+  return wishlist;
+}
+function seatProjects(room, projects, bandRows) {
+  const wishlist = wishlistOf(projects);
   let band2 = 0;
   let n = 0;
   for (let i = 0; i < wishlist.length; ) {
@@ -2427,21 +2499,6 @@ function seatProjects(room, projects, bandRows) {
   room.dropped = [];
   room.workBottom = room.pods.length ? Math.max(...room.pods.map((p) => p.seatRow)) + 1 : 1;
   return band2;
-}
-function addBoard(room, bandRows, firstFree) {
-  if (room.cols < BOARD.minCols) {
-    room.dropped.push("board");
-    return;
-  }
-  const row = bandRows[firstFree];
-  if (row === void 0 || row + BOARD.h > room.rows - 1) {
-    room.dropped.push("board");
-    return;
-  }
-  const w = Math.min(BOARD.w, room.cols - 6);
-  const col = Math.max(2, Math.floor((room.cols - w) / 2));
-  room.board = { col, row, w, h: BOARD.h };
-  for (let r = row; r < row + BOARD.h; r++) for (let c = col; c < col + w; c++) if (room.grid[r]?.[c] !== void 0) room.grid[r][c] = "solid";
 }
 function addFacilities(room, bandRows, firstFree) {
   const below = room.workBottom + 2;
@@ -2573,6 +2630,10 @@ var RoomBase = class {
   hiddenCount = 0;
   dropped = [];
   /** where to place a monitor image this frame, and whether it is lit */
+  /** `id` is the session sitting at this desk, so a renderer that can read a screen knows
+   *  WHOSE screen to put on this monitor. Optional because an empty desk has no session,
+   *  and carried here rather than looked up by position because position is exactly what
+   *  the tripled-nameplate bug got wrong. */
   monitors = [];
   /** project nameplates, drawn rotated as images beside each pod */
   plates = [];
@@ -2583,13 +2644,12 @@ var RoomBase = class {
   /** static furniture image placements, in canvas pixels */
   props = [];
   /**
-   * The wall display, in TILE coordinates, or null when the room cannot afford one.
+   * One live terminal per desk, in TILE coordinates.
    *
-   * Placement only — the text is not the room's business. The office draws sessions; a
-   * live screen comes from cmux and belongs to whoever is rendering, which also keeps
-   * `peek.ts` out of the browser bundle and out of this class.
+   * The placement is the room's business; the text is not. A renderer that can read a
+   * screen fills these in, which is what keeps peek.ts out of the browser bundle.
    */
-  board = null;
+  screens = [];
   /** cell spans covered by an image, per cell row. Kitty draws images over text,
    *  so a label must not overlap one — but sharing the row is fine. */
   imageSpans = /* @__PURE__ */ new Map();
@@ -2627,8 +2687,8 @@ var RoomBase = class {
    * this is the only place its output becomes state, which keeps the geometry
    * reasoning testable on its own and out of the simulation.
    */
-  plan(cols, rows, projects) {
-    const room = planRoom(cols, rows, projects);
+  plan(cols, rows, projects, wantScreens) {
+    const room = planRoom(cols, rows, projects, wantScreens);
     this.cols = room.cols;
     this.rows = room.rows;
     this.grid = room.grid;
@@ -2642,7 +2702,7 @@ var RoomBase = class {
     this.zoneColor = room.zoneColor;
     this.hiddenCount = room.hiddenCount;
     this.dropped = room.dropped;
-    this.board = room.board;
+    this.screens = room.screens;
   }
   /* ───────────────────── walkability & paths ───────────────────── */
   /** A spot tile is walkable only by whoever holds it, so nobody stands in
@@ -2703,16 +2763,27 @@ var RoomBase = class {
   }
   /* ───────────────────── population ───────────────────── */
   /** Re-plan only when the viewport or the project mix actually changes. */
-  fit(wPx, hPx, sessions3) {
+  /**
+   * Lay the room out.
+   *
+   * `wantBoard` is opt-in, and it is opt-in because the FOOTPRINT and the DRAWING live in
+   * different places. `plan.ts` is in the browser bundle, so stamping a board's footprint
+   * happens everywhere the room is planned, while only a renderer that calls `drawBoard`
+   * puts anything on it. Defaulting it on shipped a 12x3 slab of dark floor into the
+   * browser and into the committed README image — the harness-mark mistake with the sides
+   * swapped, and exactly what board.test.ts's own header calls indistinguishable from a
+   * bug. A renderer asks for the footprint when it intends to draw on it.
+   */
+  fit(wPx, hPx, sessions3, wantScreens = false) {
     const cols = Math.max(12, Math.min(Math.floor(wPx / TILE), Math.floor(wPx / TILE)));
     const rows = Math.max(8, Math.floor(hPx / TILE));
     const byProj = /* @__PURE__ */ new Map();
     for (const s of sessions3) byProj.set(s.proj, (byProj.get(s.proj) ?? 0) + 1);
     const projects = [...byProj.entries()].map(([name, seats]) => ({ name, seats })).sort((a, b) => b.seats - a.seats || a.name.localeCompare(b.name));
-    const sig = `${cols}x${rows}|${projects.map((p) => `${p.name}:${p.seats}`).join(",")}`;
+    const sig = `${cols}x${rows}|${wantScreens ? "s" : "-"}|${projects.map((p) => `${p.name}:${p.seats}`).join(",")}`;
     if (sig === this.signature) return;
     this.signature = sig;
-    this.plan(cols, rows, projects);
+    this.plan(cols, rows, projects, wantScreens);
     for (const ch of this.chars.values()) ch.seatId = null;
     for (const spot of this.spots.values()) spot.taken = null;
     this.assign(sessions3);
@@ -3285,6 +3356,7 @@ var Office = class extends SimBase {
     const harness = /* @__PURE__ */ new Map();
     const levels = /* @__PURE__ */ new Map();
     const asking = /* @__PURE__ */ new Set();
+    const seatOwner = /* @__PURE__ */ new Map();
     for (const sp of this.spots.values()) {
       if (sp.kind !== "desk" || !sp.taken) continue;
       const s = byId.get(sp.taken);
@@ -3292,17 +3364,25 @@ var Office = class extends SimBase {
       if (s && s.state === "needs") asking.add(`${sp.col},${sp.row}`);
       if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind);
       if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent);
+      if (s) seatOwner.set(`${sp.col},${sp.row}`, s.id);
+    }
+    for (const sc of this.screens) {
+      const spot = this.spots.get(sc.desk);
+      sc.id = spot?.taken ?? void 0;
+      block(sc.col * TILE, sc.row * TILE, sc.w * TILE, sc.h * TILE >> 1);
     }
     for (const pod of this.pods)
       for (let c = pod.c0; c <= pod.c1; c += 2) {
-        this.monitors.push({
-          x: c * TILE,
-          y: pod.monitorRow * TILE,
-          lit: lit.has(`${c},${pod.seatRow}`),
-          seed: c + pod.monitorRow,
-          kind: lit.get(`${c},${pod.seatRow}`) ?? "think",
-          agent: harness.get(`${c},${pod.seatRow}`)
-        });
+        if (!this.screens.length)
+          this.monitors.push({
+            x: c * TILE,
+            y: pod.monitorRow * TILE,
+            lit: lit.has(`${c},${pod.seatRow}`),
+            seed: c + pod.monitorRow,
+            kind: lit.get(`${c},${pod.seatRow}`) ?? "think",
+            agent: harness.get(`${c},${pod.seatRow}`),
+            id: seatOwner.get(`${c},${pod.seatRow}`)
+          });
         block(c * TILE, pod.monitorRow * TILE, MON_COLS, MON_ROWS);
         if (lit.has(`${c},${pod.seatRow}`)) {
           const span = TILE + 2;
@@ -3316,16 +3396,21 @@ var Office = class extends SimBase {
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
         const wants = asking.has(`${c},${pod.seatRow}`);
         if (lvl || wants) {
-          this.badges.push({ x: c * TILE + TILE, y: pod.deskRow * TILE, level: lvl, asking: wants });
-          block(c * TILE + TILE, pod.deskRow * TILE, TILE, TILE / 2);
+          const sc = this.screens.find((v) => c >= v.col && c < v.col + v.w);
+          const bx = sc ? (sc.col + sc.w - 1) * TILE : c * TILE + TILE;
+          this.badges.push({ x: bx, y: pod.deskRow * TILE, level: lvl, asking: wants });
+          block(bx, pod.deskRow * TILE, TILE, TILE / 2);
         }
         const who = harness.get(`${c},${pod.seatRow}`) ?? "claude";
         if (lvl && hasLogo(who)) {
-          this.logos.push({ x: c * TILE + TILE, y: pod.monitorRow * TILE, agent: who });
-          block(c * TILE + TILE, pod.monitorRow * TILE, TILE, TILE / 2);
+          const seat = this.screens.find((v) => c >= v.col && c < v.col + v.w);
+          const x = (this.screens.length ? seat ? seat.col + seat.w - 2 : c - 1 : c + 1) * TILE;
+          const y = (this.screens.length ? pod.deskRow : pod.monitorRow) * TILE;
+          this.logos.push({ x, y, agent: who });
+          block(x, y, TILE, TILE / 2);
         }
       }
-    if (this.vertical) {
+    if (this.vertical && !this.screens.length) {
       const named = /* @__PURE__ */ new Set();
       for (const pod of this.pods) {
         if (named.has(pod.proj)) continue;
@@ -3346,6 +3431,14 @@ var Office = class extends SimBase {
         if (k === "desk") drawDesk(cv2, c * TILE, r * TILE, lit.has(`${c},${r + 1}`));
         else if (k === "solid") cv2.rect(c * TILE, r * TILE, TILE, TILE, C.floorDark);
       }
+    for (const sp of this.screens.length ? this.spots.values() : []) {
+      if (sp.kind !== "desk") continue;
+      const x = sp.col * TILE;
+      const y = sp.row * TILE;
+      cv2.rect(x, y + TILE - 2, TILE, 1, C.deskEdge);
+      cv2.rect(x, y + TILE - 1, 1, 1, C.deskCase);
+      cv2.rect(x + TILE - 1, y + TILE - 1, 1, 1, C.deskCase);
+    }
     for (const g of new Set([...this.spots.values()].filter((x) => x.kind === "pingpong").map((x) => x.group))) {
       const pair = [...this.spots.values()].filter((x2) => x2.group === g);
       if (pair.length !== 2) continue;
@@ -4514,6 +4607,13 @@ function mountPress(host2, closed) {
 // web/newsession.ts
 var KEY3 = "guildhall.control";
 var token2 = () => sessionStorage.getItem(KEY3) ?? "";
+function ago2(ms) {
+  const s = Math.max(0, Math.round(ms / 1e3));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
 var el4;
 var onPick = () => {
 };
@@ -4587,7 +4687,7 @@ async function show3() {
   open2 = true;
   el4.hidden = false;
   lockPage("newsession");
-  el4.replaceChildren(bar("Start a session"));
+  el4.replaceChildren(bar("Open a session"));
   const body2 = document.createElement("div");
   body2.className = "min-h-0 flex-1 overflow-auto overscroll-contain";
   el4.append(body2);
@@ -4607,9 +4707,49 @@ async function show3() {
     say(body2, "Could not reach guildhall.", "text-hot");
     return;
   }
+  let closed = [];
+  let closedWhy = "";
+  try {
+    const res = await fetch("/api/closed", { headers: { "x-guildhall-control": token2() }, signal: AbortSignal.timeout(15e3) });
+    if (res.ok) closed = (await res.json()).closed ?? [];
+    else if (res.status === 404) closedWhy = "This guildhall is older than the app \u2014 restart it to reopen closed sessions.";
+    else closedWhy = `Could not list closed sessions (${res.status}).`;
+  } catch {
+    closedWhy = "Could not list closed sessions.";
+  }
   body2.replaceChildren();
-  if (!projects.length) return void say(body2, "No projects found to start in.");
-  say(body2, "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
+  if (!projects.length && !closed.length && !closedWhy) return void say(body2, "No projects found to start in.");
+  if (closedWhy) say(body2, closedWhy, "text-gold");
+  if (closed.length) {
+    say(body2, "Reopen one you closed. It picks up the same conversation, where it left off.");
+    const back = document.createElement("ul");
+    back.className = "m-0 list-none p-0";
+    for (const c of closed) {
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "flex min-h-12 w-full cursor-pointer flex-col items-start justify-center gap-0.5 border-0 border-b border-line bg-transparent px-3 py-2 text-left hover:bg-line/40";
+      const top = document.createElement("span");
+      top.className = "flex w-full items-baseline gap-2";
+      const name = document.createElement("span");
+      name.className = "shrink-0 text-[0.86rem] text-label";
+      name.textContent = c.proj;
+      const when = document.createElement("span");
+      when.className = "ml-auto shrink-0 text-[0.72rem] text-faint";
+      when.textContent = ago2(Date.now() - c.at);
+      top.append(name, when);
+      const what = document.createElement("span");
+      what.className = "line-clamp-2 w-full text-[0.76rem]/[1.35] text-faint";
+      what.textContent = c.title;
+      b.append(top, what);
+      b.addEventListener("click", () => start({ dir: c.cwd, label: c.proj, live: false }, body2, b, c.id));
+      li.append(b);
+      back.append(li);
+    }
+    body2.append(back);
+  }
+  if (!projects.length) return;
+  say(body2, closed.length ? "Or start a new one." : "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
   const list = document.createElement("ul");
   list.className = "m-0 list-none p-0";
   for (const p of projects) {
@@ -4633,15 +4773,16 @@ async function show3() {
   }
   body2.append(list);
 }
-async function start(p, body2, btn) {
+async function start(p, body2, btn, resume) {
   btn.disabled = true;
   const was = btn.textContent;
-  btn.textContent = `Starting in ${p.label}\u2026`;
+  btn.replaceChildren();
+  btn.textContent = resume ? `Reopening ${p.label}\u2026` : `Starting in ${p.label}\u2026`;
   try {
     const res = await fetch("/api/spawn", {
       method: "POST",
       headers: { "x-guildhall-control": token2(), "content-type": "application/json" },
-      body: JSON.stringify({ dir: p.dir }),
+      body: JSON.stringify(resume ? { dir: p.dir, resume } : { dir: p.dir }),
       // Starting a session runs `claude`, which is slower than a send; the server
       // also waits to see whether a trust prompt came up before answering.
       signal: AbortSignal.timeout(3e4)
