@@ -8,7 +8,13 @@
 import os from 'node:os'
 import path from 'node:path'
 
-const HOME = os.homedir()
+/**
+ * `GUILDHALL_HOME` overrides it, which is the seam a test uses to point the whole module at
+ * a fixture instead of at the machine's real transcripts. Same convention `commands.ts`
+ * already follows; it is honored here so anything reading a transcript can be tested
+ * without the test's answer depending on whatever happens to be running.
+ */
+const HOME = process.env.GUILDHALL_HOME || os.homedir()
 
 /** One JSON file per running process, named for its PID. */
 export const SESS_DIR = path.join(HOME, '.claude', 'sessions')
