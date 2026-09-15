@@ -1254,3 +1254,43 @@ the process; `startedAt` remains the fallback for older entries that lack it.
 dropped registry entry is indistinguishable from a session that was never there. If
 sessions are missing from the room again, compare `ps -o lstart=` against both fields
 before looking anywhere else.
+
+## A pty with no window size, and two frames' worth of looking in the wrong place
+
+**Status: fixed.** The wall display drew nothing, then appeared to still draw nothing after
+the fix, and both readings were real numbers answering a different question.
+
+**The bug itself** was render order: `drawBoard` ran AFTER `townLines = cv.render()`, so
+every rect and every text cell it wrote was discarded before anything was printed and
+`cv.clear()` wiped the overlay on the next frame. The feature was never on screen once.
+
+**The first wrong measurement** was reading `cv.overlay` in a scratch harness immediately
+after calling `drawBoard`. That is one step past the point where the frame becomes text, so
+it reported a board that the terminal never received — `$?` after a pipe, with a canvas.
+
+**The second wrong measurement** cost more, because it survived the fix. A `pty.fork()`
+harness captured 62KB of real output and found zero occurrences of anything the board
+draws, which read as "the reorder did not work". The harness never called
+`ioctl(TIOCSWINSZ)`. Without it the tty reports a default size, `main.ts` clamps to
+`Math.max(20, …)`, and the app renders a **5x2-tile** room in which `addBoard` correctly
+refuses to place anything. The instrumentation that settled it printed one line:
+
+```
+[board] null cols=20 rows=8 sessions=7
+```
+
+### Measured, so do not re-measure
+
+| | capture | board text found |
+|---|---|---|
+| pty with no `TIOCSWINSZ` | 62KB, then 188KB | 0 — room is 5x2 tiles, board correctly dropped |
+| pty at 120x60, fix in place | 194KB | header, content line, and a `❯` line, in `C.gold` / `C.night` |
+| pty at 120x60, fix removed | 294KB | **0** |
+
+The last row is the point: the larger capture is the failing one, so output volume says
+nothing about whether the room was drawn. Confirm this feature by looking for its text in
+what the app PRINTS, at a pty whose size was actually set, and confirm the fix by removing
+it and watching the count go to zero.
+
+**Anything driving this app through a pty must set the window size first.** A room too
+small to hold a feature is indistinguishable from a feature that is broken.
