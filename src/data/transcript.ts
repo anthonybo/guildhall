@@ -10,6 +10,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { PROJ_DIR } from './paths.ts'
+import { type Stored, loadLedgers, saveLedgers } from './ledgercache.ts'
 
 /** Uncached on purpose: this is reached only when two directories hold the same
  *  session id, and a cached mtime would freeze that choice as the files grow. */
@@ -62,9 +63,66 @@ export function transcriptIndex() {
  * append-only, so the byte offset reached last time is kept and only what has been
  * added since is parsed. The full pass happens once, at startup.
  */
-type Ledger = { off: number; tail: string; commits: number; edits: number; activeMs: number }
+/**
+ * `done` is the byte just past the last complete line, which is the offset the counters
+ * are exact for and the only one safe to resume from. Tracked from the raw bytes rather
+ * than computed as `off - byteLength(tail)`, because the decoder can be holding up to
+ * three bytes of a character split across a chunk boundary that are in neither — and
+ * resuming from that computed offset would start mid-character and garble a record.
+ */
+type Ledger = { ino: number; off: number; done: number; tail: string; commits: number; edits: number; activeMs: number }
 const ledgers = new Map<string, Ledger>()
-const blank = (): Ledger => ({ off: 0, tail: '', commits: 0, edits: 0, activeMs: 0 })
+const blank = (ino = 0): Ledger => ({ ino, off: 0, done: 0, tail: '', commits: 0, edits: 0, activeMs: 0 })
+
+/**
+ * Seeded from disk on first use, so a fresh process resumes rather than re-parsing.
+ *
+ * "The full pass happens once, at startup" above was true of a long-lived process and
+ * expensive for a short one: every `guildhall --sessions` the menu bar ran paid ~8 cpu-s
+ * re-reading gigabytes of transcript. See ledgercache.ts for the measurement.
+ */
+let seeded = false
+function seed() {
+	if (seeded) return
+	seeded = true
+	// A stored offset is always a line boundary, so it is both where reading resumes and
+	// where the counters are exact.
+	for (const [file, s] of loadLedgers()) ledgers.set(file, { ...s, done: s.off, tail: '' })
+}
+
+/** A ledger moved since the last save, so the cache is behind. */
+let dirty = false
+let savedAt = 0
+/**
+ * How often a long-lived process writes the cache. A short one writes on its first call,
+ * since `savedAt` starts at zero — which is exactly `--sessions`, run once and gone.
+ * Sixty seconds because the cache only has to be close: an entry a minute old costs the
+ * next fresh process one minute of appended bytes, which is nothing.
+ */
+const SAVE_EVERY = 60_000
+
+/** Write the ledgers if any moved and the last write was long enough ago. */
+export function persistLedgers(now = Date.now()) {
+	if (!dirty || now - savedAt < SAVE_EVERY) return false
+	const out = new Map<string, Stored>()
+	for (const [file, L] of ledgers) {
+		// The last complete line, not how far reading got. The fragment past it is not
+		// stored: the next process re-reads it — one line — rather than trusting a partial
+		// line it did not read itself.
+		out.set(file, { ino: L.ino, off: L.done, commits: L.commits, edits: L.edits, activeMs: L.activeMs })
+	}
+	savedAt = now
+	dirty = false
+	return saveLedgers(out)
+}
+
+/** Test seam: forget everything, including that the cache was ever read. */
+export function resetLedgers() {
+	ledgers.clear()
+	seeded = false
+	dirty = false
+	savedAt = 0
+}
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit'])
 const COMMIT = /\bgit\s+commit\b/
@@ -92,22 +150,29 @@ function tally(L: Ledger, line: string) {
 
 /** Read whatever has been appended since last time and fold it into the totals. */
 export function advance(file: string) {
+	seed()
 	let L = ledgers.get(file)
-	if (!L) {
-		L = blank()
-		ledgers.set(file, L)
-	}
-	let size = 0
+	let st: fs.Stats
 	try {
-		size = fs.statSync(file).size
+		st = fs.statSync(file)
 	} catch {
-		return L
+		return L ?? blank()
 	}
-	// shorter than where we stopped: the file was replaced, so the totals are stale
-	if (size < L.off) {
-		L = blank()
+	const size = st.size
+	if (!L) {
+		L = blank(st.ino)
 		ledgers.set(file, L)
 	}
+	// A DIFFERENT FILE at the same path: the totals belong to its predecessor. Shorter
+	// than where we stopped was the only check while ledgers lived for one process; once
+	// they outlive it, a transcript replaced by a LONGER one would pass that check and
+	// have its counts added to a stranger's. The inode catches both.
+	if (size < L.off || (L.ino && st.ino !== L.ino)) {
+		L = blank(st.ino)
+		ledgers.set(file, L)
+		dirty = true
+	}
+	L.ino = st.ino
 	if (size === L.off) return L
 	let fd: number
 	try {
@@ -120,12 +185,18 @@ export function advance(file: string) {
 		const CHUNK = 4_000_000
 		const buf = Buffer.alloc(CHUNK)
 		while (L.off < size) {
+			const at = L.off
 			const n = fs.readSync(fd, buf, 0, Math.min(CHUNK, size - L.off), L.off)
 			if (n <= 0) break
 			L.off += n
 			const lines = (L.tail + dec.write(buf.subarray(0, n))).split('\n')
 			L.tail = lines.pop() ?? '' // the last line may still be being written
 			for (const line of lines) tally(L, line)
+			// Byte-exact: 0x0a never appears inside a multibyte UTF-8 sequence, so the last
+			// newline in the raw chunk is the end of the last line tallied.
+			const nl = buf.lastIndexOf(0x0a, n - 1)
+			if (nl >= 0) L.done = at + nl + 1
+			dirty = true
 		}
 	} catch {
 	} finally {

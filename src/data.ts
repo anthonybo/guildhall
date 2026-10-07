@@ -24,7 +24,7 @@ import { liveSessions } from './data/registry.ts'
 import { levelFor, xpOf } from './data/score.ts'
 import { prune, settle } from './data/settle.ts'
 import { stateOf } from './data/state.ts'
-import { transcriptIndex } from './data/transcript.ts'
+import { persistLedgers, transcriptIndex } from './data/transcript.ts'
 import type { Digest, Registry, Session } from './data/types.ts'
 import { codexSessions } from './data/codex.ts'
 
@@ -173,6 +173,15 @@ export function collect(codex = false): Session[] {
 	// go through `disambiguate`, because two sessions called `guildhall` need telling
 	// apart whichever harness they came from.
 	const folded = pairByTty(fold(out, registry))
+	// Keep the transcript ledgers on disk so the NEXT fresh process starts warm. The menu
+	// bar runs `--sessions` as a fresh process every few seconds, and without this each run
+	// re-parsed gigabytes of transcript — see data/ledgercache.ts. Throttled inside: a
+	// short-lived run writes once, a long-lived one at most once a minute.
+	//
+	// HERE, above both returns. It was first placed before the last one, under the early
+	// return for a room with no Codex sessions — which is the ordinary room — so it never
+	// ran at all and the fix measured as no change.
+	persistLedgers()
 	if (!extra.length) return disambiguate(folded)
 	const withLooks = extra.map((s) => ({
 		...s,

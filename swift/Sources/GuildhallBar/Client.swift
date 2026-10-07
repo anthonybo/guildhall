@@ -147,9 +147,16 @@ struct Settings {
 /// Polls rather than holding the server's SSE stream open. The stream is the
 /// better fit for a page that is being looked at; a menu bar item is usually not
 /// being looked at, and a poll that stops when the machine sleeps and resumes
-/// when it wakes needs no reconnection logic at all. `collect()` is measured at
-/// about 4 cpu-ms, so a request every few seconds is not a cost worth optimising
-/// away with code that can get stuck half-connected.
+/// when it wakes needs no reconnection logic at all.
+///
+/// WHAT A POLL COSTS. This used to say "`collect()` is measured at about 4
+/// cpu-ms" — true of a long-lived process, and the wrong number here: every poll
+/// is a FRESH `guildhall --sessions`, which had no transcript ledgers and
+/// re-parsed every transcript from byte zero. Measured at ~9 cpu-seconds a run,
+/// every 5s idle and every 2s open — most of a core, reported as the machine
+/// lagging. The ledgers are now kept on disk (data/ledgercache.ts), and a fresh
+/// process leans on them: ~0.27 cpu-s a run including node's own startup.
+/// `check-perf`'s "fresh-process poll" gate measures this path, not the warm one.
 actor Client {
 	private var settings = Settings.load()
 
