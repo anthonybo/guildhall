@@ -127,6 +127,44 @@ checks.push({
 })
 
 /**
+ * The poll as the menu bar actually makes it: a FRESH process every time.
+ *
+ * The gate above warms `collect()` and then times it, which is right for the terminal
+ * room — a long-lived process — and was blind to the most expensive thing this program
+ * did. The menu bar runs `guildhall --sessions` as a new process every 5 seconds idle and
+ * every 2 with its popover open, and a new process has no transcript ledgers, so it
+ * re-parsed every transcript from byte zero: 7,802 cpu-ms measured, ~9 cpu-s per run,
+ * against the 4 cpu-ms this file reported the whole time. Most of a core, continuously,
+ * reported by the user as the machine lagging — and the menu bar's own code justified the
+ * spawn by citing the warm number from here.
+ *
+ * Two processes: the first brings the disk cache up to date and is not timed (on a
+ * machine that has never built one it costs the full parse, once); the second is the
+ * steady state, a fresh process leaning only on the cache. Measured at ~40 cpu-ms.
+ */
+checks.push({
+	name: 'fresh-process poll',
+	unit: 'cpu-ms',
+	budget: 150,
+	was: 7802,
+	note: 'a new process per menu bar poll; 7802 before the ledgers were kept on disk',
+	measure: () => {
+		run(`
+			import { collect } from './src/data.ts'
+			collect()
+			console.log(0)
+		`)
+		return run(`
+			import { collect } from './src/data.ts'
+			const c = process.cpuUsage()
+			collect()
+			const u = process.cpuUsage(c)
+			console.log((u.user + u.system) / 1000)
+		`)
+	},
+})
+
+/**
  * The SECOND harness on the same poll, against a history the size of a year's use.
  *
  * The gate above calls `collect()` with no argument, which means Codex is off — so the
