@@ -1294,3 +1294,42 @@ it and watching the count go to zero.
 
 **Anything driving this app through a pty must set the window size first.** A room too
 small to hold a feature is indistinguishable from a feature that is broken.
+
+## The menu bar poll that re-parsed every transcript, every few seconds
+
+**Status: fixed.** Reported as the machine lagging, with a `guildhall --sessions` process
+at 104% CPU that was five seconds old.
+
+The menu bar reads the room by running `guildhall --sessions` — a fresh process — every 5
+seconds idle and every 2 with its popover open. The design was justified in its own
+comment: *"`collect()` is measured at about 4 cpu-ms, so a request every few seconds is not
+a cost worth optimising."* That number was real and answered a different question. It came
+from the perf gate, which warms `collect()` inside one long-lived process and then times
+it. A fresh process has no transcript ledgers, so it re-parsed every transcript from byte
+zero.
+
+### Measured, so do not re-measure
+
+| | cost |
+|---|---|
+| `collect()` warm, long-lived process (what the gate measured) | 3-4 cpu-ms |
+| `collect()` in a fresh process (what every poll paid) | **7,802 cpu-ms** |
+| one whole `--sessions` run | ~9 cpu-s, 225 MB |
+| one `--sessions` run with the ledgers on disk | **0.27 cpu-s**, 58 MB |
+
+2.8GB of transcripts on this machine, the largest 726MB. A CPU profile put 87% of the run
+in `tally`, `advance` and the UTF-8 decoder — the ledger parse, confirmed rather than
+assumed. The fix keeps the ledgers on disk (`data/ledgercache.ts`) and the totals were
+checked identical between a cold parse and a cached resume.
+
+### The fix that measured as no change
+
+The save was first placed just before `collect()`'s final `return` — under an early
+`if (!extra.length) return` for a room with no Codex sessions, which is the ordinary room.
+It never ran, and the before/after read 8.5s both times. Found with a stack trace in
+`advance()` and a log in the save, after reasoning about the code order had said it must
+work. A grep for `return` lines had missed it because the early one is `if (...) return`.
+
+**The gate now measures the path that runs:** "fresh-process poll" times `collect()` in a
+new process leaning only on the disk cache — 45 cpu-ms, against 9,120 with the cache
+disabled. The old warm gate reads ~2 cpu-ms in both cases, which is how this got in.
