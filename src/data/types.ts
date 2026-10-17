@@ -81,6 +81,14 @@ export type Session = {
 	/** subagents out and dispatched, in words, when there are any */
 	agents?: string
 	/**
+	 * The agent team this session leads, when it leads one.
+	 *
+	 * Teammates are separate processes that never register as sessions, so without this
+	 * they are invisible. Linked by each teammate's own `--parent-session-id`, never by
+	 * directory — see data/teams.ts.
+	 */
+	team?: import('./teams.ts').Team
+	/**
 	 * Which harness this session belongs to, when it is not Claude Code.
 	 *
 	 * OPTIONAL, and absent for every session that exists today. A phone left open

@@ -20,6 +20,8 @@ const HOME = process.env.GUILDHALL_HOME || os.homedir()
 export const SESS_DIR = path.join(HOME, '.claude', 'sessions')
 /** One directory per project slug, holding `<sessionId>.jsonl` transcripts. */
 export const PROJ_DIR = path.join(HOME, '.claude', 'projects')
+/** One directory per agent team, holding `config.json` — see data/teams.ts. */
+export const TEAMS_DIR = path.join(HOME, '.claude', 'teams')
 /**
  * cmux's window layout, which is how a session maps to a tab we can jump to.
  *

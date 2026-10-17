@@ -32,6 +32,13 @@ export function expansion(s: Session, total: number): string[] {
 		['context', s.ctxUsed ? `${tokens(s.ctxUsed)} of ${tokens(s.ctxLimit)}` : 'nothing yet'],
 	]
 	if (s.agents) pairs.splice(1, 0, ['agents', s.agents])
+	// The team this session leads, one teammate each, active ones first. Plain text on
+	// purpose: this is the data being made visible so it can be looked at, before anybody
+	// decides how the room should draw it.
+	if (s.team?.members.length) {
+		const ms = [...s.team.members].sort((a, b) => Number(b.active) - Number(a.active))
+		pairs.splice(1, 0, ['team', ms.map((m) => `${m.active ? '●' : '○'} ${m.name}`).join('  ')])
+	}
 	if (s.waitingFor) pairs.splice(1, 0, ['waiting on', s.waitingFor])
 	// The project column is a fixed width and cannot carry a journey, so the row
 	// keeps the stable name and the detail says where the work actually is.

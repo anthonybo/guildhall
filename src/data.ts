@@ -25,6 +25,7 @@ import { levelFor, xpOf } from './data/score.ts'
 import { prune, settle } from './data/settle.ts'
 import { stateOf } from './data/state.ts'
 import { persistLedgers, transcriptIndex } from './data/transcript.ts'
+import { teamsByLead } from './data/teams.ts'
 import type { Digest, Registry, Session } from './data/types.ts'
 import { codexSessions } from './data/codex.ts'
 
@@ -173,6 +174,13 @@ export function collect(codex = false): Session[] {
 	// go through `disambiguate`, because two sessions called `guildhall` need telling
 	// apart whichever harness they came from.
 	const folded = pairByTty(fold(out, registry))
+	// Each lead gets the team it spawned. Before the returns below, for the same reason
+	// the ledger save is: the early one is the ordinary room.
+	const teams = teamsByLead(now)
+	for (const s of folded) {
+		const t = teams.get(s.id)
+		if (t) s.team = t
+	}
 	// Keep the transcript ledgers on disk so the NEXT fresh process starts warm. The menu
 	// bar runs `--sessions` as a fresh process every few seconds, and without this each run
 	// re-parsed gigabytes of transcript — see data/ledgercache.ts. Throttled inside: a
