@@ -23,7 +23,7 @@ import path from 'node:path'
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-history-'))
 process.env.HOME = HOME
 
-const { historyPage } = await import('./history.ts')
+const { historyPage, imageAt } = await import('./history.ts')
 
 const ID = 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb'
 const DIR = path.join(HOME, '.claude', 'projects', '-tmp-guildhall-fixture-orchard')
@@ -269,4 +269,33 @@ test('a huge edit is clipped rather than sent whole', () => {
 	assert.ok(call.after!.length < 3_000, `after was ${call.after!.length} characters`)
 	// and it says so, rather than silently ending mid-line
 	assert.match(call.after!, /more characters$/)
+})
+
+test('pictures in the conversation are entries that fetch the exact image, and nothing else', () => {
+	// One you pasted, then one a Read answered with — the two shapes a transcript holds.
+	const pasted = Buffer.from('TEST-ONLY pasted picture bytes')
+	const read = Buffer.from('TEST-ONLY read picture bytes')
+	const lines = [
+		JSON.stringify({ type: 'user', timestamp: '2026-10-17T00:00:00.000Z', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: pasted.toString('base64') } }, { type: 'text', text: 'look at this' }] } }),
+		JSON.stringify({ type: 'assistant', timestamp: '2026-10-17T00:00:01.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_TEST', name: 'Read', input: { file_path: '/tmp/guildhall-fixture/w.jpg' } }] } }),
+		JSON.stringify({ type: 'user', timestamp: '2026-10-17T00:00:02.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_TEST', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: read.toString('base64') } }] }] } }),
+		JSON.stringify({ type: 'user', timestamp: '2026-10-17T00:00:03.000Z', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'text/html', data: Buffer.from('<b>TEST-ONLY</b>').toString('base64') } }] } }),
+	]
+	fs.mkdirSync(DIR, { recursive: true })
+	fs.writeFileSync(path.join(DIR, `${ID}.jsonl`), lines.join('\n') + '\n')
+	const pics = historyPage(ID)!.entries.filter((e) => e.kind === 'image')
+	assert.equal(pics.length, 3)
+	// Pasted has no `for`; the one a Read returned names its call, so it goes under it.
+	assert.equal(pics[0]!.for, undefined)
+	assert.equal(pics[1]!.for, 'toolu_TEST')
+	assert.deepEqual(imageAt(ID, pics[0]!.image!), { bytes: pasted, type: 'image/png' })
+	assert.deepEqual(imageAt(ID, pics[1]!.image!), { bytes: read, type: 'image/jpeg' })
+	// A media type that is not an image is never served as one.
+	assert.equal(imageAt(ID, pics[2]!.image!), null)
+	// Aimed into the middle of a line, past its images, past the file, or malformed.
+	const second = pics[1]!.image!.split(':')[0]!
+	for (const ref of [`${Number(second) + 5}:0`, `${second}:1`, '999999999:0', 'x', '-1:0', '']) {
+		assert.equal(imageAt(ID, ref), null, `${JSON.stringify(ref)} was served`)
+	}
+	assert.equal(imageAt('no-such-session', pics[0]!.image!), null)
 })

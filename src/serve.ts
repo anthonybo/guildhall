@@ -34,7 +34,7 @@ import { press } from './data/press.ts'
 import { usage } from './data/usage.ts'
 import { type Call, MIME, type ServeOptions, addressOf, login, readBody, send, sessionOf } from './serve/http.ts'
 import { clickRoute, keyRoute, sendRoute, spawnRoute, uploadRoute } from './serve/control.ts'
-import { closedRoute, commandsRoute, projectsRoute, screenRoute, transcriptRoute } from './serve/reads.ts'
+import { closedRoute, commandsRoute, historyImageRoute, imageRoute, projectsRoute, screenRoute, transcriptRoute } from './serve/reads.ts'
 import { clientStamp, serveStatic } from './serve/static.ts'
 import type { Session } from './data.ts'
 
@@ -57,6 +57,8 @@ const ACTS = new Map<string, (c: Call) => Promise<void>>([
 const READS = new Map<string, (c: Call) => Promise<void>>([
 	['/api/screen', screenRoute],
 	['/api/transcript', transcriptRoute],
+	['/api/image', imageRoute],
+	['/api/history-image', historyImageRoute],
 	['/api/commands', commandsRoute],
 	['/api/projects', projectsRoute],
 	['/api/closed', closedRoute],

@@ -256,6 +256,47 @@ function linkParts(text) {
   return out;
 }
 
+// web/picture.ts
+var PLACEHOLDER = "\u{10EEEE}";
+var FILE = /[\w@%+=,.-]+\.(?:png|jpe?g|gif|webp|heic|tiff?|bmp)\b/gi;
+function pictures(spans, rows) {
+  const cols = /* @__PURE__ */ new Map();
+  const text = /* @__PURE__ */ new Map();
+  const style = /* @__PURE__ */ new Map();
+  for (const sp of spans) {
+    text.set(sp.row, (text.get(sp.row) ?? "") + sp.text);
+    if (!sp.text.startsWith(PLACEHOLDER)) continue;
+    if (!style.has(sp.row)) style.set(sp.row, sp.style_id);
+    const width = [...sp.text].filter((ch) => ch === PLACEHOLDER).length;
+    const at = cols.get(sp.row);
+    const lo = Math.min(at?.[0] ?? sp.column, sp.column);
+    const hi = Math.max(at?.[1] ?? 0, sp.column + Math.max(1, width) - 1);
+    cols.set(sp.row, [lo, hi]);
+  }
+  const out = [];
+  for (let r = 0; r < rows; r++) {
+    const c = cols.get(r);
+    if (!c) continue;
+    const last2 = out.at(-1);
+    if (last2 && last2.bottom === r - 1) {
+      last2.bottom = r;
+      last2.left = Math.min(last2.left, c[0]);
+      last2.right = Math.max(last2.right, c[1]);
+      continue;
+    }
+    let name = null;
+    for (const above of [r - 1, r - 2]) {
+      const hits = (text.get(above) ?? "").match(FILE);
+      if (hits) {
+        name = hits.at(-1);
+        break;
+      }
+    }
+    out.push({ top: r, bottom: r, left: c[0], right: c[1], name, style: style.get(r) ?? 0 });
+  }
+  return out;
+}
+
 // web/viewport.ts
 var fullScreen = () => window.matchMedia("(width < 880px)").matches;
 var KEYBOARD = 60;
@@ -414,7 +455,33 @@ function advanceRatio(host2) {
   ratio = w > 0 ? w / 1e4 : 0.6;
   return ratio;
 }
-function paint(pre, g, panel, wrap) {
+var seenAs = /* @__PURE__ */ new Map();
+function drawPicture(p, url, cell, lineH, reflow) {
+  const line = document.createElement("div");
+  line.dataset.row = String(p.top);
+  if (!url) {
+    const label = document.createElement("span");
+    label.dataset.col = String(p.left);
+    label.style.cssText = "opacity:0.6;font-style:italic";
+    label.textContent = `${" ".repeat(reflow ? 0 : p.left)}[picture${p.name ? `: ${p.name}` : ""}]`;
+    line.append(label);
+    return line;
+  }
+  const cols = p.right - p.left + 1;
+  const rows = p.bottom - p.top + 1;
+  const img = document.createElement("img");
+  img.alt = p.name ?? "picture";
+  img.src = url;
+  img.style.cssText = reflow ? `display:block;width:100%;max-width:${(cols * cell).toFixed(1)}px;height:auto;margin-inline:auto` : `display:block;width:${(cols * cell).toFixed(1)}px;height:${(rows * lineH).toFixed(1)}px;object-fit:contain;margin-left:${(p.left * cell).toFixed(1)}px`;
+  const open3 = document.createElement("a");
+  open3.href = url;
+  open3.target = "_blank";
+  open3.rel = "noopener";
+  open3.append(img);
+  line.append(open3);
+  return line;
+}
+function paint(pre, g, panel, wrap, picture2 = () => null) {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
   const byId = new Map(g.styles.map((st) => [st.id, st]));
   const rows = /* @__PURE__ */ new Map();
@@ -458,7 +525,18 @@ function paint(pre, g, panel, wrap) {
       break;
     }
   }
+  const shown = pictures(g.row_spans, g.rows);
   for (let r = 0; r < g.rows; r++) {
+    const pic = shown.find((p) => r >= p.top && r <= p.bottom);
+    if (pic) {
+      if (r === pic.top) {
+        const id = byId.get(pic.style)?.foreground;
+        if (pic.name && id) seenAs.set(id, pic.name);
+        const name = pic.name ?? (id ? seenAs.get(id) : void 0);
+        out.push(drawPicture({ ...pic, name: name ?? null }, name ? picture2(name) : null, advance * size, 1.25 * size, reflow));
+      }
+      continue;
+    }
     const line = document.createElement("div");
     line.dataset.row = String(r);
     const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
@@ -950,6 +1028,71 @@ function typedForm(text) {
   return text;
 }
 
+// web/historyimage.ts
+var AHEAD = "600px 0px";
+var watcher = null;
+var watching = null;
+var urls = [];
+function watchImages(scroller) {
+  forgetImages();
+  watching = scroller;
+  watcher = new IntersectionObserver(
+    (seen2) => {
+      for (const s of seen2) {
+        if (!s.isIntersecting) continue;
+        watcher?.unobserve(s.target);
+        void s.target.load?.();
+      }
+    },
+    { root: scroller, rootMargin: AHEAD }
+  );
+}
+function forgetImages() {
+  watcher?.disconnect();
+  watcher = null;
+  watching = null;
+  for (const u of urls.splice(0)) URL.revokeObjectURL(u);
+}
+function historyImage(session, ref, token3, mine) {
+  const box = document.createElement("div");
+  box.className = mine ? "mt-2 mb-2 border-l-4 border-l-you pl-2" : "mt-1 mb-2 ml-4";
+  const label = document.createElement("div");
+  label.className = "text-[0.7rem] text-faint";
+  label.textContent = mine ? "you pasted a picture" : "picture";
+  box.append(label);
+  const host2 = box;
+  host2.load = async () => {
+    try {
+      const res = await fetch(`/api/history-image?id=${encodeURIComponent(session)}&ref=${encodeURIComponent(ref)}`, {
+        headers: { "x-guildhall-control": token3 },
+        signal: AbortSignal.timeout(3e4)
+      });
+      if (!res.ok) {
+        label.textContent = mine ? "you pasted a picture (it could not be read)" : "picture (it could not be read)";
+        return;
+      }
+      const url = URL.createObjectURL(await res.blob());
+      if (!watching) return URL.revokeObjectURL(url);
+      urls.push(url);
+      const img = document.createElement("img");
+      img.src = url;
+      img.alt = label.textContent ?? "picture";
+      img.className = "block h-auto max-h-[70vh] max-w-full rounded border border-line";
+      const open3 = document.createElement("a");
+      open3.href = url;
+      open3.target = "_blank";
+      open3.rel = "noopener";
+      open3.append(img);
+      label.replaceWith(open3);
+    } catch {
+      label.textContent = mine ? "you pasted a picture" : "picture";
+      setTimeout(() => watcher?.observe(box), 5e3);
+    }
+  };
+  watcher?.observe(box);
+  return box;
+}
+
 // src/data/describe.ts
 var cut = (s, n) => {
   const t = (s ?? "").replace(/\s+/g, " ").trim();
@@ -970,15 +1113,7 @@ var KIND = {
   Workflow: "agent"
 };
 
-// web/transcript.ts
-var MODE = "guildhall.transcript.mode";
-var el = null;
-var body = null;
-var cursor = null;
-var openId = null;
-var loading = false;
-var exhausted = false;
-var mode = localStorage.getItem(MODE) === "all" ? "all" : "talk";
+// web/transcripttools.ts
 function withLinks(text) {
   const frag = document.createDocumentFragment();
   for (const part of linkParts(text)) {
@@ -1001,6 +1136,17 @@ function toolTint(raw) {
   const kind = raw ? KIND[raw.replace(/^mcp__[^_]+(?:-[^_]+)*__/, "")] : void 0;
   return kind ? rgb(TINT[kind]) : "var(--color-muted)";
 }
+
+// web/transcript.ts
+var MODE = "guildhall.transcript.mode";
+var el = null;
+var body = null;
+var cursor = null;
+var openId = null;
+var openToken = "";
+var loading = false;
+var exhausted = false;
+var mode = localStorage.getItem(MODE) === "all" ? "all" : "talk";
 function prose(e) {
   const row = document.createElement("div");
   const notice = e.kind === "text" && e.role === "user" ? inserted(e.text) : null;
@@ -1124,11 +1270,24 @@ function build(entries) {
   for (const e of entries) if (e.kind === "result" && e.for) results.set(e.for, e);
   const orphans = entries.filter((e) => e.kind === "result" && !e.for);
   let steps = [];
+  let read2 = [];
   const flush = () => {
     if (steps.length) frag.append(run(steps));
     steps = [];
+    frag.append(...read2);
+    read2 = [];
   };
   for (const e of entries) {
+    if (e.kind === "image") {
+      if (!openId || !e.image) continue;
+      const pic = historyImage(openId, e.image, openToken, !e.for);
+      if (e.for) read2.push(pic);
+      else {
+        flush();
+        frag.append(pic);
+      }
+      continue;
+    }
     if (e.kind === "tool") {
       steps.push({ call: e, result: e.id ? results.get(e.id) : orphans.shift() });
       continue;
@@ -1246,6 +1405,8 @@ function openTranscript(id, name, token3) {
   body = document.createElement("div");
   body.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.5]";
   body.textContent = "reading\u2026";
+  openToken = token3;
+  watchImages(body);
   body.addEventListener("scroll", () => {
     if (body && body.scrollTop < 240) void load(token3, true);
   });
@@ -1261,6 +1422,7 @@ function closeTranscript() {
   document.removeEventListener("keydown", onKey);
   openId = null;
   body = null;
+  forgetImages();
   pages = [];
   if (el) {
     el.hidden = true;
@@ -1656,6 +1818,41 @@ function askForToken(why) {
   input.focus();
 }
 
+// web/termimages.ts
+var got = /* @__PURE__ */ new Map();
+var asking = /* @__PURE__ */ new Set();
+var KEEP = 24;
+function picture(name) {
+  const id = term.openId;
+  if (!id) return null;
+  const key = `${id}\0${name}`;
+  if (got.has(key)) return got.get(key) ?? null;
+  if (!asking.has(key)) {
+    asking.add(key);
+    void load2(id, name, key);
+  }
+  return null;
+}
+async function load2(id, name, key) {
+  try {
+    const res = await fetch(`/api/image?id=${encodeURIComponent(id)}&name=${encodeURIComponent(name)}`, {
+      headers: { "x-guildhall-control": token() },
+      signal: AbortSignal.timeout(2e4)
+    });
+    const url = res.ok ? URL.createObjectURL(await res.blob()) : null;
+    if (got.size >= KEEP) {
+      const [oldest, url0] = got.entries().next().value;
+      if (url0) URL.revokeObjectURL(url0);
+      got.delete(oldest);
+    }
+    got.set(key, url);
+    if (url) repaintSoon();
+  } catch {
+  } finally {
+    asking.delete(key);
+  }
+}
+
 // web/termpoll.ts
 async function sendKey(key, pre) {
   if (!term.openId) return;
@@ -1707,7 +1904,7 @@ async function poll() {
   if (sig === term.lastSig && pre.childElementCount) return;
   term.lastSig = sig;
   const btn = document.getElementById("screenmode");
-  const cramped = paint(pre, r.render_grid, term.el, term.wrap);
+  const cramped = paint(pre, r.render_grid, term.el, term.wrap, picture);
   if (btn) btn.hidden = !cramped;
   if (term.jump) {
     pre.scrollTop = term.jump === "top" ? 0 : pre.scrollHeight;
@@ -3789,13 +3986,13 @@ var Office = class extends SimBase {
     const lit = /* @__PURE__ */ new Map();
     const harness = /* @__PURE__ */ new Map();
     const levels = /* @__PURE__ */ new Map();
-    const asking = /* @__PURE__ */ new Set();
+    const asking2 = /* @__PURE__ */ new Set();
     const seatOwner = /* @__PURE__ */ new Map();
     for (const sp of this.spots.values()) {
       if (sp.kind !== "desk" || !sp.taken) continue;
       const s = byId.get(sp.taken);
       if (s) levels.set(`${sp.col},${sp.row}`, s.level);
-      if (s && s.state === "needs") asking.add(`${sp.col},${sp.row}`);
+      if (s && s.state === "needs") asking2.add(`${sp.col},${sp.row}`);
       if (s && (this.atDesk(s) || s.stale < SCREEN_HOLD)) lit.set(`${sp.col},${sp.row}`, s.toolKind);
       if (s?.agent) harness.set(`${sp.col},${sp.row}`, s.agent);
       if (s) seatOwner.set(`${sp.col},${sp.row}`, s.id);
@@ -3828,7 +4025,7 @@ var Office = class extends SimBase {
           cv2.tint(c * TILE - 1 + (head + span - 2) % span, y, 1, 1, tint, 0.25);
         }
         const lvl = levels.get(`${c},${pod.seatRow}`) ?? 0;
-        const wants = asking.has(`${c},${pod.seatRow}`);
+        const wants = asking2.has(`${c},${pod.seatRow}`);
         if (lvl || wants) {
           const sc = this.screens.find((v) => c >= v.col && c < v.col + v.w);
           const bx = sc ? (sc.col + sc.w - 1) * TILE : c * TILE + TILE;

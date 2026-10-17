@@ -25,8 +25,16 @@ export type Entry = {
 	at: string
 	role: 'user' | 'assistant'
 	/** What it is, so the view can style it the way the terminal does. */
-	kind: 'text' | 'thinking' | 'tool' | 'result'
+	kind: 'text' | 'thinking' | 'tool' | 'result' | 'image'
 	text: string
+	/**
+	 * On an image: where it is, as `<byte offset of its line>:<which image in that line>`,
+	 * for `imageAt` to fetch. The pixels are never in a page — one screenshot is up to
+	 * 2MB of base64 in the transcript, and a page full of them would be a download nobody
+	 * asked for. Images Claude read carry `for`, the call that read them; one with no
+	 * `for` was pasted into a message.
+	 */
+	image?: string
 	/** Present on a tool call: the tool's name, for the `⏺ Update(...)` line. */
 	tool?: string
 	/**
@@ -87,7 +95,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … +${
  * Returns several because one assistant turn is commonly a thought, some prose and a
  * tool call, and showing them as one blob loses the shape the terminal gives them.
  */
-export function entriesOf(rec: unknown): Entry[] {
+export function entriesOf(rec: unknown, line = -1): Entry[] {
 	const r = rec as {
 		type?: string
 		timestamp?: string
@@ -103,6 +111,13 @@ export function entriesOf(rec: unknown): Entry[] {
 	}
 	if (!Array.isArray(content)) return []
 	const out: Entry[] = []
+	// Images are numbered in the order `imagesIn` finds them, which is this same order:
+	// each block, and inside a tool result, its own content.
+	let n = 0
+	const picture = (extra: Partial<Entry> = {}) => {
+		const ref = `${line}:${n++}`
+		if (line >= 0) out.push({ at, role, kind: 'image', text: '', image: ref, ...extra })
+	}
 	for (const raw of content) {
 		const b = raw as {
 			type?: string
@@ -115,7 +130,8 @@ export function entriesOf(rec: unknown): Entry[] {
 			tool_use_id?: string
 			is_error?: boolean
 		}
-		if (b.type === 'text' && b.text?.trim()) out.push({ at, role, kind: 'text', text: clip(b.text.trim(), CAP.text) })
+		if (b.type === 'image') picture()
+		else if (b.type === 'text' && b.text?.trim()) out.push({ at, role, kind: 'text', text: clip(b.text.trim(), CAP.text) })
 		else if (b.type === 'thinking' && b.thinking?.trim()) out.push({ at, role, kind: 'thinking', text: clip(b.thinking.trim(), CAP.thinking) })
 		else if (b.type === 'tool_use') {
 			// The one line the terminal draws for a call: the tool and its subject.
@@ -159,9 +175,88 @@ export function entriesOf(rec: unknown): Entry[] {
 					...(b.is_error ? { error: true as const } : {}),
 				})
 			}
+			// A Read of an image answers with the image itself.
+			if (Array.isArray(c)) for (const x of c) if ((x as { type?: string })?.type === 'image') picture(b.tool_use_id ? { for: b.tool_use_id } : {})
 		}
 	}
 	return out
+}
+
+type Block = { type?: string; content?: unknown; source?: { type?: string; data?: string; media_type?: string } }
+
+/** Every image block in a record, in the order `entriesOf` numbers them. */
+function imagesIn(rec: unknown): Block[] {
+	const content = (rec as { message?: { content?: unknown } })?.message?.content
+	if (!Array.isArray(content)) return []
+	const out: Block[] = []
+	for (const b of content as Block[]) {
+		if (b?.type === 'image') out.push(b)
+		else if (b?.type === 'tool_result' && Array.isArray(b.content)) for (const x of b.content as Block[]) if (x?.type === 'image') out.push(x)
+	}
+	return out
+}
+
+/** Media types an image is served as. Anything else in a transcript is not sent. */
+const SERVABLE = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** The longest line read to find one: the biggest seen here is 2MB, and a line is read
+ *  whole, so this is the cap on what one request can make the server read. */
+const MAX_LINE = 32 * 1024 * 1024
+
+/**
+ * One image out of a session's own transcript, by the reference a page gave for it.
+ *
+ * No more than the history view already discloses: it is the same file, behind the same
+ * control token, and only image blocks come out of it. The offset has to be the start of
+ * a line — a reference cannot be aimed into the middle of one — and the line is parsed,
+ * never sliced, so all that can come back is an image the transcript actually holds.
+ */
+export function imageAt(sessionId: string, ref: string): { bytes: Buffer; type: string } | null {
+	const m = /^(\d{1,15}):(\d{1,4})$/.exec(ref)
+	if (!m) return null
+	const at = Number(m[1])
+	const n = Number(m[2])
+	const file = transcriptIndex().get(sessionId)
+	if (!file) return null
+	let fd: number
+	try {
+		fd = fs.openSync(file, 'r')
+	} catch {
+		return null
+	}
+	try {
+		const size = fs.fstatSync(fd).size
+		if (at >= size) return null
+		if (at > 0) {
+			const prev = Buffer.alloc(1)
+			fs.readSync(fd, prev, 0, 1, at - 1)
+			if (prev[0] !== 10) return null
+		}
+		const parts: Buffer[] = []
+		let pos = at
+		let read = 0
+		for (;;) {
+			const buf = Buffer.alloc(Math.min(CHUNK, size - pos))
+			if (!buf.length) break
+			fs.readSync(fd, buf, 0, buf.length, pos)
+			const nl = buf.indexOf(10)
+			parts.push(nl === -1 ? buf : buf.subarray(0, nl))
+			read += nl === -1 ? buf.length : nl
+			if (nl !== -1 || read > MAX_LINE) break
+			pos += buf.length
+		}
+		if (read > MAX_LINE) return null
+		let rec: unknown
+		try {
+			rec = JSON.parse(Buffer.concat(parts).toString('utf8'))
+		} catch {
+			return null
+		}
+		const src = imagesIn(rec)[n]?.source
+		if (src?.type !== 'base64' || typeof src.data !== 'string' || !SERVABLE.has(String(src.media_type))) return null
+		return { bytes: Buffer.from(src.data, 'base64'), type: String(src.media_type) }
+	} finally {
+		fs.closeSync(fd)
+	}
 }
 
 /**
@@ -221,16 +316,23 @@ export function historyPage(sessionId: string, before?: number, want = 60): Page
 				continue
 			}
 			carry = start === 0 ? Buffer.alloc(0) : joined.subarray(0, nl + 1)
-			const usable = joined.subarray(start === 0 ? 0 : nl + 1).toString('utf8')
+			// Line by line in bytes, so each record knows where it starts in the file —
+			// which is how an image in it is fetched later (see imageAt).
 			const page: Entry[] = []
-			for (const line of usable.split('\n')) {
-				if (!line.trim()) continue
-				try {
-					page.push(...entriesOf(JSON.parse(line)))
-				} catch {
-					// A half-written last line while the session is live. Skipping it is
-					// right: the next poll gets it complete.
+			let from = start === 0 ? 0 : nl + 1
+			while (from < joined.length) {
+				const eol = joined.indexOf(10, from)
+				const stop = eol === -1 ? joined.length : eol
+				const line = joined.subarray(from, stop).toString('utf8')
+				if (line.trim()) {
+					try {
+						page.push(...entriesOf(JSON.parse(line), start + from))
+					} catch {
+						// A half-written last line while the session is live. Skipping it is
+						// right: the next poll gets it complete.
+					}
 				}
+				from = stop + 1
 			}
 			entries.unshift(...page)
 			end = start

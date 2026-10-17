@@ -291,6 +291,34 @@ test('the transcript is behind control, and its two failures are told apart', as
 	srv.close()
 })
 
+test('a picture is behind control too, and never a path', async () => {
+	// It hands out a file from this machine, so it gets the transcript's guards.
+	const { hit, srv, set } = await boot(true)
+	resetControlThrottle()
+	set(false)
+	const off = await hit('/api/image?id=tidepool&name=w.png', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(off.status, 403, `readable with control off: ${off.text}`)
+	set(true)
+	resetControlThrottle()
+	const noToken = await hit('/api/image?id=tidepool&name=w.png')
+	assert.equal(noToken.status, 401, `a view-only session fetched a picture: ${noToken.text}`)
+	resetControlThrottle()
+	// The history's pictures come out of the transcript, so they have its guards too.
+	const histNoToken = await hit('/api/history-image?id=tidepool&ref=0:0')
+	assert.equal(histNoToken.status, 401, `a view-only session fetched a history picture: ${histNoToken.text}`)
+	resetControlThrottle()
+	set(false)
+	const histOff = await hit('/api/history-image?id=tidepool&ref=0:0', { headers: { 'x-guildhall-control': PASS } })
+	assert.equal(histOff.status, 403, `a history picture with control off: ${histOff.text}`)
+	set(true)
+	resetControlThrottle()
+	for (const name of ['../etc/passwd', '/etc/hosts', 'notes.md', '']) {
+		const r = await hit(`/api/image?id=tidepool&name=${encodeURIComponent(name)}`, { headers: { 'x-guildhall-control': PASS } })
+		assert.equal(r.status, 404, `${JSON.stringify(name)} was served: ${r.text}`)
+	}
+	srv.close()
+})
+
 test('a junk cursor is refused rather than read as "from the end"', async () => {
 	// This matters more than it looks. `Number('nonsense')` is NaN, and an undefined
 	// cursor means "start at the newest" — so a junk value would quietly restart the

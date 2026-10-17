@@ -336,6 +336,9 @@
   .mb-px {
     margin-bottom: 1px;
   }
+  .ml-4 {
+    margin-left: calc(var(--spacing) * 4);
+  }
   .ml-auto {
     margin-left: auto;
   }
@@ -378,6 +381,9 @@
   .h-9 {
     height: calc(var(--spacing) * 9);
   }
+  .h-auto {
+    height: auto;
+  }
   .h-full {
     height: 100%;
   }
@@ -386,6 +392,9 @@
   }
   .max-h-\[60\%\] {
     max-height: 60%;
+  }
+  .max-h-\[70vh\] {
+    max-height: 70vh;
   }
   .min-h-0 {
     min-height: 0px;
@@ -437,6 +446,9 @@
   }
   .max-w-\[12rem\] {
     max-width: 12rem;
+  }
+  .max-w-full {
+    max-width: 100%;
   }
   .min-w-0 {
     min-width: 0px;

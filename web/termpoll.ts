@@ -1,6 +1,7 @@
 /** Reading the open session's screen, and the four answer keys that change it. */
 import { paint } from './grid.ts'
 import { askForToken } from './termpass.ts'
+import { picture } from './termimages.ts'
 import { api, term } from './termstate.ts'
 
 /**
@@ -101,7 +102,7 @@ async function poll() {
 	// The mode button is revealed from the measurement rather than from a
 	// breakpoint, so it appears exactly when it would do something — see paint().
 	const btn = document.getElementById('screenmode')
-	const cramped = paint(pre, r.render_grid, term.el, term.wrap)
+	const cramped = paint(pre, r.render_grid, term.el, term.wrap, picture)
 	if (btn) btn.hidden = !cramped
 	if (term.jump) {
 		pre.scrollTop = term.jump === 'top' ? 0 : pre.scrollHeight

@@ -31,23 +31,20 @@
  * must not reflow, and this is prose with no grid to keep.
  */
 import { ago, rgb, tap } from './dom.ts'
-import { linkParts } from './links.ts'
 import { renderMarkdown } from './mdview.ts'
 import { inserted, typedForm } from './said.ts'
 import { fullScreen, lockPage, unlockPage } from './viewport.ts'
-// The room's own tool palette, not a second one invented here. `TINT` is what paints a
-// workstation screen by what the session is doing — "so the whole room is readable at a
-// glance" — and `KIND` is the map from a tool's name to that class. Reusing both means
-// a phone and the office agree about what blue means, and there is one place to change
-// it. `screens.ts` is already in this bundle via list.ts, so it costs nothing.
 import { TINT } from '../src/screens.ts'
-import { KIND } from '../src/data/describe.ts'
+import { forgetImages, historyImage, watchImages } from './historyimage.ts'
+import { toolName, toolTint, withLinks } from './transcripttools.ts'
 
 type Entry = {
 	at: string
 	role: 'user' | 'assistant'
-	kind: 'text' | 'thinking' | 'tool' | 'result'
+	kind: 'text' | 'thinking' | 'tool' | 'result' | 'image'
 	text: string
+	/** On an image: where to fetch it from — see historyimage.ts. */
+	image?: string
 	tool?: string
 	id?: string
 	for?: string
@@ -64,53 +61,12 @@ let el: HTMLElement | null = null
 let body: HTMLElement | null = null
 let cursor: number | null = null
 let openId: string | null = null
+/** The control password this history was opened with, for fetching its pictures. */
+let openToken = ''
 let loading = false
 let exhausted = false
 /** `talk` is the conversation with tool runs folded; `all` opens every run. */
 let mode: 'talk' | 'all' = localStorage.getItem(MODE) === 'all' ? 'all' : 'talk'
-
-/** Terminal output is never innerHTML. Links are built as real nodes. */
-function withLinks(text: string): DocumentFragment {
-	const frag = document.createDocumentFragment()
-	for (const part of linkParts(text)) {
-		if (!part.href) {
-			frag.append(document.createTextNode(part.text))
-			continue
-		}
-		const a = document.createElement('a')
-		a.href = part.href
-		a.textContent = part.text
-		a.target = '_blank'
-		// noopener because the opened page must not get a handle on this one, and
-		// noreferrer because a session's output can contain private URLs.
-		a.rel = 'noopener noreferrer'
-		a.className = 'text-newer underline decoration-dotted underline-offset-2'
-		frag.append(a)
-	}
-	return frag
-}
-
-/**
- * A tool's name, short enough for a phone.
- *
- * An MCP tool is named `mcp__claude-in-chrome__javascript_tool`, which is 38 characters
- * of mostly plumbing and wraps a 375px screen on its own. The server and the underscores
- * are what get dropped; the verb is what anybody is reading for.
- */
-const toolName = (raw: string) => raw.replace(/^mcp__[^_]+(?:-[^_]+)*__/, '').replace(/_/g, ' ')
-
-/**
- * The colour for a tool, by what class of work it is.
- *
- * Blue edits, cyan reads, orange runs, violet searches, green agents — the same five a
- * desk's monitor is tinted with in the room. A tool nobody has classified stays grey
- * rather than being guessed into a colour: a wrong colour is worse than no colour here,
- * because the whole point is that the colour can be trusted at a glance.
- */
-function toolTint(raw?: string): string {
-	const kind = raw ? KIND[raw.replace(/^mcp__[^_]+(?:-[^_]+)*__/, '')] : undefined
-	return kind ? rgb(TINT[kind]) : 'var(--color-muted)'
-}
 
 /** Prose: what you said, and what came back. */
 function prose(e: Entry): HTMLElement {
@@ -303,11 +259,26 @@ function build(entries: Entry[]): DocumentFragment {
 	const orphans = entries.filter((e) => e.kind === 'result' && !e.for)
 
 	let steps: { call: Entry; result?: Entry }[] = []
+	// Pictures Claude read go under the run of steps that read them, the way the terminal
+	// draws them under the Read; they stay visible when the run is folded.
+	let read: HTMLElement[] = []
 	const flush = () => {
 		if (steps.length) frag.append(run(steps))
 		steps = []
+		frag.append(...read)
+		read = []
 	}
 	for (const e of entries) {
+		if (e.kind === 'image') {
+			if (!openId || !e.image) continue
+			const pic = historyImage(openId, e.image, openToken, !e.for)
+			if (e.for) read.push(pic)
+			else {
+				flush()
+				frag.append(pic)
+			}
+			continue
+		}
 		if (e.kind === 'tool') {
 			steps.push({ call: e, result: e.id ? results.get(e.id) : orphans.shift() })
 			continue
@@ -455,6 +426,8 @@ export function openTranscript(id: string, name: string, token: string) {
 	body = document.createElement('div')
 	body.className = 'min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.5]'
 	body.textContent = 'reading…'
+	openToken = token
+	watchImages(body)
 	// Reading upward is the whole point, so older pages load as you approach the top.
 	body.addEventListener('scroll', () => {
 		if (body && body.scrollTop < 240) void load(token, true)
@@ -474,6 +447,7 @@ export function closeTranscript() {
 	document.removeEventListener('keydown', onKey)
 	openId = null
 	body = null
+	forgetImages()
 	pages = []
 	if (el) {
 		el.hidden = true

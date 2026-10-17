@@ -7,10 +7,12 @@
  * the summaries the room is built from.
  */
 import crypto from 'node:crypto'
+import fs from 'node:fs'
 import zlib from 'node:zlib'
 import { controlAttempt, controlLockedFor, controlReachable } from '../controlauth.ts'
 import { readGrid } from '../control.ts'
-import { historyPage } from '../data/history.ts'
+import { historyPage, imageAt } from '../data/history.ts'
+import { shownImage } from '../data/shown.ts'
 import { commands } from '../data/commands.ts'
 import { closedSessions } from '../data/closed.ts'
 import { spawnable } from '../data/projects.ts'
@@ -106,6 +108,51 @@ export async function transcriptRoute(c: Call) {
 	const page = historyPage(id, before)
 	if (!page) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
 	return send(res, 200, MIME['.json'], JSON.stringify(page))
+}
+
+/**
+ * A picture the session's terminal is drawing, by the file name printed above it —
+ * see data/shown.ts for why it has to be found this way and what is refused.
+ *
+ * The guards of `/api/transcript`: this is a file off the machine, and the lookup reads
+ * the transcript to find it.
+ */
+export async function imageRoute(c: Call) {
+	const { req, res, url, addr, opts, sessions } = c
+	if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+	if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+	const waitI = controlLockedFor(addr)
+	if (waitI > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitI / 1000)}s"}`)
+	if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+	const id = url.searchParams.get('id') ?? ''
+	if (!sessions().some((s) => s.id === id)) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+	const hit = shownImage(id, url.searchParams.get('name') ?? '')
+	if (!hit) return send(res, 404, MIME['.json'], '{"error":"no image by that name in this session"}')
+	let bytes: Buffer
+	try {
+		bytes = fs.readFileSync(hit.file)
+	} catch {
+		return send(res, 404, MIME['.json'], '{"error":"the image is gone"}')
+	}
+	return send(res, 200, hit.type, bytes)
+}
+
+/**
+ * An image out of a session's conversation, by the reference its history page gave —
+ * see `imageAt`. The guards of `/api/transcript`, whose file this is read from.
+ */
+export async function historyImageRoute(c: Call) {
+	const { req, res, url, addr, opts, sessions } = c
+	if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+	if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+	const waitH = controlLockedFor(addr)
+	if (waitH > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitH / 1000)}s"}`)
+	if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+	const id = url.searchParams.get('id') ?? ''
+	if (!sessions().some((s) => s.id === id)) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+	const hit = imageAt(id, url.searchParams.get('ref') ?? '')
+	if (!hit) return send(res, 404, MIME['.json'], '{"error":"no image there"}')
+	return send(res, 200, hit.type, hit.bytes)
 }
 
 /**

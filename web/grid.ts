@@ -13,6 +13,7 @@
  * one shifts everything after it.
  */
 import { linkParts } from './links.ts'
+import { type Picture, pictures } from './picture.ts'
 import { fullScreen } from './viewport.ts'
 
 type Style = { foreground?: string; background?: string; bold?: boolean; faint?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean; inverse?: boolean; invisible?: boolean; id: number }
@@ -226,7 +227,52 @@ function advanceRatio(host: HTMLElement) {
  * enough gets the control too. Returned rather than reached for through
  * `getElementById`, so this module never has to know what the caller called it.
  */
-export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boolean): boolean {
+/**
+ * A picture the terminal draws, in place of the placeholder cells it covers — see
+ * picture.ts. The image itself when it has arrived; until then, or when it cannot be
+ * found, one dim line naming it, never the blank hole the placeholders painted as.
+ *
+ * Exact, it takes the block's real cells, so every row below stays where the terminal
+ * put it. Wrapped, it is fitted to the width with the block's proportions, centered the
+ * way the preview is centered on the Mac.
+ */
+/** Which file each picture on screen was, by its image id (the color of its cells), so a
+ *  picture whose name line has scrolled off the top is still recognized. */
+const seenAs = new Map<string, string>()
+
+function drawPicture(p: Picture, url: string | null, cell: number, lineH: number, reflow: boolean) {
+	const line = document.createElement('div')
+	line.dataset.row = String(p.top)
+	if (!url) {
+		const label = document.createElement('span')
+		label.dataset.col = String(p.left)
+		label.style.cssText = 'opacity:0.6;font-style:italic'
+		label.textContent = `${' '.repeat(reflow ? 0 : p.left)}[picture${p.name ? `: ${p.name}` : ''}]`
+		line.append(label)
+		return line
+	}
+	const cols = p.right - p.left + 1
+	const rows = p.bottom - p.top + 1
+	const img = document.createElement('img')
+	img.alt = p.name ?? 'picture'
+	img.src = url
+	// Wrapped, at its own proportions: rows no longer line up with the terminal anyway, and
+	// a picture half scrolled off the top covers only a few rows — squeezed into those it
+	// came out a thumbnail (measured: 396 by 50px for a 1440 by 800 screenshot).
+	img.style.cssText = reflow
+		? `display:block;width:100%;max-width:${(cols * cell).toFixed(1)}px;height:auto;margin-inline:auto`
+		: `display:block;width:${(cols * cell).toFixed(1)}px;height:${(rows * lineH).toFixed(1)}px;object-fit:contain;margin-left:${(p.left * cell).toFixed(1)}px`
+	// Tap for the whole picture, at full size, in its own tab.
+	const open = document.createElement('a')
+	open.href = url
+	open.target = '_blank'
+	open.rel = 'noopener'
+	open.append(img)
+	line.append(open)
+	return line
+}
+
+export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boolean, picture: (name: string) => string | null = () => null): boolean {
 	const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
 	const byId = new Map(g.styles.map((st) => [st.id, st]))
 	const rows = new Map<number, Span[]>()
@@ -345,7 +391,19 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 			break
 		}
 	}
+	const shown = pictures(g.row_spans, g.rows)
 	for (let r = 0; r < g.rows; r++) {
+		const pic = shown.find((p) => r >= p.top && r <= p.bottom)
+		if (pic) {
+			// One element for the whole block, at its first row; the rest of its rows are it.
+			if (r === pic.top) {
+				const id = byId.get(pic.style)?.foreground
+				if (pic.name && id) seenAs.set(id, pic.name)
+				const name = pic.name ?? (id ? seenAs.get(id) : undefined)
+				out.push(drawPicture({ ...pic, name: name ?? null }, name ? picture(name) : null, advance * size, 1.25 * size, reflow))
+			}
+			continue
+		}
 		const line = document.createElement('div')
 		line.dataset.row = String(r)
 		const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column)
