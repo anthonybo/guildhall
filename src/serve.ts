@@ -16,132 +16,51 @@
  *
  * What it exposes is worth knowing: session titles, the last thing each one
  * said, filenames being edited and shell commands that were run.
+ *
+ * The routes live in serve/: control.ts for the ones that act on a session, reads.ts
+ * for the ones that read a session's insides, static.ts for the client's files. This
+ * file is the server itself — the live feed, the passcode, and which route answers.
  */
 import http from 'node:http'
-import crypto from 'node:crypto'
-import zlib from 'node:zlib'
-import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { attempt, issue, lockedFor, triesLeft, valid } from './auth.ts'
-import { loginPage } from './login.ts'
 import { build } from './version.ts'
 import { available } from './update.ts'
 import { collect } from './data.ts'
-import { historyPage } from './data/history.ts'
-import { claim, finish, release } from './once.ts'
-import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
-import { MAX_ASK, ask } from './ask.ts'
-import { MAX_UPLOAD, readBytes, saveUpload } from './upload.ts'
-import { askCodex, click, press as pressKey, readGrid, spawn, trustNew } from './control.ts'
-import { reachSoon } from './cmuxreach.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
-import { commands } from './data/commands.ts'
-import { closedSessions } from './data/closed.ts'
-import { createProject, spawnable } from './data/projects.ts'
 import { usage } from './data/usage.ts'
+import { type Call, MIME, type ServeOptions, addressOf, login, readBody, send, sessionOf } from './serve/http.ts'
+import { clickRoute, keyRoute, sendRoute, spawnRoute, uploadRoute } from './serve/control.ts'
+import { closedRoute, commandsRoute, projectsRoute, screenRoute, transcriptRoute } from './serve/reads.ts'
+import { clientStamp, serveStatic } from './serve/static.ts'
 import type { Session } from './data.ts'
+
+export { screenTag } from './serve/reads.ts'
+export type { ServeOptions }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-/**
- * Answering prompts from away: what changed, and what actually protects you.
- *
- * There used to be a guard here refusing any send to a session whose `waitingFor`
- * looked like a permission request. It has been removed because it did nothing.
- * `waitingFor` is not a field Claude Code writes: it is absent from the schema in
- * all thirteen live registry files on this machine, and the only value guildhall
- * ever puts there itself is the literal "answer a question", which the pattern did
- * not match. A guard that cannot fire is worse than no guard, because the README
- * described it as protection somebody was relying on.
- *
- * Answering prompts is now a deliberate feature — see `/api/key`. A session
- * blocked on a question is the exact moment being away from the machine hurts
- * most, and refusing to help then made the whole browser view decorative.
- *
- * What is actually holding the line, all of it real and all of it testable:
- *
- *  - control is off unless deliberately turned on, and it is its own switch
- *  - loopback or a tailnet only, never a plain LAN, whatever the config says
- *  - a separate password from the view passcode, scrypt-hashed, throttled
- *  - four keys and no more: up, down, enter, escape. No text, no letters, nothing
- *    that could type a command into a shell sitting at a prompt
- *  - every press is announced on the machine's own screen, so acting here
- *    remotely is possible and doing it unseen is not
- */
+/** The routes that change something, each behind the control gate. POST only. */
+const ACTS = new Map<string, (c: Call) => Promise<void>>([
+	['/api/send', sendRoute],
+	['/api/spawn', spawnRoute],
+	['/api/upload', uploadRoute],
+	['/api/click', clickRoute],
+	['/api/key', keyRoute],
+])
 
-export type ServeOptions = {
-	port: number
-	/** 0.0.0.0 reaches the LAN; 127.0.0.1 is localhost only, for tunnels. */
-	host: string
-	demo: boolean
-	/** Include Codex sessions as well as Claude Code ones. Off by default; see
-	 *  docs/codex.md.
-	 *
-	 *  A function for the same reason `control` below is one, and it was a plain
-	 *  boolean first: captured once at `createServer`, so flipping the setting in
-	 *  the running app changed the room and left the browser serving Claude-only
-	 *  until a restart. Two surfaces of one program disagreeing about which
-	 *  harnesses exist is the shape of bug this whole setting was meant to avoid. */
-	codex?: () => boolean
-	/** Whether typing into a session is permitted at all. A function, not a
-	 *  boolean, so turning it off in the running app takes effect immediately
-	 *  rather than at the next restart. */
-	control?: () => boolean
-	/** Announce a remote send on this machine's own screen. A caller that can act
-	 *  here must not be able to do it invisibly. */
-	onSend?: (proj: string, text: string, ok: boolean) => void
-}
-
-/**
- * Refuse in guildhall's own words when this process cannot drive cmux at all.
- *
- * Checked alongside the other control gates rather than left to fail at the cmux call,
- * because what came back otherwise was cmux's sentence — "only processes started inside
- * cmux can connect" — shown on a phone under a panel that said control was on. True,
- * and useless: it names cmux's rule and not what to do about it.
- *
- * 503 rather than 403: nothing about the REQUEST is wrong. The caller is on the right
- * network with the right password, and the server simply cannot carry it out.
- */
-async function cmuxRefusal(res: http.ServerResponse): Promise<boolean> {
-	const r = await reachSoon()
-	if (r.ok) return false
-	send(res, 503, MIME['.json'], JSON.stringify({ error: `${r.why}. ${r.fix}` }))
-	return true
-}
-
-/** The session this request carries, if any. Never the passcode itself. */
-function sessionOf(req: http.IncomingMessage) {
-	const auth = req.headers.authorization
-	if (auth?.startsWith('Bearer ')) return auth.slice(7)
-	const m = /(?:^|;\s*)gh_sid=([^;]+)/.exec(req.headers.cookie ?? '')
-	return m ? decodeURIComponent(m[1]) : undefined
-}
-
-/** Who is asking, for throttling. Behind a proxy this is the proxy, which is
- *  acceptable here: there is no proxy on a home network or a tailnet. */
-const addressOf = (req: http.IncomingMessage) => req.socket.remoteAddress ?? 'unknown'
-
-/** Read a small request body. Capped: the passcode form needs four bytes, so 8KB is
- *  generous for everything except a message, which passes its own cap.
- *
- *  A message got 8KB too, and a pasted log is bigger than that. Over the cap the
- *  connection is cut, which the browser can only report as "could not reach
- *  guildhall" — with the text handed back, so every retry failed the same way. */
-function readBody(req: http.IncomingMessage, cap = 8192): Promise<string> {
-	return new Promise((resolve) => {
-		let data = ''
-		req.on('data', (c) => {
-			data += c
-			if (data.length > cap) req.destroy()
-		})
-		req.on('end', () => resolve(data))
-		req.on('error', () => resolve(''))
-	})
-}
+/** The routes that read a session's insides, behind the control gate too. Reached only
+ *  after the view passcode, like everything else that is not an act. */
+const READS = new Map<string, (c: Call) => Promise<void>>([
+	['/api/screen', screenRoute],
+	['/api/transcript', transcriptRoute],
+	['/api/commands', commandsRoute],
+	['/api/projects', projectsRoute],
+	['/api/closed', closedRoute],
+])
 
 /**
  * Every address this machine answers on, split by what kind of network it is.
@@ -166,15 +85,6 @@ export function addresses() {
 	return { lan, vpn }
 }
 
-const MIME: Record<string, string> = {
-	'.html': 'text/html; charset=utf-8',
-	'.js': 'text/javascript; charset=utf-8',
-	'.css': 'text/css; charset=utf-8',
-	'.png': 'image/png',
-	'.svg': 'image/svg+xml',
-	'.json': 'application/json; charset=utf-8',
-}
-
 /**
  * One snapshot of everything a client is told, as JSON.
  *
@@ -193,7 +103,7 @@ export function snapshot(demo = false, codex = false): string {
 		at: Date.now(),
 		version: build(),
 		update: available(),
-		client: clientStamp(),
+		client: clientStamp(ROOT),
 	})
 }
 
@@ -282,6 +192,7 @@ export function createServer(opts: ServeOptions) {
 	async function handle(req: http.IncomingMessage, res: http.ServerResponse) {
 		const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
 		const addr = addressOf(req)
+		const call: Call = { req, res, url, addr, opts, sessions }
 
 		// The one place a request may carry a body, and the only one that changes
 		// anything at all — and what it changes is who you are, never any session.
@@ -305,256 +216,8 @@ export function createServer(opts: ServeOptions) {
 			return
 		}
 
-		/**
-		 * Typing into a session's real terminal.
-		 *
-		 * The only route in this server that changes anything outside itself, and
-		 * it is guarded four ways, each closing a different hole:
-		 *
-		 *  - the feature is off unless `control` was deliberately enabled;
-		 *  - the caller must be on loopback or a tailnet, because a shared secret
-		 *    on a LAN is one guest network away from running commands here;
-		 *  - the control token is required, and it is not the view passcode — a
-		 *    device that may watch has not thereby been trusted to type;
-		 *  - the token goes in a header, never a query string, so it cannot be
-		 *    captured by a proxy log, a referrer, or browser history.
-		 */
-		if (req.method === 'POST' && url.pathname === '/api/send') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			// No cmux check HERE: this route serves both harnesses, and a Codex message goes
-			// through the codex CLI, which has nothing to do with cmux. Gating the route
-			// would have refused Codex sends on a machine where only cmux was unreachable.
-			// The check sits below, on the branch that actually needs a cmux pane.
-			const waitCtl = controlLockedFor(addr)
-			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { id?: string; text?: string; key?: string }
-			try {
-				// Room for the longest message ask() takes, as JSON: a control character
-				// escapes to six bytes, so that is the worst case, plus the envelope.
-				body = JSON.parse(await readBody(req, MAX_ASK * 6 + 1024))
-			} catch {
-				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
-			}
-			/**
-			 * At most once, however many times this is asked for.
-			 *
-			 * A lost reply looks exactly like a lost request, so a send that succeeded and
-			 * failed to say so gets typed again by whoever is holding the phone. See
-			 * once.ts, and MISTAKES.md for the five fixes that missed this.
-			 *
-			 * An absent key still sends: an older client must keep working, and it is no
-			 * worse off than it was.
-			 */
-			const key = typeof body.key === 'string' && body.key.length >= 8 && body.key.length <= 128 ? body.key : null
-			if (key) {
-				const already = claim(key)
-				if (already && 'done' in already) {
-					// Byte-identical to what the first attempt returned, so a retry cannot be
-					// told apart from the send that worked.
-					res.writeHead(already.done.status, { 'content-type': MIME['.json'], 'cache-control': 'no-store' }).end(already.done.body)
-					return
-				}
-				if (already) return send(res, 202, MIME['.json'], '{"ok":true,"note":"already sending that message"}')
-			}
-			/** Answer, and remember the answer against the key. */
-			const reply = (status: number, payload: string) => {
-				if (key) finish(key, { status, body: payload })
-				return send(res, status, MIME['.json'], payload)
-			}
-			/** Refused before anything was typed: the key must stay usable. */
-			const refuse = (status: number, payload: string) => {
-				if (key) release(key)
-				return send(res, status, MIME['.json'], payload)
-			}
-			const target = sessions().find((s) => s.id === body.id)
-			if (!target) return refuse(404, '{"error":"no such session"}')
-			// The fifth guard, and the one the other four missed.
-			//
-			// control.ts refuses `y`, `n`, `a` and `d` so that no remote caller can
-			// approve tool use. But a permission prompt is a NUMBERED list — "1. Yes,
-			// 2. Yes and don't ask again, 3. No" — and `ask` sends text followed by
-			// Enter, so "1" walks straight through a refusal list built out of
-			// letters. The guard was letter-shaped and the prompt is number-shaped.
-			//
-			// Claude Code's own registry reports which sessions are sitting on a modal
-			// prompt, so this reads a first-party fact rather than guessing from the
-			// screen — and a prompt that asks to run a command stays answerable only
-			// by someone at the machine, which was the point of the whole design.
-			// Checked before the workspace lookup: this is a refusal about what the
-			// session is being asked, not about whether the plumbing to reach it exists.
-			// A Codex session is not a cmux pane, so it is reached by its own route rather
-			// than being refused for lacking a tab. Every guard above still applied: this
-			// is only about which CLI carries the message the last few inches.
-			//
-			// Both branches converge below, so the announcement on this machine's screen
-			// and the throttle and the password are one implementation for both harnesses.
-			// The 404 stays a 404. Folding it into the shared reply below turned "there is
-			// no tab to reach this through" into a 400, which is a different statement —
-			// one says the request named something unreachable, the other says the send was
-			// attempted and failed. A test caught it.
-			// A cmux pane is about to be driven, so this is where the ability to drive one
-			// belongs — after the target is known to be a cmux session.
-			// A Codex session IN a cmux pane is typed into like any other — exactly what the
-			// person at the machine would do, and the terminal panel shows it land. Measured
-			// on a scratch Codex pane: 60 to 8,000 characters each arrived once and was
-			// answered. `codex queue` stays for a Codex session with no pane to type into.
-			const queued = target.agent === 'codex' && !target.workspace
-			if (!queued && (await cmuxRefusal(res))) return
-			if (!queued && !target.workspace) {
-				return refuse(404, '{"error":"no such session, or it is not in a cmux tab"}')
-			}
-			const out = queued ? await askCodex(target.id, String(body.text ?? '')) : await ask({ workspace: target.workspace!, surface: target.surface }, String(body.text ?? ''))
-			// Every send is announced on the machine's own screen. A remote caller
-			// must not be able to act here invisibly.
-			opts.onSend?.(target.proj, String(body.text ?? '').slice(0, 200), out.ok)
-			// `note` rides along with a SUCCESS. The send did happen; what it needs is a
-			// caveat, because a message that has been queued behind a background job looks
-			// exactly like one that vanished, and looking like it vanished is what made
-			// somebody send everything twice.
-			// Recorded against the key on BOTH outcomes. A failed send that is retried with
-			// the same key must not be attempted a second time either — the whole point is
-			// that one composed message reaches the session at most once.
-			return reply(out.ok ? 200 : 400, JSON.stringify(out.ok ? { ok: true, ...(target.deferred ? { note: target.deferred } : {}) } : { error: out.error }))
-		}
-
-		/**
-		 * Start a new session, in a directory this server chose.
-		 *
-		 * The most powerful call here: a session can edit files and run commands, so
-		 * being able to create one is being able to do both. It carries every guard
-		 * the send path does — control armed, loopback or tailnet only, throttled,
-		 * control password — plus one that only applies here: the directory must be
-		 * one `spawnable()` offered. A path taken from the request body would be
-		 * arbitrary code execution in a text field, and no amount of validation on a
-		 * string makes a client-supplied cwd safe.
-		 *
-		 * No prompt is passed. The session comes up empty and is typed into through
-		 * the same guarded path as every other message, which is also what lets Claude
-		 * Code name it from the conversation exactly as it does normally.
-		 */
-		if (req.method === 'POST' && url.pathname === '/api/spawn') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			const waitCtl = controlLockedFor(addr)
-			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { dir?: string; resume?: string; create?: string }
-			try {
-				body = JSON.parse(await readBody(req))
-			} catch {
-				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
-			}
-			// `create` makes a new project folder first and starts there. A name, not a
-			// path — see createProject — and the folder it makes then has to pass the same
-			// allowlist as any other, so this adds a way in only for a fresh empty repo.
-			if (body.create !== undefined) {
-				const made = createProject(String(body.create))
-				if (!made.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: made.error }))
-				body.dir = made.dir
-				body.resume = undefined
-			}
-			/**
-			 * `resume` reopens a session you closed instead of starting an empty one.
-			 *
-			 * The same endpoint and the same gate, because it is the same act: a process
-			 * started in a directory this machine offered. What it is NOT is a second writer
-			 * on a live conversation — a session with a process attached is not in the closed
-			 * list, so the id can only ever name one nothing is holding.
-			 */
-			const resume = body.resume ? String(body.resume) : undefined
-			const dir = String(body.dir ?? '')
-			const created = body.create !== undefined
-			const out = await spawn(dir, created ? path.basename(dir) : resume ? 'reopened' : 'new session', resume)
-			// Not awaited: the trust prompt arrives half a minute later, long after this
-			// reply. Only for a folder this request just made — see trustNew.
-			if (out.ok && created) void trustNew(out.text)
-			// Announced on the machine's own screen like a send. Starting a session
-			// remotely is possible; doing it unseen is not.
-			opts.onSend?.(path.basename(dir), created ? 'started a new project' : resume ? 'reopened a closed session' : 'started a new session', out.ok)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, workspace: out.text, dir } : { error: out.error }))
-		}
-
-		/**
-		 * Move the caret in a prompt, or confirm it.
-		 *
-		 * Claude Code asks its questions as a list you arrow through, and from a phone
-		 * there was no way to answer one — the moment a session most needs you was the
-		 * moment you could do least. Four keys only; see `press` in control.ts for why
-		 * that list is not longer.
-		 */
-		/**
-		 * An image to mention in a message — see upload.ts for why a path is the way in.
-		 *
-		 * Behind exactly the guards of /api/send: putting a file on this machine is
-		 * typing in all but name. The body is the raw image, not JSON or a multipart
-		 * form, so there is nothing to parse but the bytes themselves.
-		 */
-		if (req.method === 'POST' && url.pathname === '/api/upload') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			const waitUp = controlLockedFor(addr)
-			if (waitUp > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitUp / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			const bytes = await readBytes(req)
-			if (!bytes) return send(res, 413, MIME['.json'], `{"error":"image too large, the limit is ${MAX_UPLOAD / 1024 / 1024}MB"}`)
-			const out = saveUpload(bytes)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, path: out.path } : { error: out.error }))
-		}
-
-		/**
-		 * A tap on one of the OTHER panes of a session's tab — see `click` in control.ts.
-		 *
-		 * The guards of /api/key, and two more. The pane must be one cmux lists in this
-		 * tab, never an id taken on trust; and it must not be the session's own pane. The
-		 * chat is driven by typing and the four keys, and a stray tap while reading it
-		 * should select text, not click whatever the TUI drew under the finger.
-		 */
-		if (req.method === 'POST' && url.pathname === '/api/click') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			const waitClick = controlLockedFor(addr)
-			if (waitClick > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitClick / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { id?: string; pane?: string; row?: number; col?: number }
-			try {
-				body = JSON.parse(await readBody(req))
-			} catch {
-				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
-			}
-			const target = sessions().find((s) => s.id === body.id)
-			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			const pane = target.panes?.find((p) => p.surface === body.pane && p.surface !== target.surface)
-			if (!pane) return send(res, 404, MIME['.json'], '{"error":"no such pane beside this session"}')
-			const out = await click({ workspace: target.workspace, surface: pane.surface }, Number(body.row), Number(body.col))
-			opts.onSend?.(target.proj, `clicked in ${pane.title.slice(0, 20)}`, out.ok)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
-		}
-
-		if (req.method === 'POST' && url.pathname === '/api/key') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			const waitKey = controlLockedFor(addr)
-			if (waitKey > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitKey / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { id?: string; key?: string }
-			try {
-				body = JSON.parse(await readBody(req))
-			} catch {
-				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
-			}
-			const target = sessions().find((s) => s.id === body.id)
-			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			const out = await pressKey({ workspace: target.workspace, surface: target.surface }, String(body.key ?? ''))
-			// Announced like a send. A key that answers a prompt is a decision, and a
-			// decision made from away must still be visible to whoever is here.
-			opts.onSend?.(target.proj, `pressed ${String(body.key ?? '').slice(0, 12)}`, out.ok)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
-		}
+		const act = req.method === 'POST' ? ACTS.get(url.pathname) : undefined
+		if (act) return act(call)
 
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
 			// nothing else here mutates anything; say so plainly rather than 404ing
@@ -607,143 +270,8 @@ export function createServer(opts: ServeOptions) {
 			return
 		}
 
-		/**
-		 * What a session's terminal is showing right now.
-		 *
-		 * Behind the control token rather than the view passcode, even though it
-		 * only reads. A screen is scrollback — source, command output, whatever a
-		 * session has printed — which is a far larger disclosure than the summaries
-		 * the rest of this serves, and it should not come with a four-digit code.
-		 */
-		if (url.pathname === '/api/screen') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			const waitCtl = controlLockedFor(addr)
-			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			const target = sessions().find((s) => s.id === url.searchParams.get('id'))
-			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			// The styled grid, not flattened text: a TUI is colour and position, and
-			// plain text throws both away. cmux hands back JSON already, so this is
-			// passed through rather than re-encoded.
-			// The session's own pane, or another pane of the same tab when asked — only one
-			// cmux listed for this tab, never an id taken on trust. Viewing only: sends and
-			// keys always go to the session's own pane.
-			const asked = url.searchParams.get('pane')
-			const other = asked ? target.panes?.find((p) => p.surface === asked) : undefined
-			if (asked && !other) return send(res, 404, MIME['.json'], '{"error":"no such pane in this tab"}')
-			const out = await readGrid({ workspace: target.workspace, surface: other?.surface ?? target.surface })
-			if (!out.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: out.error }))
-			// Do not send a screen that has not changed.
-			//
-			// This grid is 68KB — measured, from a real cmux pane — and it went over the
-			// wire every two seconds whether or not a single character had moved. On a
-			// phone that is 34KB/s, continuously, to watch a session that is thinking.
-			//
-			// Worse than the bytes is what they occupy: at 40KB/s a read takes 2.1s
-			// against a 2s poll, so reads overlap, and a browser allows six connections
-			// to one host — one of which is permanently the event stream. Overlapping
-			// reads eat the rest, and then a send has nowhere to go and simply waits.
-			// That is the reported "I pressed Send and nothing happened".
-			//
-			// The same lesson as the stream's push guard, one layer down: compute it if
-			// you must, but do not SEND what nobody needs. An idle terminal now costs a
-			// couple of hundred bytes a poll instead of 68KB.
-			const tag = screenTag(out.text)
-			if (req.headers['if-none-match'] === tag) {
-				res.writeHead(304, { etag: tag, 'cache-control': 'no-store' }).end()
-				return
-			}
-			// Compressed. The grid is JSON that repeats itself — measured, a 51.4KB screen
-			// gzips to 3.8KB in 5ms — and it was going to a phone raw, every two seconds.
-			// That was most of why switching panes or tapping a backlog took seconds to show.
-			if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) {
-				res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag, 'content-encoding': 'gzip', vary: 'accept-encoding' }).end(zlib.gzipSync(out.text, { level: 6 }))
-				return
-			}
-			res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag }).end(out.text)
-			return
-		}
-
-		/**
-		 * A session's conversation, older than `before`, newest last.
-		 *
-		 * The terminal view can never show this. Claude Code draws on the alternate
-		 * screen and Ghostty hardcodes `scrollback-limit = 0` there, so the lines are
-		 * gone before cmux sees them — every Claude pane here reports
-		 * `scrollback_rows: 0` against 115 for a plain shell. Rebuilding it from polled
-		 * screens was tried and measured, and does not work; see MISTAKES.md.
-		 *
-		 * Behind the control token, exactly like `/api/screen` and for a stronger
-		 * version of the same reason: a screen is what a session is showing now, and
-		 * this is everything it has ever said.
-		 */
-		if (url.pathname === '/api/transcript') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			const waitT = controlLockedFor(addr)
-			if (waitT > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitT / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			const id = url.searchParams.get('id') ?? ''
-			if (!sessions().some((s) => s.id === id)) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
-			const raw = url.searchParams.get('before')
-			// A junk cursor must not become `NaN` and read as "from the end" — that would
-			// silently restart the paging and loop the same page forever.
-			const before = raw === null ? undefined : Number(raw)
-			if (before !== undefined && !Number.isInteger(before)) return send(res, 400, MIME['.json'], '{"error":"bad cursor"}')
-			const page = historyPage(id, before)
-			if (!page) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
-			return send(res, 200, MIME['.json'], JSON.stringify(page))
-		}
-
-		/**
-		 * The slash commands this session would accept.
-		 *
-		 * Behind the control token because it exists to be typed with, and because it
-		 * names your skills and your project's own commands. Read on demand — this is
-		 * reached when somebody opens the picker, not on any poll.
-		 *
-		 * A session id is optional. Without one the answer is what is available
-		 * everywhere; with one it also includes that project's own commands, which are
-		 * the ones that would actually run there.
-		 */
-		if (url.pathname === '/api/commands') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			const waitCmd = controlLockedFor(addr)
-			if (waitCmd > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCmd / 1000)}s"}`)
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			const forId = url.searchParams.get('id')
-			const cwd = forId ? sessions().find((s) => s.id === forId)?.cwd : undefined
-			return send(res, 200, MIME['.json'], JSON.stringify({ commands: commands(cwd) }))
-		}
-
-		/** Directories a session can be started in. Behind the control token because
-		 *  it is only useful to something that can spawn, and it names your folders. */
-		if (url.pathname === '/api/projects') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			return send(res, 200, MIME['.json'], JSON.stringify({ projects: spawnable() }))
-		}
-
-		/**
-		 * Sessions you closed, which you can open again.
-		 *
-		 * Behind the control gate like `/api/projects`, and for a stronger reason than that
-		 * one: this lists the directories and opening prompts of past work, which is the
-		 * kind of thing that has no business being readable by anyone who can reach the
-		 * port. The list itself changes nothing — reopening goes through `/api/spawn`.
-		 */
-		if (url.pathname === '/api/closed') {
-			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
-			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (await cmuxRefusal(res)) return
-			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			return send(res, 200, MIME['.json'], JSON.stringify({ closed: closedSessions() }))
-		}
+		const read = READS.get(url.pathname)
+		if (read) return read(call)
 
 		if (url.pathname === '/api/stream') {
 			res.writeHead(200, {
@@ -765,133 +293,11 @@ export function createServer(opts: ServeOptions) {
 			return
 		}
 
-		serveStatic(res, url.pathname, String(req.headers['accept-encoding'] ?? ''))
+		serveStatic(ROOT, res, url.pathname, String(req.headers['accept-encoding'] ?? ''))
 	}
 
 	server.on('close', () => clearInterval(timer))
 	return server
 }
-
-/**
- * A fingerprint of what a screen will actually DRAW.
- *
- * Not a hash of the reply, which was the obvious thing and would never once have
- * matched. Two reads of a terminal nobody has touched differ in exactly two
- * fields — `render_revision` and `terminal_theme_revision`, cmux's own
- * bookkeeping counters, which tick regardless — while every field the browser
- * draws from is byte-identical. Hashing the envelope would have shipped a
- * conditional request that could not fire, and looked like a saving.
- *
- * So the fingerprint covers exactly the six fields `paint()` reads and nothing
- * else. Anything cmux adds later is ignored by default, which is the safe
- * direction for a cache key: a new field that should have busted it costs a
- * missed repaint on an otherwise identical screen, where including everything
- * costs the whole optimisation.
- *
- * Falls back to the raw text if the reply is not what we expect. A screen that
- * cannot be parsed is still a screen that must be delivered.
- */
-export function screenTag(text: string) {
-	let key = text
-	try {
-		const g = JSON.parse(text).render_grid
-		if (g) key = JSON.stringify([g.rows, g.columns, g.styles, g.row_spans, g.terminal_foreground, g.terminal_background])
-	} catch {}
-	return `"${crypto.createHash('sha1').update(key).digest('base64url').slice(0, 22)}"`
-}
-
-/** The passcode screen, in whichever state applies. Never cached — a stale copy
- *  of a lockout message would be wrong the moment the lock expires. */
-function login(res: http.ServerResponse, code: number, state: Parameters<typeof loginPage>[0]) {
-	res.writeHead(code, { 'content-type': MIME['.html'], 'cache-control': 'no-store' }).end(loginPage(state))
-}
-
-function send(res: http.ServerResponse, code: number, type: string, body: string | Buffer) {
-	res.writeHead(code, { 'content-type': type, 'cache-control': 'no-store' }).end(body)
-}
-
-/**
- * A fingerprint of the browser client, so a tab can tell it has gone stale.
- *
- * `web/` is read from disk on every request, which means a rebuild is live the
- * moment it lands — but only to a browser that asks again, and a phone left open
- * on the sofa never does. So the fingerprint rides the feed the page is already
- * listening to, and the page reloads itself when it changes.
- *
- * Size and mtime rather than a hash of the contents: this is called on every
- * stream tick, hashing a 100KB bundle twice a second to detect a change that
- * happens twice a day is a poor trade, and stat is enough to notice a rebuild.
- */
-function clientStamp() {
-	let stamp = ''
-	for (const name of ['app.js', 'app.css', 'index.html']) {
-		try {
-			const s = fs.statSync(path.join(ROOT, 'web', name))
-			stamp += `${s.size}:${Math.round(s.mtimeMs)};`
-		} catch {
-			stamp += 'missing;'
-		}
-	}
-	return stamp
-}
-
-/**
- * Text served compressed, keyed by the file and its mtime.
- *
- * The client asks for `no-store`, so without this the same 172KB would be gzipped on
- * every page load. Small and bounded: there are a handful of files under web/.
- */
-const squeezed = new Map<string, { at: number; body: Buffer }>()
-
-/** Worth compressing. A PNG is already compressed and gzip makes it very slightly bigger. */
-const COMPRESSIBLE = new Set(['.js', '.css', '.html', '.svg', '.json'])
-
-/** Static files, confined to web/ and assets/ — never an arbitrary path. */
-function serveStatic(res: http.ServerResponse, pathname: string, accepts = '') {
-	const rel = pathname === '/' ? '/index.html' : pathname
-	const roots = [path.join(ROOT, 'web'), path.join(ROOT, 'assets')]
-	for (const root of roots) {
-		const file = path.resolve(root, '.' + rel)
-		// resolve first, then check containment: `..` in the URL must not escape
-		if (!file.startsWith(root + path.sep)) continue
-		try {
-			const body = fs.readFileSync(file)
-			const type = MIME[path.extname(file)] ?? 'application/octet-stream'
-			/**
-			 * Compressed when the client says it can take it.
-			 *
-			 * The browser bundle is 172KB and gzips to 49KB — measured — and this is a
-			 * phone pulling it over a tailnet, which is the whole reason there is a size
-			 * budget on it at all. Serving it raw meant the budget was guarding a number
-			 * three and a half times the cost anybody actually pays.
-			 *
-			 * Only here, in the static path. The event stream must never be compressed:
-			 * buffering a live feed turns it into a slideshow, which is the same reason
-			 * `x-accel-buffering: no` is set on it.
-			 */
-			if (COMPRESSIBLE.has(path.extname(file)) && /\bgzip\b/.test(accepts)) {
-				const stat = fs.statSync(file)
-				const had = squeezed.get(file)
-				const gz = had && had.at === stat.mtimeMs ? had.body : zlib.gzipSync(body, { level: 6 })
-				if (!had || had.at !== stat.mtimeMs) squeezed.set(file, { at: stat.mtimeMs, body: gz })
-				res
-					.writeHead(200, {
-						'content-type': type,
-						'content-encoding': 'gzip',
-						'cache-control': 'no-store',
-						// Caches and proxies must not hand a gzipped body to a client that
-						// did not ask for one.
-						vary: 'accept-encoding',
-					})
-					.end(gz)
-				return
-			}
-			send(res, 200, type, body)
-			return
-		} catch {}
-	}
-	send(res, 404, 'text/plain; charset=utf-8', 'not found')
-}
-
 
 export type { Session }
