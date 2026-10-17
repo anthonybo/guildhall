@@ -188,7 +188,7 @@ export function messageForm(pre: HTMLElement) {
 	const keys = document.createElement('div')
 	keys.id = 'promptkeys'
 	keys.hidden = !term.keypad
-	keys.className = 'flex shrink-0 items-center gap-2 border-t border-line px-2 py-2'
+	keys.className = 'flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-2 py-2'
 	const hint = document.createElement('span')
 	hint.className = 'mr-auto text-[0.72rem] text-faint'
 	hint.textContent = 'answer a prompt'
@@ -221,9 +221,46 @@ export function messageForm(pre: HTMLElement) {
 		})
 		keys.append(b)
 	}
+	/**
+	 * Claude Code's own shortcuts, the ones its screen tells you to press — see NAMED in
+	 * src/control.ts for what each does and why ctrl+c is not one of them.
+	 *
+	 * A row of their own, labelled in words as well as symbols: a phone has no ctrl or
+	 * shift key, and ⌃ and ⇧ alone are not something anybody reads at a glance.
+	 */
+	// Set by ⌃⏎ for the one send it starts, and cleared by that send whatever happens.
+	let sendNow = false
+	const shortcuts = document.createElement('div')
+	shortcuts.className = 'flex w-full gap-2'
+	for (const [label, key, title] of [
+		['⌃⏎ now', 'ctrl+enter', 'Send now: interrupts the turn in progress. With text in the box, sends that.'],
+		['⇧⇥ mode', 'shift+tab', 'Cycle the permission mode: manual, accept edits, plan, auto'],
+		['⌃B bg', 'ctrl+b', 'Move a running shell command to the background'],
+		['⌃O log', 'ctrl+o', 'Open or close the detailed transcript'],
+	] as const) {
+		const b = document.createElement('button')
+		b.type = 'button'
+		b.title = title
+		b.textContent = label
+		b.className = 'min-h-11 min-w-0 flex-1 cursor-pointer rounded border border-line bg-transparent px-1 text-[0.8rem] whitespace-nowrap text-label active:border-gold active:text-gold'
+		tap(b, () => {
+			// "Send this now" is one tap, not two. With text in the box it is sent as usual —
+			// which queues it behind a busy turn — and ctrl+enter follows once the send is
+			// confirmed, so it goes now instead of waiting.
+			if (key === 'ctrl+enter' && input.value.trim()) {
+				sendNow = true
+				return void form.requestSubmit()
+			}
+			sendKey(key, pre)
+		})
+		shortcuts.append(b)
+	}
+	keys.append(shortcuts)
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
 		const text = input.value
+		const now = sendNow
+		sendNow = false
 		if (!text.trim() || term.sending || !term.openId) return
 		const sentTo = term.openId
 		let failed: string | null = null
@@ -285,6 +322,8 @@ export function messageForm(pre: HTMLElement) {
 			// Sent, not cleared: there is nothing to put back, and the button goes away.
 			cleared = null
 			if (draftOf(sentTo) === text) keepDraft(sentTo, '')
+			// Only to the session it was sent to: the panel may have moved on meanwhile.
+			if (now && term.openId === sentTo) void sendKey('ctrl+enter', pre)
 		}
 		labelWipe()
 		// A send that worked but will sit for a while says so, ONCE, above the screen.

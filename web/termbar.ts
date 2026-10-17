@@ -119,7 +119,7 @@ export function screenBar(name: string, refresh: () => void) {
 	keysBtn.id = 'keystoggle'
 	const labelKeys = () => {
 		keysBtn.textContent = '⌨'
-		keysBtn.title = term.keypad ? 'Hide the prompt keys' : 'Show arrows and enter, for answering a prompt'
+		keysBtn.title = term.keypad ? 'Hide the prompt keys' : 'Show the keys: arrows and enter for a prompt, and Claude Code shortcuts'
 		keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${term.keypad ? 'border-gold text-gold' : 'border-line text-muted'}`
 	}
 	labelKeys()

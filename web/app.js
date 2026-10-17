@@ -1414,7 +1414,7 @@ function screenBar(name, refresh3) {
   keysBtn.id = "keystoggle";
   const labelKeys = () => {
     keysBtn.textContent = "\u2328";
-    keysBtn.title = term.keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
+    keysBtn.title = term.keypad ? "Hide the prompt keys" : "Show the keys: arrows and enter for a prompt, and Claude Code shortcuts";
     keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${term.keypad ? "border-gold text-gold" : "border-line text-muted"}`;
   };
   labelKeys();
@@ -1807,7 +1807,7 @@ function messageForm(pre) {
   const keys = document.createElement("div");
   keys.id = "promptkeys";
   keys.hidden = !term.keypad;
-  keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
+  keys.className = "flex shrink-0 flex-wrap items-center gap-2 border-t border-line px-2 py-2";
   const hint = document.createElement("span");
   hint.className = "mr-auto text-[0.72rem] text-faint";
   hint.textContent = "answer a prompt";
@@ -1829,9 +1829,35 @@ function messageForm(pre) {
     });
     keys.append(b);
   }
+  let sendNow = false;
+  const shortcuts = document.createElement("div");
+  shortcuts.className = "flex w-full gap-2";
+  for (const [label, key, title] of [
+    ["\u2303\u23CE now", "ctrl+enter", "Send now: interrupts the turn in progress. With text in the box, sends that."],
+    ["\u21E7\u21E5 mode", "shift+tab", "Cycle the permission mode: manual, accept edits, plan, auto"],
+    ["\u2303B bg", "ctrl+b", "Move a running shell command to the background"],
+    ["\u2303O log", "ctrl+o", "Open or close the detailed transcript"]
+  ]) {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.title = title;
+    b.textContent = label;
+    b.className = "min-h-11 min-w-0 flex-1 cursor-pointer rounded border border-line bg-transparent px-1 text-[0.8rem] whitespace-nowrap text-label active:border-gold active:text-gold";
+    tap(b, () => {
+      if (key === "ctrl+enter" && input.value.trim()) {
+        sendNow = true;
+        return void form.requestSubmit();
+      }
+      sendKey(key, pre);
+    });
+    shortcuts.append(b);
+  }
+  keys.append(shortcuts);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
+    const now = sendNow;
+    sendNow = false;
     if (!text.trim() || term.sending || !term.openId) return;
     const sentTo = term.openId;
     let failed2 = null;
@@ -1857,6 +1883,7 @@ function messageForm(pre) {
       term.msgKey = null;
       cleared = null;
       if (draftOf(sentTo) === text) keepDraft(sentTo, "");
+      if (now && term.openId === sentTo) void sendKey("ctrl+enter", pre);
     }
     labelWipe();
     const say2 = failed2 ?? r.note ?? "";

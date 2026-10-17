@@ -289,9 +289,9 @@ export async function trustNew(workspace: string, io = { read: readScreen, press
  * `\x1b[B` moved the caret from the first option to the second and `\x1b[A` moved
  * it back.
  *
- * FOUR keys and no more. Not a general keyboard: no text, no letters, nothing that
- * could type a command into a shell that happens to be at a prompt. Moving a caret
- * and confirming are the whole vocabulary of answering a question.
+ * FOUR keys here, and a few named shortcuts below. Not a general keyboard: no text, no
+ * letters, nothing that could type a command into a shell that happens to be at a
+ * prompt. Moving a caret and confirming are the whole vocabulary of answering a question.
  */
 /** The escape byte, written as an escape rather than embedded raw: a literal
  *  0x1b in the source is invisible in every editor and diff. */
@@ -304,9 +304,33 @@ const KEYS: Record<string, string> = {
 	escape: ESC,
 }
 
+/**
+ * Claude Code's own shortcuts, for the moments it tells you to press one.
+ *
+ * Asked for from a phone, which has no ctrl or shift to send them with. Still a closed
+ * list of named keys — no letters, no text, nothing a shell would run — and each was
+ * pressed on a scratch session and seen to do its job:
+ *
+ *  - ctrl+enter sends a queued message now, interrupting the turn in progress.
+ *  - shift+tab cycles the permission mode: manual, accept edits, plan, auto.
+ *  - ctrl+b moves a running shell command to the background.
+ *  - ctrl+o opens and closes the detailed transcript.
+ *
+ * ctrl+c and ctrl+d are left out on purpose: twice ctrl+c quits Claude Code, and a
+ * ctrl+d at a shell prompt closes the shell.
+ *
+ * Through `surface.send_key`, not raw bytes. Once Claude Code has started, cmux types
+ * `terminal.input` as keystrokes, so a raw `ESC [ Z` arrived as an Escape and then the
+ * text "[Z" in the input box — measured — while the arrows above still work raw.
+ * send_key names the key and lets the terminal encode it the way the program asked.
+ */
+const NAMED = new Set(['ctrl+enter', 'shift+tab', 'ctrl+b', 'ctrl+o'])
+
 export async function press(where: string | Pane, key: string): Promise<Result> {
 	if (!paneParams(paneOf(where))) return { ok: false, error: 'not a workspace id' }
-	const seq = KEYS[String(key).toLowerCase()]
+	const name = String(key).toLowerCase()
+	if (NAMED.has(name)) return rpcAt('surface.send_key', where, { key: name })
+	const seq = KEYS[name]
 	if (!seq) return { ok: false, error: `not an answerable key: ${String(key).slice(0, 20)}` }
 	return rpcAt('terminal.input', where, { text: seq })
 }
