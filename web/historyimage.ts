@@ -9,6 +9,8 @@
  * cannot send the header it travels in (see termimages.ts for the same reason).
  */
 
+import { enlargeOnTap } from './lightbox.ts'
+
 /** Room above and below the screen to start loading in, so a picture is there by the
  *  time it scrolls in rather than popping in under the reader. */
 const AHEAD = '600px 0px'
@@ -75,13 +77,15 @@ export function historyImage(session: string, ref: string, token: string, mine: 
 			// A tool's picture is smaller than yours: it is evidence of a step, not the
 			// conversation, and full width it dominated the screen.
 			img.className = `block h-auto max-w-full rounded border border-line ${mine ? 'max-h-[70vh]' : 'max-h-[40vh]'}`
-			// Tap for the whole picture, at full size, in its own tab.
+			// Tap to see it full screen, in place — see lightbox.ts. Still a real link, so a
+			// long-press can open it in a tab.
 			const open = document.createElement('a')
 			open.href = url
 			open.target = '_blank'
 			open.rel = 'noopener'
 			open.className = 'inline-block'
 			open.append(img)
+			enlargeOnTap(open, label.textContent ?? 'picture')
 			box.append(open)
 		} catch {
 			// Unreachable for now: watched again after a pause, so it tries again while in

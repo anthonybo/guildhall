@@ -35,6 +35,8 @@ export function onCellTap(pre: HTMLElement, hit: (x: number, y: number) => void)
 		if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 8 || Date.now() - s.at > 600) return
 		// Not if the tap finished a text selection.
 		if (String(getSelection() ?? '').length) return
+		// Not on a picture or a link: that tap opens it, and must not also click the pane.
+		if ((e.target as Element | null)?.closest?.('a, img')) return
 		hit(e.clientX, e.clientY)
 	})
 	pre.addEventListener('pointercancel', () => (start = null))

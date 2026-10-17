@@ -13,6 +13,7 @@
  * one shifts everything after it.
  */
 import { linkParts } from './links.ts'
+import { enlargeOnTap } from './lightbox.ts'
 import { type Picture, pictures } from './picture.ts'
 import { fullScreen } from './viewport.ts'
 
@@ -262,12 +263,14 @@ function drawPicture(p: Picture, url: string | null, cell: number, lineH: number
 	img.style.cssText = reflow
 		? `display:block;width:100%;max-width:${(cols * cell).toFixed(1)}px;height:auto;margin-inline:auto`
 		: `display:block;width:${(cols * cell).toFixed(1)}px;height:${(rows * lineH).toFixed(1)}px;object-fit:contain;margin-left:${(p.left * cell).toFixed(1)}px`
-	// Tap for the whole picture, at full size, in its own tab.
+	// Tap to see it full screen, in place — see lightbox.ts. Still a real link, so a
+	// long-press can open it in a tab.
 	const open = document.createElement('a')
 	open.href = url
 	open.target = '_blank'
 	open.rel = 'noopener'
 	open.append(img)
+	enlargeOnTap(open, p.name ?? 'picture')
 	line.append(open)
 	return line
 }
