@@ -182,14 +182,23 @@ export async function show() {
 	}
 
 	body.replaceChildren()
-	if (!projects.length && !closed.length && !closedWhy) return void say(body, 'No projects found to start in.')
+	body.append(newProject(body))
 	if (closedWhy) say(body, closedWhy, 'text-gold')
 
 	if (closed.length) {
 		say(body, 'Reopen one you closed. It picks up the same conversation, where it left off.')
 		const back = document.createElement('ul')
 		back.className = 'm-0 list-none p-0'
-		for (const c of closed) {
+		/**
+		 * The most recent few, and the rest behind a tap.
+		 *
+		 * Every closed session in the last month was listed, at two lines each — twelve of
+		 * them filled a phone screen, and the projects to start in sat below the fold. That
+		 * was reported as "it only has resume": starting something new looked missing.
+		 */
+		const SHOWN = 3
+		const rest: HTMLLIElement[] = []
+		for (const [i, c] of closed.entries()) {
 			const li = document.createElement('li')
 			const b = document.createElement('button')
 			b.type = 'button'
@@ -211,13 +220,28 @@ export async function show() {
 			b.append(top, what)
 			b.addEventListener('click', () => start({ dir: c.cwd, label: c.proj, live: false }, body, b, c.id))
 			li.append(b)
+			li.hidden = i >= SHOWN
+			if (li.hidden) rest.push(li)
+			back.append(li)
+		}
+		if (rest.length) {
+			const li = document.createElement('li')
+			const more = document.createElement('button')
+			more.type = 'button'
+			more.className = 'min-h-11 w-full cursor-pointer border-0 border-b border-line bg-transparent px-3 text-left text-[0.8rem] text-muted hover:bg-line/40'
+			more.textContent = `Show ${rest.length} more closed`
+			more.addEventListener('click', () => {
+				for (const r of rest) r.hidden = false
+				li.remove()
+			})
+			li.append(more)
 			back.append(li)
 		}
 		body.append(back)
 	}
 
 	if (!projects.length) return
-	say(body, closed.length ? 'Or start a new one.' : 'Pick where it runs. The session opens empty — type your idea into it and it will name itself.')
+	say(body, 'Or start a session in a project you have. It opens empty — type your idea into it and it will name itself.')
 
 	const list = document.createElement('ul')
 	list.className = 'm-0 list-none p-0'
@@ -245,6 +269,68 @@ export async function show() {
 	body.append(list)
 }
 
+/** A red line at the top of the panel saying why something did not start. */
+function fail(body: HTMLElement, text: string) {
+	body.querySelectorAll('[data-note]').forEach((n) => n.remove())
+	const n = document.createElement('p')
+	n.dataset.note = '1'
+	n.className = 'm-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot'
+	n.textContent = text
+	body.prepend(n)
+}
+
+/**
+ * A brand-new project: a name, and the server makes `~/projects/<name>`, runs
+ * `git init`, and opens Claude Code in it — answering the "do you trust this folder"
+ * question itself, since it made the folder (see trustNew in src/control.ts).
+ *
+ * First in the panel because it is the one thing here with no other way to do it
+ * from a phone: every other row needs the folder to exist already.
+ */
+function newProject(body: HTMLElement) {
+	const form = document.createElement('form')
+	form.className = 'flex gap-2 border-b border-line p-3'
+	const input = document.createElement('input')
+	input.placeholder = 'new project name'
+	input.autocomplete = 'off'
+	input.autocapitalize = 'off'
+	input.spellcheck = false
+	input.enterKeyHint = 'go'
+	// 16px, or iOS zooms the page the moment this is tapped; `min-w-0`, or the button
+	// is pushed off the edge (see the message box in terminal.ts).
+	input.className = 'min-h-11 w-0 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label'
+	const go = document.createElement('button')
+	go.type = 'submit'
+	go.textContent = 'Create'
+	go.className = 'min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg'
+	form.addEventListener('submit', async (e) => {
+		e.preventDefault()
+		const name = input.value.trim()
+		if (!name || go.disabled) return
+		go.disabled = true
+		go.textContent = 'Creating…'
+		try {
+			const res = await fetch('/api/spawn', {
+				method: 'POST',
+				headers: { 'x-guildhall-control': token(), 'content-type': 'application/json' },
+				body: JSON.stringify({ create: name }),
+				signal: AbortSignal.timeout(30_000),
+			})
+			const out = await res.json().catch(() => ({ error: 'unreadable reply' }))
+			if (out.error) return fail(body, out.error)
+			close()
+			onPick(out.dir)
+		} catch {
+			fail(body, 'Could not reach guildhall.')
+		} finally {
+			go.disabled = false
+			go.textContent = 'Create'
+		}
+	})
+	form.append(input, go)
+	return form
+}
+
 async function start(p: Project, body: HTMLElement, btn: HTMLButtonElement, resume?: string) {
 	btn.disabled = true
 	const was = btn.textContent
@@ -265,13 +351,7 @@ async function start(p: Project, body: HTMLElement, btn: HTMLButtonElement, resu
 		if (out.error) {
 			btn.disabled = false
 			btn.textContent = was
-			body.querySelectorAll('[data-note]').forEach((n) => n.remove())
-			const n = document.createElement('p')
-			n.dataset.note = '1'
-			n.className = 'm-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot'
-			n.textContent = out.error
-			body.prepend(n)
-			return
+			return fail(body, out.error)
 		}
 		close()
 		// The row appears on the next feed tick; the caller opens its terminal once

@@ -551,8 +551,8 @@ export function codexSessions(now = Date.now(), at = dir(), locks = lockDir()): 
 			last: firstSentence(r.text),
 			ctxUsed: r.ctxUsed,
 			ctxLimit: r.ctxLimit || 200_000,
-			// No tab and no workspace: a Codex session is not a cmux pane, so the room must
-			// not offer to focus it. Both are optional for exactly this reason.
+			// No tab or workspace from the rollout. `collect()` adds them from cmux's state
+			// when the session is running in a cmux pane; one that is not stays without.
 			unread: false,
 			// `toolKind` drives the monitor tint and its vocabulary is Claude's tool names,
 			// so there is nothing honest to map a Codex tool onto yet. `think` is the neutral

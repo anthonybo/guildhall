@@ -51,6 +51,12 @@ export type Session = {
 	/** cmux workspace UUID, the only safe way to address this session's terminal.
 	 *  Absent unless cmux is running and the session is in one of its tabs. */
 	workspace?: string
+	/** The pane inside that tab the session is running in, when cmux records it. A tab
+	 *  can be split, and the tab alone resolves to whichever pane is focused. */
+	surface?: string
+	/** Every terminal pane in the tab, when there is more than one — so the browser can
+	 *  show the others (a backlog beside the chat) as well as the session's own. */
+	panes?: { surface: string; title: string }[]
 	/**
 	 * A warning to hand back with a send that will not be read promptly.
 	 *

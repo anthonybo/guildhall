@@ -10,9 +10,13 @@ import path from 'node:path'
 
 // never touch the real passcode or token; set before the imports that read it
 process.env.GUILDHALL_CONFIG_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-serve-control-'))
+process.env.GUILDHALL_UPLOAD_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-serve-upload-'))
+
+/** The smallest thing that starts like a PNG: the signature and an IHDR header. */
+const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52])
 
 import { createServer, screenTag } from './serve.ts'
-import { inputBox } from './control.ts'
+import { inputBox } from './ask.ts'
 import { resetControlThrottle, setControlPass } from './controlauth.ts'
 import { claim, finish, resetOnce } from './once.ts'
 
@@ -56,6 +60,8 @@ test('the view passcode does not buy the right to type', () => {
 		for (const [what, r] of [
 			['screen', await hit('/api/screen?id=tidepool')],
 			['send', await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}' })],
+			['upload', await hit('/api/upload', { method: 'POST', body: PNG })],
+			['click', await hit('/api/click', { method: 'POST', body: '{"id":"tidepool","pane":"x","row":0,"col":0}' })],
 		] as const) {
 			assert.equal(r.status, 401, `${what} allowed a view-only session through: ${r.text}`)
 		}
@@ -80,10 +86,27 @@ test('switching control off closes it immediately, token or not', () =>
 		for (const r of [
 			await hit('/api/screen?id=tidepool', { headers: { 'x-guildhall-control': token } }),
 			await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}', headers: { 'x-guildhall-control': token } }),
+			await hit('/api/upload', { method: 'POST', body: PNG, headers: { 'x-guildhall-control': token } }),
+			await hit('/api/click', { method: 'POST', body: '{"id":"tidepool","row":0,"col":0}', headers: { 'x-guildhall-control': token } }),
 		]) {
 			assert.equal(r.status, 403, `still reachable with control off: ${r.text}`)
 			assert.match(r.text, /control is off/)
 		}
+		srv.close()
+	}))
+
+test('an uploaded image is saved privately and its path handed back; anything else is refused', () =>
+	boot().then(async ({ hit, srv }) => {
+		resetControlThrottle()
+		const ok = await hit('/api/upload', { method: 'POST', body: PNG, headers: { 'x-guildhall-control': PASS } })
+		assert.equal(ok.status, 200, ok.text)
+		const saved = JSON.parse(ok.text).path as string
+		assert.equal(path.dirname(saved), process.env.GUILDHALL_UPLOAD_DIR)
+		assert.deepEqual(fs.readFileSync(saved), Buffer.from(PNG))
+		assert.equal(fs.statSync(saved).mode & 0o777, 0o600)
+		// Text dressed up as an image by its header is still text.
+		const fake = await hit('/api/upload', { method: 'POST', body: 'echo hi', headers: { 'x-guildhall-control': PASS, 'content-type': 'image/png' } })
+		assert.equal(fake.status, 400, fake.text)
 		srv.close()
 	}))
 
@@ -181,10 +204,19 @@ test('a send names the workspace in the one spelling cmux honours', async () => 
 	// a live session, twice. `readGrid` already carries a test for this; `ask` runs
 	// the same rpc and needs the same one, because the blast radius here is larger —
 	// this one types, and it presses Enter.
-	const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('./control.ts', import.meta.url), 'utf8'))
-	const rpc = src.slice(src.indexOf('export async function ask'))
-	assert.ok(rpc.includes('workspace_id'), 'ask must pass workspace_id')
-	assert.ok(!/workspaceId/.test(rpc), 'ask must never use the camelCase spelling, which cmux ignores')
+	//
+	// The parameters are now built in ONE place, `paneParams`, which every typing and
+	// reading call goes through — so that is what is checked, by its output rather than
+	// its source, along with ask.ts never building its own.
+	const { paneParams } = await import('./control.ts')
+	const ws = '11111111-2222-3333-4444-555555555555'
+	const sf = '66666666-7777-8888-9999-AAAAAAAAAAAA'
+	assert.deepEqual(paneParams({ workspace: ws }), { workspace_id: ws })
+	assert.deepEqual(paneParams({ workspace: ws, surface: sf }), { workspace_id: ws, surface_id: sf })
+	assert.equal(paneParams({ workspace: '' }), null)
+	assert.equal(paneParams({ workspace: ws, surface: 'surface:3' }), null, 'a malformed pane must refuse, not fall back to the tab')
+	const src = await import('node:fs').then((fs) => fs.readFileSync(new URL('./ask.ts', import.meta.url), 'utf8'))
+	assert.ok(!/workspace_?[iI]d/.test(src), 'ask.ts must reach cmux through rpcAt, never with hand-built parameters')
 })
 
 test('a send to a workspace that does not exist is reported as a failure', async () => {
@@ -193,7 +225,7 @@ test('a send to a workspace that does not exist is reported as a failure', async
 	// it; the reading came from `$?` after a pipe, which is the exit code of `head`.
 	// The check stays because the property matters — a send that did not happen must
 	// never come back as ok — but nothing here needs to parse the message.
-	const { ask } = await import('./control.ts')
+	const { ask } = await import('./ask.ts')
 	const r = await ask('00000000-1111-2222-3333-444444444444', 'this must not be reported as sent')
 	assert.equal(r.ok, false, 'a send to a workspace that does not exist was reported as ok')
 	if (!r.ok) assert.ok(/not.?found|failed|refus/i.test(r.error), `unhelpful error: ${r.error}`)

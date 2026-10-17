@@ -270,6 +270,7 @@ function lockPage(who) {
     s.left = "0";
     s.right = "0";
     s.width = "100%";
+    document.documentElement.classList.add("held");
   }
   holders.add(who);
 }
@@ -281,6 +282,7 @@ function unlockPage(who) {
   s.left = "";
   s.right = "";
   s.width = "";
+  document.documentElement.classList.remove("held");
   window.scrollTo(0, savedScroll);
 }
 var host = null;
@@ -338,6 +340,50 @@ var COMFORTABLE = 15;
 var LEGIBLE = 8;
 var READABLE = 12;
 var PAD = 24;
+var FIXED_MIN = 6.5;
+var drawn = (text) => (text.match(/[─-▟]/g)?.length ?? 0) >= 2;
+function cellAt(pre, x, y) {
+  const line = document.elementFromPoint(x, y)?.closest("[data-row]");
+  if (!line || !pre.contains(line)) return null;
+  const row = Number(line.dataset.row);
+  const doc = document;
+  let node = null;
+  let offset = 0;
+  if (doc.caretPositionFromPoint) {
+    const p = doc.caretPositionFromPoint(x, y);
+    if (p) ({ offsetNode: node, offset } = p);
+  } else if (document.caretRangeFromPoint) {
+    const r = document.caretRangeFromPoint(x, y);
+    if (r) ({ startContainer: node, startOffset: offset } = r);
+  }
+  const cell = node && line.contains(node) ? (node.nodeType === 1 ? node : node.parentElement)?.closest("[data-col]") : null;
+  if (node && node.nodeType === 3 && offset > 0) {
+    const r = document.createRange();
+    r.setStart(node, offset - 1);
+    r.setEnd(node, offset);
+    const b = r.getBoundingClientRect();
+    if (x >= b.left && x < b.right) offset -= 1;
+  }
+  if (cell) {
+    let before = 0;
+    const walk = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT);
+    for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+      if (t === node) {
+        before += [...(t.textContent ?? "").slice(0, offset)].length;
+        break;
+      }
+      before += [...t.textContent ?? ""].length;
+    }
+    return { row, col: Number(cell.dataset.col) + before };
+  }
+  const runs2 = [...line.querySelectorAll("[data-col]")];
+  const left = runs2.filter((c) => c.getBoundingClientRect().left <= x).pop();
+  if (!left) return { row, col: 0 };
+  const rect = left.getBoundingClientRect();
+  const chars = [...left.textContent ?? ""].length || 1;
+  const width = rect.width / chars;
+  return { row, col: Number(left.dataset.col) + Math.max(0, Math.floor((x - rect.left) / (width || 1))) };
+}
 var RULE = /^(\S)\1{7,}$/;
 function fill(host2, text) {
   const parts = linkParts(text);
@@ -392,24 +438,52 @@ function paint(pre, g, panel, wrap2) {
   const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size);
   pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`;
   pre.style.whiteSpace = reflow ? "pre-wrap" : "pre";
+  pre.style.overflowX = reflow ? "hidden" : "";
   pre.style.overflowWrap = reflow ? "break-word" : "";
   if (fullScreen()) {
     pre.style.maxHeight = "";
   } else {
     const headerH = document.getElementById("bar")?.getBoundingClientRect().height ?? 0;
-    const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH;
+    const strip = document.getElementById("panestrip")?.getBoundingClientRect().height ?? 0;
+    const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH + strip;
     const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0;
     pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`;
   }
   const out = [];
+  const textOf = (r) => (rows.get(r) ?? []).map((sp) => sp.text).join("");
+  let footer = g.rows;
+  for (let r = g.rows - 1; r >= 0; r--) {
+    if (/^\s*─{20,}\s*$/.test(textOf(r))) {
+      footer = r + 1;
+      break;
+    }
+  }
   for (let r = 0; r < g.rows; r++) {
     const line = document.createElement("div");
+    line.dataset.row = String(r);
     const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column);
+    const fixed = reflow && (r >= footer || drawn(textOf(r)));
+    if (fixed) {
+      const used = Math.max(1, ...spans.map((sp) => sp.column + [...sp.text.trimEnd()].length));
+      const fit = Math.max(FIXED_MIN, Math.min(READABLE, usable / (used * advance)));
+      line.style.cssText = `font-size:${fit.toFixed(2)}px;white-space:pre;overflow:hidden`;
+    }
+    const indent = textOf(r).length - textOf(r).trimStart().length;
+    const reach = Math.max(0, ...spans.map((sp) => sp.column + [...sp.text.trimEnd()].length));
+    const right = reflow && !fixed && textOf(r).trim() !== "" && indent >= g.columns / 3 && reach >= g.columns - 3;
+    if (right) line.style.textAlign = "right";
     let col = 0;
-    for (const sp of spans) {
-      if (sp.column > col) line.append(reflow ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
+    let first = true;
+    let lastSeen = -1;
+    spans.forEach((sp, i) => {
+      if (sp.text.trim()) lastSeen = i;
+    });
+    for (const [i, sp] of spans.entries()) {
+      if (reflow && !fixed && i > lastSeen) break;
+      if (sp.column > col && !(right && first)) line.append(reflow && !fixed ? "  ".slice(0, Math.min(2, sp.column - col)) : " ".repeat(sp.column - col));
       const st = byId.get(sp.style_id);
       const cell = document.createElement("span");
+      cell.dataset.col = String(sp.column);
       const fg = st?.inverse ? st?.background ?? g.terminal_background : st?.foreground;
       const bg = st?.inverse ? st?.foreground ?? g.terminal_foreground : st?.background;
       if (fg) cell.style.color = fg;
@@ -419,8 +493,12 @@ function paint(pre, g, panel, wrap2) {
       if (st?.italic) cell.style.fontStyle = "italic";
       if (st?.underline || st?.strikethrough) cell.style.textDecoration = `${st.underline ? "underline" : ""} ${st.strikethrough ? "line-through" : ""}`.trim();
       if (st?.invisible) cell.style.visibility = "hidden";
-      if (reflow && RULE.test(sp.text)) cell.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
-      fill(cell, sp.text);
+      if (reflow && !fixed && RULE.test(sp.text)) cell.style.cssText += ";display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom";
+      const tail = reflow && !fixed && i === lastSeen;
+      const lead = right && first ? sp.text.trimStart() : sp.text;
+      const text = tail ? lead.trimEnd() : lead;
+      if (text) first = false;
+      fill(cell, text);
       line.append(cell);
       col = sp.column + [...sp.text].length;
     }
@@ -430,6 +508,145 @@ function paint(pre, g, panel, wrap2) {
   pre.replaceChildren(...out);
   if (atBottom) pre.scrollTop = pre.scrollHeight;
   return cramped;
+}
+
+// web/attach.ts
+var MAX_SIDE = 2e3;
+var KEEP_BYTES = 15e5;
+async function shrink(file) {
+  const plain = /^image\/(png|jpeg|gif|webp)$/.test(file.type);
+  let img;
+  try {
+    img = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+  const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+  if (plain && scale === 1 && file.size <= KEEP_BYTES) {
+    img.close();
+    return file;
+  }
+  const canvas2 = document.createElement("canvas");
+  canvas2.width = Math.round(img.width * scale);
+  canvas2.height = Math.round(img.height * scale);
+  const ctx = canvas2.getContext("2d");
+  if (!ctx) return file;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas2.width, canvas2.height);
+  ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+  img.close();
+  return new Promise((resolve) => canvas2.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.85));
+}
+function insertPath(input, path) {
+  const at = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? at;
+  const before = input.value.slice(0, at);
+  const after = input.value.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const tail = after && /^\s/.test(after) ? "" : " ";
+  input.value = before + lead + path + tail + after;
+  const caret = (before + lead + path + tail).length;
+  input.setSelectionRange(caret, caret);
+}
+var CLIP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>';
+function attacher(upload, input, said, changed) {
+  const label = document.createElement("label");
+  label.title = "Attach an image";
+  label.setAttribute("aria-label", "Attach an image");
+  const idle = () => {
+    label.innerHTML = CLIP;
+    label.append(picker);
+    label.className = "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border border-muted/50 bg-transparent text-[16px] text-muted";
+  };
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = "image/*";
+  picker.multiple = true;
+  picker.hidden = true;
+  let busy2 = false;
+  async function take(files) {
+    const images = [...files].filter((f) => f.type.startsWith("image/") || f.type === "");
+    if (!images.length || busy2) return;
+    busy2 = true;
+    label.textContent = "\u2026";
+    label.append(picker);
+    let added = 0;
+    let failed2 = "";
+    try {
+      for (const f of images) {
+        const r = await upload(await shrink(f));
+        if (r.path) {
+          insertPath(input, r.path);
+          added++;
+        } else failed2 = r.error ?? "the upload failed";
+      }
+    } finally {
+      busy2 = false;
+      idle();
+    }
+    if (added) changed();
+    const done = added ? `${added === 1 ? "image" : `${added} images`} attached \u2014 finish your message and send` : "";
+    said([done, failed2].filter(Boolean).join("; "));
+  }
+  picker.addEventListener("change", () => {
+    const files = [...picker.files ?? []];
+    picker.value = "";
+    void take(files);
+  });
+  idle();
+  return { label, take };
+}
+
+// web/panes.ts
+function onCellTap(pre, hit) {
+  let start2 = null;
+  pre.addEventListener("pointerdown", (e) => {
+    start2 = e.isPrimary ? { x: e.clientX, y: e.clientY, at: Date.now() } : null;
+  });
+  pre.addEventListener("pointerup", (e) => {
+    const s = start2;
+    start2 = null;
+    if (!s || !e.isPrimary) return;
+    if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > 8 || Date.now() - s.at > 600) return;
+    if (String(getSelection() ?? "").length) return;
+    hit(e.clientX, e.clientY);
+  });
+  pre.addEventListener("pointercancel", () => start2 = null);
+}
+function paneStrip(panes, own, pick2) {
+  if (!panes || panes.length < 2 || !own) return null;
+  const strip = document.createElement("div");
+  strip.id = "panestrip";
+  strip.className = "flex shrink-0 items-center gap-2 overflow-x-auto border-b border-line bg-panel px-3 py-1.5";
+  const hint = document.createElement("span");
+  hint.className = "shrink-0 text-[0.72rem] text-faint";
+  const chips = [];
+  const ordered = [...panes.filter((p) => p.surface === own), ...panes.filter((p) => p.surface !== own)];
+  const paint3 = (on) => {
+    for (const [b, s] of chips) {
+      const active = s === on;
+      b.setAttribute("aria-pressed", String(active));
+      b.className = `min-h-9 max-w-[12rem] shrink-0 cursor-pointer truncate rounded border bg-transparent px-3 text-[0.78rem] ${active ? "border-gold text-gold" : "border-line text-muted"}`;
+    }
+    hint.textContent = on ? "tap to click it \xB7 messages still go to the chat" : "";
+  };
+  for (const p of ordered) {
+    const mine = p.surface === own;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.textContent = mine ? "Chat" : p.title;
+    b.title = mine ? "The session itself" : `${p.title} \u2014 another pane in this tab, view only`;
+    const value = mine ? null : p.surface;
+    chips.push([b, value]);
+    tap(b, () => {
+      paint3(value);
+      pick2(value);
+    });
+    strip.append(b);
+  }
+  strip.append(hint);
+  paint3(null);
+  return strip;
 }
 
 // src/screens.ts
@@ -793,6 +1010,33 @@ function renderMarkdown(text) {
   return frag;
 }
 
+// web/said.ts
+function inserted(text) {
+  const t = text.trimStart();
+  const tag = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(t)?.[1]?.trim();
+  const short = (s) => s.length > 140 ? `${s.slice(0, 140)}\u2026` : s;
+  if (t.startsWith("<task-notification>")) return `\u2699 background task \u2014 ${short(tag("summary") ?? tag("status") ?? "finished")}`;
+  if (t.startsWith("This session is being continued")) return "\u2699 earlier conversation summarized here";
+  if (t.startsWith("[Request interrupted")) return "\u2699 interrupted";
+  if (t.startsWith("Caveat:")) return "\u2699 note from Claude Code";
+  for (const out of ["local-command-stdout", "local-command-stderr", "bash-stdout", "bash-stderr"]) {
+    if (t.startsWith(`<${out}>`)) {
+      const body2 = tag(out) ?? "";
+      return body2 ? `\u2699 output \u2014 ${short(body2.replace(/\s+/g, " "))}` : "\u2699 output (empty)";
+    }
+  }
+  return null;
+}
+function typedForm(text) {
+  const t = text.trimStart();
+  const tag = (name) => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(t)?.[1]?.trim();
+  const cmd = tag("command-name");
+  if (cmd) return [cmd.startsWith("/") ? cmd : `/${cmd}`, tag("command-args")].filter(Boolean).join(" ");
+  const sh = tag("bash-input");
+  if (sh) return `! ${sh}`;
+  return text;
+}
+
 // src/data/describe.ts
 var cut = (s, n) => {
   const t = (s ?? "").replace(/\s+/g, " ").trim();
@@ -846,24 +1090,29 @@ function toolTint(raw) {
 }
 function prose(e) {
   const row = document.createElement("div");
+  const notice = e.kind === "text" && e.role === "user" ? inserted(e.text) : null;
+  if (notice !== null) {
+    row.className = "mt-3 rounded border border-dashed border-line px-2 py-1 text-[0.68rem] text-muted break-words";
+    row.textContent = notice;
+    return row;
+  }
   if (e.kind === "text" && e.role === "user") {
-    row.className = "mt-5 border-l-2 border-gold/60 py-1 pl-2 whitespace-pre-wrap break-words text-gold";
+    row.className = "mt-6 mb-2 rounded-md border border-you/35 border-l-4 border-l-you bg-you/10 px-3 py-2 whitespace-pre-wrap break-words text-you-soft shadow-[0_0_0_1px_rgb(255_121_198/8%)]";
   } else if (e.kind === "thinking") {
     row.className = "mt-3 whitespace-pre-wrap break-words italic";
     row.style.color = rgb(TINT.think);
   } else {
     row.className = "mt-3 whitespace-pre-wrap break-words text-label";
   }
-  if (e.kind === "text" && e.role === "user" && e.at) {
-    const when = Date.parse(e.at);
-    if (Number.isFinite(when)) {
-      const stamp = document.createElement("span");
-      stamp.className = "mr-2 text-[0.66rem] text-muted";
-      stamp.textContent = ago(Math.max(0, Date.now() - when));
-      row.append(stamp);
-    }
+  if (e.kind === "text" && e.role === "user") {
+    const head = document.createElement("div");
+    head.className = "mb-1 text-[0.64rem] font-bold tracking-[0.12em] text-you";
+    const when = e.at ? Date.parse(e.at) : NaN;
+    head.textContent = Number.isFinite(when) ? `YOU \xB7 ${ago(Math.max(0, Date.now() - when))}` : "YOU";
+    row.append(head);
   }
   if (e.role === "assistant" && e.kind === "text") row.append(renderMarkdown(e.text));
+  else if (e.role === "user" && e.kind === "text") row.append(withLinks(typedForm(e.text)));
   else row.append(withLinks(e.text));
   return row;
 }
@@ -1111,12 +1360,32 @@ var WRAP = "guildhall.terminal.wrap";
 var KEYPAD = "guildhall.terminal.keys";
 var wrap = localStorage.getItem(WRAP) !== "exact";
 var keypad = localStorage.getItem(KEYPAD) === "on";
+var DRAFT = "guildhall.terminal.draft.";
+var draftOf = (id) => {
+  try {
+    return sessionStorage.getItem(DRAFT + id) ?? "";
+  } catch {
+    return "";
+  }
+};
+var keepDraft = (id, text) => {
+  if (!id) return;
+  try {
+    if (text) sessionStorage.setItem(DRAFT + id, text);
+    else sessionStorage.removeItem(DRAFT + id);
+  } catch {
+  }
+};
+var OPEN = "guildhall.terminal.open";
 var lastSig = "";
 function repaintSoon() {
   lastSig = "";
   lastTag = "";
 }
 var openId2 = null;
+var viewing = null;
+var jump = null;
+var seatOf = () => void 0;
 var openName = "";
 var msgKey = null;
 var slash = [];
@@ -1143,9 +1412,9 @@ function holdPage() {
 }
 var token = () => sessionStorage.getItem(KEY) ?? "";
 var lastTag = "";
-async function api(path, init = {}) {
+async function api(path, init = {}, deadline = 2e4) {
   try {
-    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(2e4), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
+    const res = await fetch(path, { ...init, signal: AbortSignal.timeout(deadline), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
     if (res.status === 304) return { status: 304 };
     lastTag = res.headers.get("etag") ?? lastTag;
     const body2 = await res.json().catch(() => ({ error: "unreadable reply" }));
@@ -1186,6 +1455,7 @@ function askForToken(why) {
   };
   go.addEventListener("click", submit);
   input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
+  for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
   wrap2.append(h, p, input, go);
   el2.append(wrap2);
   input.focus();
@@ -1288,6 +1558,7 @@ function chrome(name) {
   input.id = "ask";
   input.autocomplete = "off";
   input.placeholder = "Type into this session\u2026";
+  input.value = openId2 ? draftOf(openId2) : "";
   input.enterKeyHint = "send";
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
@@ -1322,11 +1593,13 @@ function chrome(name) {
       input.value = "";
       msgKey = null;
     }
+    keepDraft(openId2, input.value);
     labelWipe();
     input.focus();
   });
   input.addEventListener("input", () => {
     if (input.value) cleared = null;
+    keepDraft(openId2, input.value);
     labelWipe();
     const typing = /^\/[^\s]*$/.test(input.value);
     if (typing) void openMenu();
@@ -1375,6 +1648,7 @@ function chrome(name) {
       tapList(row, () => {
         const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name);
         input.value = value;
+        keepDraft(openId2, value);
         msgKey = null;
         closeMenu();
         input.focus();
@@ -1418,7 +1692,34 @@ function chrome(name) {
   note.id = "sendnote";
   note.hidden = true;
   note.className = "m-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold";
-  form.append(wipe, slashBtn, input, send);
+  const attach = attacher(
+    (body2) => api("/api/upload", { method: "POST", body: body2, headers: { "content-type": body2.type || "application/octet-stream" } }),
+    input,
+    (say2) => {
+      note.textContent = say2;
+      note.hidden = !say2;
+    },
+    () => {
+      cleared = null;
+      msgKey = null;
+      keepDraft(openId2, input.value);
+      labelWipe();
+    }
+  );
+  input.addEventListener("paste", (e) => {
+    const files = [...e.clipboardData?.files ?? []];
+    if (!files.some((f) => f.type.startsWith("image/"))) return;
+    e.preventDefault();
+    void attach.take(files);
+  });
+  form.addEventListener("dragover", (e) => e.preventDefault());
+  form.addEventListener("drop", (e) => {
+    const files = [...e.dataTransfer?.files ?? []];
+    if (!files.length) return;
+    e.preventDefault();
+    void attach.take(files);
+  });
+  form.append(wipe, slashBtn, attach.label, input, send);
   const keys = document.createElement("div");
   keys.id = "promptkeys";
   keys.hidden = !keypad;
@@ -1444,11 +1745,12 @@ function chrome(name) {
     });
     keys.append(b);
   }
-  el2.append(keys);
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
-    if (!text.trim() || sending) return;
+    if (!text.trim() || sending || !openId2) return;
+    const sentTo = openId2;
+    let failed2 = null;
     if (!msgKey) msgKey = newKey();
     const key = msgKey;
     input.value = "";
@@ -1457,7 +1759,7 @@ function chrome(name) {
     send.textContent = "Sending\u2026";
     let r;
     try {
-      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: openId2, text, ...key ? { key } : {} }) });
+      r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: sentTo, text, ...key ? { key } : {} }) }, 35e3);
     } finally {
       sending = false;
       send.disabled = false;
@@ -1465,20 +1767,41 @@ function chrome(name) {
     }
     if (r.error) {
       const unknown = r.status === 0;
-      pre.textContent = `${unknown ? `${r.error} \u2014 it may still have gone through; sending again is safe, it will not arrive twice` : r.error}
-
-${pre.textContent}`;
-      input.value = text;
+      failed2 = unknown ? `${r.error} \u2014 it may still have gone through; sending again is safe, it will not arrive twice` : r.error;
+      if (!input.value) input.value = text;
     } else {
       msgKey = null;
       cleared = null;
+      if (draftOf(sentTo) === text) keepDraft(sentTo, "");
     }
     labelWipe();
-    note.textContent = r.note ?? "";
-    note.hidden = !r.note;
+    const say2 = failed2 ?? r.note ?? "";
+    note.textContent = say2;
+    note.hidden = !say2;
     refresh();
   });
-  el2.append(bar3, pre, note, menu, form);
+  const seat = openId2 ? seatOf(openId2) : void 0;
+  const strip = paneStrip(seat?.panes, seat?.surface, (surface) => {
+    viewing = surface;
+    jump = surface ? "top" : "bottom";
+    lastTag = "";
+    lastSig = "";
+    pre.classList.add("opacity-40");
+    refresh();
+  });
+  onCellTap(pre, async (x2, y) => {
+    const cell = viewing && openId2 ? cellAt(pre, x2, y) : null;
+    if (!cell || !viewing || !openId2) return;
+    const row = pre.querySelector(`[data-row="${cell.row}"]`);
+    if (row) row.style.background = "rgb(255 214 92 / 22%)";
+    const r = await api("/api/click", { method: "POST", body: JSON.stringify({ id: openId2, pane: viewing, ...cell }) });
+    note.textContent = r.error ?? "";
+    note.hidden = !r.error;
+    lastTag = "";
+    refresh();
+    setTimeout(refresh, 250);
+  });
+  el2.append(...strip ? [bar3, strip] : [bar3], pre, note, menu, keys, form);
   return { pre, input };
 }
 var polling = false;
@@ -1496,25 +1819,39 @@ ${pre.textContent}`;
   for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
   refresh();
 }
+var again = false;
 async function refresh() {
-  if (!openId2 || polling || sending) return;
+  if (!openId2 || sending) return;
+  if (polling) return void (again = true);
   polling = true;
   try {
-    await poll();
+    do {
+      again = false;
+      await poll();
+    } while (again && openId2);
   } finally {
     polling = false;
   }
 }
 async function poll() {
   if (!openId2) return;
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  const want = viewing;
+  const pane = want ? `&pane=${encodeURIComponent(want)}` : "";
+  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}${pane}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
+  if (want !== viewing) return void (lastTag = "");
+  document.getElementById("screen")?.classList.remove("opacity-40");
   if (r.status === 304) return;
   if (r.status === 401) return askForToken("That password was not accepted.");
   if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
   if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
   const pre = document.getElementById("screen");
   if (!pre) return;
-  if (r.error) return void (pre.textContent = r.error);
+  if (r.error) {
+    lastTag = "";
+    lastSig = "";
+    pre.textContent = r.error;
+    return;
+  }
   if (!r.render_grid) return;
   const sig = JSON.stringify(r.render_grid.row_spans);
   if (sig === lastSig && pre.childElementCount) return;
@@ -1522,10 +1859,20 @@ async function poll() {
   const btn = document.getElementById("screenmode");
   const cramped = paint(pre, r.render_grid, el2, wrap);
   if (btn) btn.hidden = !cramped;
+  if (jump) {
+    pre.scrollTop = jump === "top" ? 0 : pre.scrollHeight;
+    jump = null;
+  }
 }
 function show(id, name) {
   openId2 = id;
   openName = name;
+  viewing = null;
+  jump = "bottom";
+  try {
+    sessionStorage.setItem(OPEN, JSON.stringify({ id, name }));
+  } catch {
+  }
   el2.hidden = false;
   holdPage();
   measure();
@@ -1539,6 +1886,10 @@ function show(id, name) {
 function close() {
   openId2 = null;
   lastTag = "";
+  try {
+    sessionStorage.removeItem(OPEN);
+  } catch {
+  }
   clearInterval(timer);
   timer = void 0;
   el2.hidden = true;
@@ -1552,11 +1903,15 @@ function close() {
   unlockPage("terminal");
   onClose();
 }
-function mountTerminal(host2, closed) {
+function mountTerminal(host2, closed, seat) {
   el2 = host2;
   onClose = closed;
+  if (seat) seatOf = seat;
   document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && openId2) close();
+    if (e.key !== "Escape" || !openId2) return;
+    const t2 = e.target;
+    if ((t2 instanceof HTMLInputElement || t2 instanceof HTMLTextAreaElement) && t2.value) return;
+    close();
   });
   watch(host2, isOpen);
   let t;
@@ -1581,6 +1936,14 @@ async function sendTo(id, text) {
   });
 }
 var isOpen = () => openId2 !== null;
+function wasOpen() {
+  try {
+    const v = JSON.parse(sessionStorage.getItem(OPEN) ?? "null");
+    return v && typeof v.id === "string" && typeof v.name === "string" ? { id: v.id, name: v.name } : null;
+  } catch {
+    return null;
+  }
+}
 var busy = () => {
   if (!openId2) return false;
   if (sending) return true;
@@ -4718,13 +5081,15 @@ async function show3() {
     closedWhy = "Could not list closed sessions.";
   }
   body2.replaceChildren();
-  if (!projects.length && !closed.length && !closedWhy) return void say(body2, "No projects found to start in.");
+  body2.append(newProject(body2));
   if (closedWhy) say(body2, closedWhy, "text-gold");
   if (closed.length) {
     say(body2, "Reopen one you closed. It picks up the same conversation, where it left off.");
     const back = document.createElement("ul");
     back.className = "m-0 list-none p-0";
-    for (const c of closed) {
+    const SHOWN = 3;
+    const rest = [];
+    for (const [i, c] of closed.entries()) {
       const li = document.createElement("li");
       const b = document.createElement("button");
       b.type = "button";
@@ -4744,12 +5109,27 @@ async function show3() {
       b.append(top, what);
       b.addEventListener("click", () => start({ dir: c.cwd, label: c.proj, live: false }, body2, b, c.id));
       li.append(b);
+      li.hidden = i >= SHOWN;
+      if (li.hidden) rest.push(li);
+      back.append(li);
+    }
+    if (rest.length) {
+      const li = document.createElement("li");
+      const more = document.createElement("button");
+      more.type = "button";
+      more.className = "min-h-11 w-full cursor-pointer border-0 border-b border-line bg-transparent px-3 text-left text-[0.8rem] text-muted hover:bg-line/40";
+      more.textContent = `Show ${rest.length} more closed`;
+      more.addEventListener("click", () => {
+        for (const r of rest) r.hidden = false;
+        li.remove();
+      });
+      li.append(more);
       back.append(li);
     }
     body2.append(back);
   }
   if (!projects.length) return;
-  say(body2, closed.length ? "Or start a new one." : "Pick where it runs. The session opens empty \u2014 type your idea into it and it will name itself.");
+  say(body2, "Or start a session in a project you have. It opens empty \u2014 type your idea into it and it will name itself.");
   const list = document.createElement("ul");
   list.className = "m-0 list-none p-0";
   for (const p of projects) {
@@ -4773,6 +5153,55 @@ async function show3() {
   }
   body2.append(list);
 }
+function fail(body2, text) {
+  body2.querySelectorAll("[data-note]").forEach((n2) => n2.remove());
+  const n = document.createElement("p");
+  n.dataset.note = "1";
+  n.className = "m-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot";
+  n.textContent = text;
+  body2.prepend(n);
+}
+function newProject(body2) {
+  const form = document.createElement("form");
+  form.className = "flex gap-2 border-b border-line p-3";
+  const input = document.createElement("input");
+  input.placeholder = "new project name";
+  input.autocomplete = "off";
+  input.autocapitalize = "off";
+  input.spellcheck = false;
+  input.enterKeyHint = "go";
+  input.className = "min-h-11 w-0 min-w-0 flex-1 rounded border border-line bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  const go = document.createElement("button");
+  go.type = "submit";
+  go.textContent = "Create";
+  go.className = "min-h-11 shrink-0 cursor-pointer rounded border border-gold bg-gold px-4 text-[15px] font-bold text-bg";
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = input.value.trim();
+    if (!name || go.disabled) return;
+    go.disabled = true;
+    go.textContent = "Creating\u2026";
+    try {
+      const res = await fetch("/api/spawn", {
+        method: "POST",
+        headers: { "x-guildhall-control": token2(), "content-type": "application/json" },
+        body: JSON.stringify({ create: name }),
+        signal: AbortSignal.timeout(3e4)
+      });
+      const out = await res.json().catch(() => ({ error: "unreadable reply" }));
+      if (out.error) return fail(body2, out.error);
+      close3();
+      onPick(out.dir);
+    } catch {
+      fail(body2, "Could not reach guildhall.");
+    } finally {
+      go.disabled = false;
+      go.textContent = "Create";
+    }
+  });
+  form.append(input, go);
+  return form;
+}
 async function start(p, body2, btn, resume) {
   btn.disabled = true;
   const was = btn.textContent;
@@ -4791,13 +5220,7 @@ async function start(p, body2, btn, resume) {
     if (out.error) {
       btn.disabled = false;
       btn.textContent = was;
-      body2.querySelectorAll("[data-note]").forEach((n2) => n2.remove());
-      const n = document.createElement("p");
-      n.dataset.note = "1";
-      n.className = "m-0 border-t border-hot/40 bg-hot/10 px-3 py-2 text-[0.8rem]/[1.45] text-hot";
-      n.textContent = out.error;
-      body2.prepend(n);
-      return;
+      return fail(body2, out.error);
     }
     close3();
     onPick(p.dir);
@@ -4847,12 +5270,18 @@ function paintCounts(list) {
   );
 }
 var clientStamp = null;
+var reopened = false;
 function apply(data) {
   if (data.client) {
     if (clientStamp === null) clientStamp = data.client;
     else if (data.client !== clientStamp && !busy() && !isOpen2() && !isOpen3() && !transcriptOpen()) return void location.reload();
   }
   sessions2 = data.sessions;
+  if (!reopened) {
+    reopened = true;
+    const was = wasOpen();
+    if (was && !isOpen() && sessions2.some((s) => s.id === was.id && s.workspace)) show(was.id, was.name);
+  }
   setRoomSessions(sessions2);
   if (data.version) {
     const [num, commit] = data.version.split(" \xB7 ");
@@ -4938,8 +5367,12 @@ function connect() {
 function showRoom() {
   roomEl2.hidden = window.innerWidth <= 720 || !settings.room || sessions2.length === 0;
 }
-mountTerminal($("#terminal"), () => {
-});
+mountTerminal(
+  $("#terminal"),
+  () => {
+  },
+  (id) => sessions2.find((s) => s.id === id)
+);
 var awaitingDir = null;
 var awaitingSince = 0;
 var SPAWN_WAIT = 75e3;

@@ -7,6 +7,8 @@
 import fs from 'node:fs'
 import { CMUX_STATE } from './paths.ts'
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
 /**
  * Session id → tab POSITION (1-based), the workspace's UUID, and whether the tab
  * is showing unread.
@@ -20,10 +22,25 @@ import { CMUX_STATE } from './paths.ts'
  * a number that means something else is exactly the mistake worth designing out.
  * It is stable across reorders, which a position is not.
  */
-const byTty = new Map<string, { tab: number; workspace: string; unread: boolean }>()
+/** One terminal pane in a tab, by the surface id cmux addresses it with. */
+export type PaneInfo = { surface: string; title: string }
+/** Where a session is: the tab, and the pane inside it when that is known. */
+export type Seat = { tab: number; workspace: string; unread: boolean; surface?: string; panes: PaneInfo[] }
+
+/** A seat as the fields a session row carries. One place, so the four ways a row gets
+ *  its tab cannot disagree about which fields come with it. */
+export const seatFields = (at: Seat) => ({
+	tab: at.tab,
+	workspace: at.workspace || undefined,
+	unread: at.unread,
+	surface: at.surface,
+	panes: at.panes.length > 1 ? at.panes : undefined,
+})
+
+const byTty = new Map<string, Seat>()
 
 export function cmuxMap() {
-	const m = new Map<string, { tab: number; workspace: string; unread: boolean }>()
+	const m = new Map<string, Seat>()
 	let st: any
 	try {
 		st = JSON.parse(fs.readFileSync(CMUX_STATE, 'utf8'))
@@ -32,8 +49,16 @@ export function cmuxMap() {
 	}
 	for (const win of st.windows ?? []) {
 		;(win.tabManager?.workspaces ?? []).forEach((ws: any, i: number) => {
-			const at = { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator }
+			// Every terminal pane in the tab. A panel's `id` IS the surface id cmux takes —
+			// measured on a split tab, where the Claude pane's panel id matched the surface
+			// `pane.list` reported for it. The user's own title wins, as cmux shows it.
+			const panes: PaneInfo[] = (ws.panels ?? [])
+				.filter((pn: any) => pn.type === 'terminal' && UUID.test(String(pn.id ?? '')))
+				.map((pn: any) => ({ surface: String(pn.id), title: String(pn.customTitle || pn.title || 'terminal').slice(0, 40) }))
+			const tab = { tab: i + 1, workspace: String(ws.workspaceId ?? ''), unread: !!ws.hasUnreadIndicator, panes }
 			for (const pn of ws.panels ?? []) {
+				// This panel's own seat: the tab, narrowed to the pane the session is in.
+				const at: Seat = UUID.test(String(pn.id ?? '')) ? { ...tab, surface: String(pn.id) } : tab
 				// Every panel by its terminal device — the exact session-to-tab key. See
 				// `tabForTty`.
 				if (pn.ttyName) {
@@ -65,7 +90,9 @@ export function cmuxMap() {
 			// from the CLI.
 			if (!(ws.panels ?? []).some((pn: any) => pn.terminal?.agent?.sessionId || pn.terminal?.resumeBinding?.checkpointId)) {
 				const dir = String(ws.currentDirectory ?? '')
-				if (dir) free.push({ dir, at })
+				// No agent recorded, so which pane holds the session is unknown — unless there is
+				// only one. Otherwise the tab alone, as before.
+				if (dir) free.push({ dir, at: panes.length === 1 ? { ...tab, surface: panes[0].surface } : tab })
 			}
 		})
 	}
@@ -87,7 +114,7 @@ export function cmuxMap() {
  * fact both sides share. This is offered as a LAST resort and only when it is
  * unambiguous — see `pairByDirectory`.
  */
-const free: { dir: string; at: { tab: number; workspace: string; unread: boolean } }[] = []
+const free: { dir: string; at: Seat }[] = []
 
 export function unclaimed() {
 	// Populated as a side effect of cmuxMap, which is the only thing that parses the

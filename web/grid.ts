@@ -97,6 +97,79 @@ const READABLE = 12
 /** The screen's own horizontal padding (px-3 both sides), which is not grid. */
 const PAD = 24
 
+/**
+ * Smallest a drawn row is shrunk to so that it fits whole. Below this it is clipped at
+ * the right edge instead — a status bar losing its last few cells reads better than
+ * one at a size nobody can read.
+ */
+const FIXED_MIN = 6.5
+
+/**
+ * A row that is a drawing: two or more box-drawing or block characters (U+2500-U+259F)
+ * — a box's border or its sides, a progress meter. Reflowing one breaks it, because its
+ * meaning is in the columns. One alone is usually a tree marker in front of prose
+ * ("└ Tip: …"), which should still wrap.
+ */
+export const drawn = (text: string) => (text.match(/[─-▟]/g)?.length ?? 0) >= 2
+
+/**
+ * The terminal cell under a point on the drawn screen, or null if it is not on one.
+ *
+ * The row is the line's. The column comes from the caret: the run of text under the
+ * finger knows the terminal column it starts at (`data-col`), plus how far into it the
+ * point is. That holds whether the row is drawn exactly, reflowed, or shrunk to fit,
+ * where measuring x against a character width would not. Off the end of a row's text
+ * the column is extrapolated from the last run, so a tap on a box's blank interior
+ * still lands inside the box.
+ */
+export function cellAt(pre: HTMLElement, x: number, y: number): { row: number; col: number } | null {
+	const line = (document.elementFromPoint(x, y) as HTMLElement | null)?.closest<HTMLElement>('[data-row]')
+	if (!line || !pre.contains(line)) return null
+	const row = Number(line.dataset.row)
+	const doc = document as Document & { caretPositionFromPoint?: (x: number, y: number) => { offsetNode: Node; offset: number } | null }
+	let node: Node | null = null
+	let offset = 0
+	if (doc.caretPositionFromPoint) {
+		const p = doc.caretPositionFromPoint(x, y)
+		if (p) ({ offsetNode: node, offset } = p)
+	} else if (document.caretRangeFromPoint) {
+		const r = document.caretRangeFromPoint(x, y)
+		if (r) ({ startContainer: node, startOffset: offset } = r)
+	}
+	const cell = node && line.contains(node) ? (node.nodeType === 1 ? (node as HTMLElement) : node.parentElement)?.closest<HTMLElement>('[data-col]') : null
+	// The caret is the nearest gap BETWEEN characters, so a tap on the right half of
+	// one comes back after it — measured one column too far. The character is the one
+	// whose box holds the point, which is the one before the caret when that is true.
+	if (node && node.nodeType === 3 && offset > 0) {
+		const r = document.createRange()
+		r.setStart(node, offset - 1)
+		r.setEnd(node, offset)
+		const b = r.getBoundingClientRect()
+		if (x >= b.left && x < b.right) offset -= 1
+	}
+	if (cell) {
+		// Characters before the caret within this run, counted by code point as the grid is.
+		let before = 0
+		const walk = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+		for (let t = walk.nextNode(); t; t = walk.nextNode()) {
+			if (t === node) {
+				before += [...(t.textContent ?? '').slice(0, offset)].length
+				break
+			}
+			before += [...(t.textContent ?? '')].length
+		}
+		return { row, col: Number(cell.dataset.col) + before }
+	}
+	// Between runs or past the last one: measure from the nearest run on the left.
+	const runs = [...line.querySelectorAll<HTMLElement>('[data-col]')]
+	const left = runs.filter((c) => c.getBoundingClientRect().left <= x).pop()
+	if (!left) return { row, col: 0 }
+	const rect = left.getBoundingClientRect()
+	const chars = [...(left.textContent ?? '')].length || 1
+	const width = rect.width / chars
+	return { row, col: Number(left.dataset.col) + Math.max(0, Math.floor((x - rect.left) / (width || 1))) }
+}
+
 /** One non-space character repeated a long way: a divider, not words. */
 const RULE = /^(\S)\1{7,}$/
 
@@ -231,6 +304,13 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size)
 	pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`
 	pre.style.whiteSpace = reflow ? 'pre-wrap' : 'pre'
+	// Reflowed means it fits: nothing in it may scroll sideways. Reported on an iPhone as
+	// the whole session screen sliding left, cut off, with a horizontal scrollbar. The
+	// cause measured in Chrome: diff lines end in runs of trailing spaces on a coloured
+	// background, and those runs hang past the edge — to 496px in a 430px box. Chrome
+	// does not let hanging spaces scroll the box; Safari evidently does. Trimmed below
+	// as well, but this is the guarantee. The exact grid still scrolls, which is its point.
+	pre.style.overflowX = reflow ? 'hidden' : ''
 	// break-word, not break-all: a wrapped path or a long token should move whole
 	// rather than be sliced mid-word wherever the edge happens to fall
 	pre.style.overflowWrap = reflow ? 'break-word' : ''
@@ -248,22 +328,64 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 		pre.style.maxHeight = ''
 	} else {
 		const headerH = document.getElementById('bar')?.getBoundingClientRect().height ?? 0
-		const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH
+		// The pane chips of a split tab sit between the bar and the screen (panes.ts).
+		const strip = document.getElementById('panestrip')?.getBoundingClientRect().height ?? 0
+		const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH + strip
 		const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0
 		pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
 	}
 	const out: HTMLElement[] = []
+	// Rows that are drawn, not written, keep their columns even when reflowing — see
+	// `drawn`. Everything below the last full-width rule is the status bar.
+	const textOf = (r: number) => (rows.get(r) ?? []).map((sp) => sp.text).join('')
+	let footer = g.rows
+	for (let r = g.rows - 1; r >= 0; r--) {
+		if (/^\s*─{20,}\s*$/.test(textOf(r))) {
+			footer = r + 1
+			break
+		}
+	}
 	for (let r = 0; r < g.rows; r++) {
 		const line = document.createElement('div')
+		line.dataset.row = String(r)
 		const spans = (rows.get(r) ?? []).sort((a, b) => a.column - b.column)
+		const fixed = reflow && (r >= footer || drawn(textOf(r)))
+		if (fixed) {
+			// Its own size, just small enough for the row's real width to fit — so a box
+			// stays a box and a meter stays beside its number. Measured on a phone: wrapped,
+			// the Agents box broke into misaligned fragments and "Effort" and the usage bars
+			// were each split from what they label.
+			const used = Math.max(1, ...spans.map((sp) => sp.column + [...sp.text.trimEnd()].length))
+			const fit = Math.max(FIXED_MIN, Math.min(READABLE, usable / (used * advance)))
+			line.style.cssText = `font-size:${fit.toFixed(2)}px;white-space:pre;overflow:hidden`
+		}
+		// Text the terminal pushed to the right with a run of spaces ("✔ Update installed ·
+		// Restart to update"). Reflowed, the run is kept and shoves the words into a wrap,
+		// so it is dropped and the row right-aligned instead — where the terminal put it.
+		const indent = textOf(r).length - textOf(r).trimStart().length
+		// AND it reaches the right edge, which is what right-aligned means: a deeply
+		// indented line of code starts far in too, but stops wherever its code stops.
+		const reach = Math.max(0, ...spans.map((sp) => sp.column + [...sp.text.trimEnd()].length))
+		const right = reflow && !fixed && textOf(r).trim() !== '' && indent >= g.columns / 3 && reach >= g.columns - 3
+		if (right) line.style.textAlign = 'right'
 		let col = 0
-		for (const sp of spans) {
+		let first = true
+		// The last run with anything visible in it; spaces after it are not drawn reflowed.
+		let lastSeen = -1
+		spans.forEach((sp, i) => {
+			if (sp.text.trim()) lastSeen = i
+		})
+		for (const [i, sp] of spans.entries()) {
+			if (reflow && !fixed && i > lastSeen) break
 			// Column gaps place a span where the terminal put it. Reflowed, they place
 			// nothing — the row is no longer a row — and a status bar's 40-space gaps
 			// would wrap into blank lines, so they collapse to a readable separation.
-			if (sp.column > col) line.append(reflow ? '  '.slice(0, Math.min(2, sp.column - col)) : ' '.repeat(sp.column - col))
+			if (sp.column > col && !(right && first)) line.append(reflow && !fixed ? '  '.slice(0, Math.min(2, sp.column - col)) : ' '.repeat(sp.column - col))
 			const st = byId.get(sp.style_id)
 			const cell = document.createElement('span')
+			// Where this run starts in the terminal, so a tap can be mapped back to a cell
+			// however the row was laid out (see cellAt).
+			cell.dataset.col = String(sp.column)
 			// inverse swaps them, which is how a selected row or a cursor is drawn
 			const fg = st?.inverse ? (st?.background ?? g.terminal_background) : st?.foreground
 			const bg = st?.inverse ? (st?.foreground ?? g.terminal_foreground) : st?.background
@@ -278,10 +400,17 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 			// reflowed it becomes four wrapped lines of dashes where the terminal drew
 			// one — so a rule is clipped to the width instead of wrapped. It reads as
 			// the line it was meant to be, and costs one row rather than four.
-			if (reflow && RULE.test(sp.text)) cell.style.cssText += ';display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom'
+			if (reflow && !fixed && RULE.test(sp.text)) cell.style.cssText += ';display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom'
 			// nodes, never innerHTML: this is whatever the terminal is showing, and it
 			// must not be able to become markup
-			fill(cell, sp.text)
+			// Until the first visible character of a right-aligned row, its spaces are padding.
+			// Reflowed, a row ends at its last visible character: trailing spaces are layout
+			// for a fixed grid, and wrapped they hang off the right edge (see overflowX above).
+			const tail = reflow && !fixed && i === lastSeen
+			const lead = right && first ? sp.text.trimStart() : sp.text
+			const text = tail ? lead.trimEnd() : lead
+			if (text) first = false
+			fill(cell, text)
 			line.append(cell)
 			col = sp.column + [...sp.text].length
 		}

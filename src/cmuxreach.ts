@@ -87,17 +87,62 @@ export function reach(): Reach {
 	if (process.env.CMUX_SOCKET_CAPABILITY) return { ok: true }
 	// A stored password authorizes any local process, whatever started it.
 	if (socketPassword()) return { ok: true }
-	let mode = ''
 	try {
 		const out = execFileSync(CMUX, ['capabilities'], { encoding: 'utf8', timeout: 4000, windowsHide: true })
-		mode = String((JSON.parse(out) as { access_mode?: string }).access_mode ?? '')
+		return verdict(out)
 	} catch {
-		return {
-			ok: false,
-			why: 'cmux could not be asked whether this process may control it',
-			fix: 'Is cmux running, and is the `cmux` command on this machine?',
-		}
+		return UNASKED
 	}
+}
+
+const UNASKED: Reach = {
+	ok: false,
+	why: 'cmux could not be asked whether this process may control it',
+	fix: 'Is cmux running, and is the `cmux` command on this machine?',
+}
+
+/** How long an answer from cmux is reused. The mode changes only when somebody edits
+ *  cmux's config, so a minute is plenty to notice that and costs one call a minute. */
+const KEEP = 60_000
+
+let last: { reach: Reach; at: number } | null = null
+let asking: Promise<Reach> | null = null
+
+/**
+ * `reach()` for the server: asked in the background and remembered.
+ *
+ * The server used to call `reach()` before every screen read and every send. That is a
+ * synchronous child process — measured 0.28-0.74s at load 50 — so it froze the whole
+ * server twice a second while a terminal was open, and under heavier load (179 that
+ * afternoon) it ran past its 4s timeout. A timeout became "cmux could not be asked",
+ * and the phone showed that in place of a session cmux was serving perfectly well.
+ *
+ * So a check that fails to ANSWER is not a verdict. Once cmux has answered, a slow or
+ * failed re-check keeps that answer; only a real answer replaces it. The refusal for an
+ * unanswered check is kept for the one case it was written for: cmux has never answered
+ * this process at all.
+ */
+export function reachSoon(): Promise<Reach> {
+	if (process.env.CMUX_SOCKET_CAPABILITY || socketPassword()) return Promise.resolve({ ok: true })
+	if (last && Date.now() - last.at < KEEP) return Promise.resolve(last.reach)
+	asking ??= new Promise<Reach>((resolve) => {
+		execFile(CMUX, ['capabilities'], { encoding: 'utf8', timeout: 4000, windowsHide: true }, (err, out) => {
+			asking = null
+			if (err) return resolve(last?.reach ?? UNASKED)
+			try {
+				last = { reach: verdict(out), at: Date.now() }
+				resolve(last.reach)
+			} catch {
+				resolve(last?.reach ?? UNASKED)
+			}
+		})
+	})
+	return asking
+}
+
+/** What cmux's `capabilities` output means for this process. Throws on output that is not JSON. */
+function verdict(out: string): Reach {
+	const mode = String((JSON.parse(out) as { access_mode?: string }).access_mode ?? '')
 	if (mode === 'cmuxOnly') {
 		return {
 			ok: false,

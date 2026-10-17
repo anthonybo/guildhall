@@ -1181,6 +1181,47 @@ one-line failure took the whole feature down with it.
 
 ---
 
+## Long pasted messages stuck, doubled, or cut short
+
+**Status: fixed against a real scratch session, not yet proven in daily use.** Reported
+from a desktop browser pasting long logs: "they get doubled up and stuck and I cannot
+send them". Every earlier send trial used short lines, which is why none of the fixes
+above ever saw this.
+
+Three separate failures stacked, all measured against a scratch Claude Code session and
+read back from its transcript, never from the screen:
+
+- **An Enter in the same write as a long message does not submit it.** Claude Code
+  folds a burst into `[Pasted text #1 +1 lines]` and the `\r` lands inside the paste as
+  a newline. A 3,000-character line sat unsent; a separate Enter submitted it at once.
+- **One big write loses text.** 12,000 characters arrived as 3,941 and 20,000 as 2,626.
+  The screen check cannot see this — it reported `ok` on the damaged sends.
+- **The verify step's re-type made the doubles.** It looked for the message's START in
+  the input box, which is the part a long message scrolls out of. Not finding it, it
+  decided the text was lost and typed a second copy beside the first.
+
+### Tried and did not work
+
+| # | Change | Why it seemed right | What actually happened |
+|---|---|---|---|
+| 1 | The re-type in `settled()` (shipped since v0.11) | The empty-prompt "lost send" seen live | That loss was a browser tap that never made a request (entry at the top). The re-type only ever doubled long messages. Removed |
+| 2 | Bracketed paste: `ESC[200~ … ESC[201~`, then Enter | Tells Claude Code exactly where a paste starts and ends | **The body was lost entirely.** The session received a literal `[201~` as the whole message, four of four times. Do not retry without chunking — the loss above is the likely cause |
+| 3 | Chunks of 1,024 characters, 10ms apart | Faster than 512 | 20,000 arrived as 20,649 with 17 gaps — garbled, not just short. 2,048 was worse (14,571) |
+
+**What works:** text alone in 512-character pieces 20ms apart, then Enter only once
+the text is seen in the box — matched by its start, its end, or a `[Pasted text #N]`
+marker — and never re-typed. Whole in every trial: 30, 600, 3,900, 4,000, 12,000,
+15,000 and 20,000 characters, idle, plus 8,000 typed while the session was busy (it
+arrives as a `queued_command`, whole). See `src/ask.ts`.
+
+**Short messages too, intermittently.** Reported from a phone the next day as "gets
+stuck in the session's text box, sometimes, and I press ⏎ to send it". A 140-character
+message through the OLD code stuck 1 time in 12 trials; the new code stuck 0 in 30, and
+all 41 delivered messages arrived exactly once. At the old rate, 30 clean runs by
+luck is about a 7% chance, so this is good evidence, not proof.
+
+---
+
 ## A tappable row inside a scrolling list
 
 **Status: fixed on the third try.** The two failures were opposites, which is what makes
@@ -1333,3 +1374,22 @@ work. A grep for `return` lines had missed it because the early one is `if (...)
 **The gate now measures the path that runs:** "fresh-process poll" times `collect()` in a
 new process leaning only on the disk cache — 45 cpu-ms, against 9,120 with the cache
 disabled. The old warm gate reads ~2 cpu-ms in both cases, which is how this got in.
+
+## Typing into a Codex pane: Enter pressed too soon is ignored
+
+**Status: fixed against a scratch Codex 0.162 pane, not yet proven in daily use.**
+
+Codex sessions running in a cmux pane got the terminal panel once cmux's own record of
+them (`terminal.agent.kind: "codex"`) was read. Typing into them through `ask()` then
+showed a Codex-specific failure: a long message sat in the composer, unsent.
+
+| # | What was tried | Why it looked right | What happened |
+|---|---|---|---|
+| 1 | The existing "no box found, press Enter once blind" path (Codex draws no rules) | Short messages sent fine that way: 6 of 6 | **2,900 characters stayed in the composer.** A second Enter, pressed by hand much later, sent it |
+| 2 | A fixed wait before one Enter | Looked like Codex just needed time to take the paste | 2,900 chars: stuck at 1, 3 and 5s (5s twice), sent at 7s (twice) and 10s. 8,000 chars stuck at 7s. 800 chars stuck even at 0.3s while 400 (one write) sent. **No fixed wait is safe** — it grows with length and machine load |
+| 3 | Bracketed paste (`ESC[200~`, the 512-char pieces, `ESC[201~`), then Enter | Codex supports bracketed paste and folds it into `[Pasted Content N chars]` | Stuck, 2 of 2. Same as without the markers |
+
+**What works:** read the composer (the LAST line starting `›`; sent messages echo above
+it with the same mark), and press Enter again on a growing schedule until it clears —
+an early Enter loses nothing. 60, 800, 2,900 (×3) and 8,000 characters each arrived
+once and were answered; the slowest took 21.4s, so the browser's send deadline is 35s.

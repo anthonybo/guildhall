@@ -32,13 +32,15 @@ import { collect } from './data.ts'
 import { historyPage } from './data/history.ts'
 import { claim, finish, release } from './once.ts'
 import { controlAttempt, controlLockedFor, controlReachable } from './controlauth.ts'
-import { ask, askCodex, press as pressKey, readGrid, spawn } from './control.ts'
-import { reach } from './cmuxreach.ts'
+import { MAX_ASK, ask } from './ask.ts'
+import { MAX_UPLOAD, readBytes, saveUpload } from './upload.ts'
+import { askCodex, click, press as pressKey, readGrid, spawn, trustNew } from './control.ts'
+import { reachSoon } from './cmuxreach.ts'
 import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { commands } from './data/commands.ts'
 import { closedSessions } from './data/closed.ts'
-import { spawnable } from './data/projects.ts'
+import { createProject, spawnable } from './data/projects.ts'
 import { usage } from './data/usage.ts'
 import type { Session } from './data.ts'
 
@@ -104,8 +106,8 @@ export type ServeOptions = {
  * 503 rather than 403: nothing about the REQUEST is wrong. The caller is on the right
  * network with the right password, and the server simply cannot carry it out.
  */
-function cmuxRefusal(res: http.ServerResponse): boolean {
-	const r = reach()
+async function cmuxRefusal(res: http.ServerResponse): Promise<boolean> {
+	const r = await reachSoon()
 	if (r.ok) return false
 	send(res, 503, MIME['.json'], JSON.stringify({ error: `${r.why}. ${r.fix}` }))
 	return true
@@ -123,14 +125,18 @@ function sessionOf(req: http.IncomingMessage) {
  *  acceptable here: there is no proxy on a home network or a tailnet. */
 const addressOf = (req: http.IncomingMessage) => req.socket.remoteAddress ?? 'unknown'
 
-/** Read a small request body. Capped: the passcode form needs four bytes and a
- *  prompt needs a few thousand, so 8KB is generous for both and refuses the rest. */
-function readBody(req: http.IncomingMessage): Promise<string> {
+/** Read a small request body. Capped: the passcode form needs four bytes, so 8KB is
+ *  generous for everything except a message, which passes its own cap.
+ *
+ *  A message got 8KB too, and a pasted log is bigger than that. Over the cap the
+ *  connection is cut, which the browser can only report as "could not reach
+ *  guildhall" — with the text handed back, so every retry failed the same way. */
+function readBody(req: http.IncomingMessage, cap = 8192): Promise<string> {
 	return new Promise((resolve) => {
 		let data = ''
 		req.on('data', (c) => {
 			data += c
-			if (data.length > 8192) req.destroy()
+			if (data.length > cap) req.destroy()
 		})
 		req.on('end', () => resolve(data))
 		req.on('error', () => resolve(''))
@@ -325,7 +331,9 @@ export function createServer(opts: ServeOptions) {
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			let body: { id?: string; text?: string; key?: string }
 			try {
-				body = JSON.parse(await readBody(req))
+				// Room for the longest message ask() takes, as JSON: a control character
+				// escapes to six bytes, so that is the worst case, plus the envelope.
+				body = JSON.parse(await readBody(req, MAX_ASK * 6 + 1024))
 			} catch {
 				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
 			}
@@ -388,14 +396,16 @@ export function createServer(opts: ServeOptions) {
 			// attempted and failed. A test caught it.
 			// A cmux pane is about to be driven, so this is where the ability to drive one
 			// belongs — after the target is known to be a cmux session.
-			if (target.agent !== 'codex' && cmuxRefusal(res)) return
-			if (target.agent !== 'codex' && !target.workspace) {
+			// A Codex session IN a cmux pane is typed into like any other — exactly what the
+			// person at the machine would do, and the terminal panel shows it land. Measured
+			// on a scratch Codex pane: 60 to 8,000 characters each arrived once and was
+			// answered. `codex queue` stays for a Codex session with no pane to type into.
+			const queued = target.agent === 'codex' && !target.workspace
+			if (!queued && (await cmuxRefusal(res))) return
+			if (!queued && !target.workspace) {
 				return refuse(404, '{"error":"no such session, or it is not in a cmux tab"}')
 			}
-			const out =
-				target.agent === 'codex'
-					? await askCodex(target.id, String(body.text ?? ''))
-					: await ask(target.workspace!, String(body.text ?? ''))
+			const out = queued ? await askCodex(target.id, String(body.text ?? '')) : await ask({ workspace: target.workspace!, surface: target.surface }, String(body.text ?? ''))
 			// Every send is announced on the machine's own screen. A remote caller
 			// must not be able to act here invisibly.
 			opts.onSend?.(target.proj, String(body.text ?? '').slice(0, 200), out.ok)
@@ -427,15 +437,24 @@ export function createServer(opts: ServeOptions) {
 		if (req.method === 'POST' && url.pathname === '/api/spawn') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (cmuxRefusal(res)) return
+			if (await cmuxRefusal(res)) return
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
-			let body: { dir?: string; resume?: string }
+			let body: { dir?: string; resume?: string; create?: string }
 			try {
 				body = JSON.parse(await readBody(req))
 			} catch {
 				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+			}
+			// `create` makes a new project folder first and starts there. A name, not a
+			// path — see createProject — and the folder it makes then has to pass the same
+			// allowlist as any other, so this adds a way in only for a fresh empty repo.
+			if (body.create !== undefined) {
+				const made = createProject(String(body.create))
+				if (!made.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: made.error }))
+				body.dir = made.dir
+				body.resume = undefined
 			}
 			/**
 			 * `resume` reopens a session you closed instead of starting an empty one.
@@ -447,11 +466,15 @@ export function createServer(opts: ServeOptions) {
 			 */
 			const resume = body.resume ? String(body.resume) : undefined
 			const dir = String(body.dir ?? '')
-			const out = await spawn(dir, resume ? 'reopened' : 'new session', resume)
+			const created = body.create !== undefined
+			const out = await spawn(dir, created ? path.basename(dir) : resume ? 'reopened' : 'new session', resume)
+			// Not awaited: the trust prompt arrives half a minute later, long after this
+			// reply. Only for a folder this request just made — see trustNew.
+			if (out.ok && created) void trustNew(out.text)
 			// Announced on the machine's own screen like a send. Starting a session
 			// remotely is possible; doing it unseen is not.
-			opts.onSend?.(path.basename(dir), resume ? 'reopened a closed session' : 'started a new session', out.ok)
-			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, workspace: out.text } : { error: out.error }))
+			opts.onSend?.(path.basename(dir), created ? 'started a new project' : resume ? 'reopened a closed session' : 'started a new session', out.ok)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, workspace: out.text, dir } : { error: out.error }))
 		}
 
 		/**
@@ -462,10 +485,59 @@ export function createServer(opts: ServeOptions) {
 		 * moment you could do least. Four keys only; see `press` in control.ts for why
 		 * that list is not longer.
 		 */
+		/**
+		 * An image to mention in a message — see upload.ts for why a path is the way in.
+		 *
+		 * Behind exactly the guards of /api/send: putting a file on this machine is
+		 * typing in all but name. The body is the raw image, not JSON or a multipart
+		 * form, so there is nothing to parse but the bytes themselves.
+		 */
+		if (req.method === 'POST' && url.pathname === '/api/upload') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			const waitUp = controlLockedFor(addr)
+			if (waitUp > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitUp / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			const bytes = await readBytes(req)
+			if (!bytes) return send(res, 413, MIME['.json'], `{"error":"image too large, the limit is ${MAX_UPLOAD / 1024 / 1024}MB"}`)
+			const out = saveUpload(bytes)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true, path: out.path } : { error: out.error }))
+		}
+
+		/**
+		 * A tap on one of the OTHER panes of a session's tab — see `click` in control.ts.
+		 *
+		 * The guards of /api/key, and two more. The pane must be one cmux lists in this
+		 * tab, never an id taken on trust; and it must not be the session's own pane. The
+		 * chat is driven by typing and the four keys, and a stray tap while reading it
+		 * should select text, not click whatever the TUI drew under the finger.
+		 */
+		if (req.method === 'POST' && url.pathname === '/api/click') {
+			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+			if (await cmuxRefusal(res)) return
+			const waitClick = controlLockedFor(addr)
+			if (waitClick > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitClick / 1000)}s"}`)
+			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+			let body: { id?: string; pane?: string; row?: number; col?: number }
+			try {
+				body = JSON.parse(await readBody(req))
+			} catch {
+				return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+			}
+			const target = sessions().find((s) => s.id === body.id)
+			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
+			const pane = target.panes?.find((p) => p.surface === body.pane && p.surface !== target.surface)
+			if (!pane) return send(res, 404, MIME['.json'], '{"error":"no such pane beside this session"}')
+			const out = await click({ workspace: target.workspace, surface: pane.surface }, Number(body.row), Number(body.col))
+			opts.onSend?.(target.proj, `clicked in ${pane.title.slice(0, 20)}`, out.ok)
+			return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
+		}
+
 		if (req.method === 'POST' && url.pathname === '/api/key') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (cmuxRefusal(res)) return
+			if (await cmuxRefusal(res)) return
 			const waitKey = controlLockedFor(addr)
 			if (waitKey > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitKey / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -477,7 +549,7 @@ export function createServer(opts: ServeOptions) {
 			}
 			const target = sessions().find((s) => s.id === body.id)
 			if (!target?.workspace) return send(res, 404, MIME['.json'], '{"error":"no such session, or it is not in a cmux tab"}')
-			const out = await pressKey(target.workspace, String(body.key ?? ''))
+			const out = await pressKey({ workspace: target.workspace, surface: target.surface }, String(body.key ?? ''))
 			// Announced like a send. A key that answers a prompt is a decision, and a
 			// decision made from away must still be visible to whoever is here.
 			opts.onSend?.(target.proj, `pressed ${String(body.key ?? '').slice(0, 12)}`, out.ok)
@@ -486,7 +558,7 @@ export function createServer(opts: ServeOptions) {
 
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
 			// nothing else here mutates anything; say so plainly rather than 404ing
-			res.writeHead(405, { allow: 'GET, HEAD, POST /auth, POST /api/send' }).end('read-only')
+			res.writeHead(405, { allow: 'GET, HEAD, POST /auth, POST /api/send, POST /api/upload, POST /api/click' }).end('read-only')
 			return
 		}
 
@@ -546,7 +618,7 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/screen') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (cmuxRefusal(res)) return
+			if (await cmuxRefusal(res)) return
 			const waitCtl = controlLockedFor(addr)
 			if (waitCtl > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitCtl / 1000)}s"}`)
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
@@ -555,7 +627,13 @@ export function createServer(opts: ServeOptions) {
 			// The styled grid, not flattened text: a TUI is colour and position, and
 			// plain text throws both away. cmux hands back JSON already, so this is
 			// passed through rather than re-encoded.
-			const out = await readGrid(target.workspace)
+			// The session's own pane, or another pane of the same tab when asked — only one
+			// cmux listed for this tab, never an id taken on trust. Viewing only: sends and
+			// keys always go to the session's own pane.
+			const asked = url.searchParams.get('pane')
+			const other = asked ? target.panes?.find((p) => p.surface === asked) : undefined
+			if (asked && !other) return send(res, 404, MIME['.json'], '{"error":"no such pane in this tab"}')
+			const out = await readGrid({ workspace: target.workspace, surface: other?.surface ?? target.surface })
 			if (!out.ok) return send(res, 400, MIME['.json'], JSON.stringify({ error: out.error }))
 			// Do not send a screen that has not changed.
 			//
@@ -575,6 +653,13 @@ export function createServer(opts: ServeOptions) {
 			const tag = screenTag(out.text)
 			if (req.headers['if-none-match'] === tag) {
 				res.writeHead(304, { etag: tag, 'cache-control': 'no-store' }).end()
+				return
+			}
+			// Compressed. The grid is JSON that repeats itself — measured, a 51.4KB screen
+			// gzips to 3.8KB in 5ms — and it was going to a phone raw, every two seconds.
+			// That was most of why switching panes or tapping a backlog took seconds to show.
+			if (/\bgzip\b/.test(String(req.headers['accept-encoding'] ?? ''))) {
+				res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag, 'content-encoding': 'gzip', vary: 'accept-encoding' }).end(zlib.gzipSync(out.text, { level: 6 }))
 				return
 			}
 			res.writeHead(200, { 'content-type': MIME['.json'], 'cache-control': 'no-store', etag: tag }).end(out.text)
@@ -639,7 +724,7 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/projects') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (cmuxRefusal(res)) return
+			if (await cmuxRefusal(res)) return
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			return send(res, 200, MIME['.json'], JSON.stringify({ projects: spawnable() }))
 		}
@@ -655,7 +740,7 @@ export function createServer(opts: ServeOptions) {
 		if (url.pathname === '/api/closed') {
 			if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
 			if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
-			if (cmuxRefusal(res)) return
+			if (await cmuxRefusal(res)) return
 			if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 			return send(res, 200, MIME['.json'], JSON.stringify({ closed: closedSessions() }))
 		}

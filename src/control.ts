@@ -42,7 +42,7 @@ const REFUSED = new Set(['y', 'n', 'a', 'd', 'Y', 'N', 'A', 'D', 'Tab', 'Escape'
 
 export type Result = { ok: true; text: string } | { ok: false; error: string }
 
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+export const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 /**
  * Every cmux call goes through cmuxreach, which owns how this process is authorized.
@@ -52,7 +52,49 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * which inherits nothing — so the default installation could read every session and type
  * into none, and reported cmux's own error to a phone.
  */
-const run = (args: string[]): Promise<Result> => runCmux(args, TIMEOUT)
+export const run = (args: string[]): Promise<Result> => runCmux(args, TIMEOUT)
+
+/**
+ * A terminal to drive: the tab, and the pane inside it when that is known.
+ *
+ * The tab alone is not an address once a tab is split. cmux resolves a bare
+ * `workspace_id` to whichever pane is FOCUSED, and a tab holding Claude beside a
+ * second pane — a backlog TUI, as reported on a real project — sent the browser that pane's
+ * screen, and would have typed messages into it. cmux records which pane holds the
+ * agent (see data/cmux.ts), so the pane is named whenever it is known. Measured on a
+ * scratch split: `surface_id` beside `workspace_id` reached the unfocused pane for
+ * both `terminal.input` and `terminal.replay`, and each reply named that surface.
+ */
+export type Pane = { workspace: string; surface?: string }
+
+export const paneOf = (p: string | Pane): Pane => (typeof p === 'string' ? { workspace: p } : p)
+
+/** The cmux parameters naming exactly this terminal, or null if either id is malformed. */
+export function paneParams(p: Pane): { workspace_id: string; surface_id?: string } | null {
+	if (!UUID.test(p.workspace)) return null
+	if (p.surface === undefined) return { workspace_id: p.workspace }
+	return UUID.test(p.surface) ? { workspace_id: p.workspace, surface_id: p.surface } : null
+}
+
+/**
+ * A `terminal.*` call against one pane. When a pane was named, a reply from any other
+ * pane is an error — cmux has ignored a parameter it did not recognise before
+ * (`workspaceId`), and the fallback is always the focused pane.
+ */
+export async function rpcAt(method: string, where: string | Pane, extra: Record<string, unknown> = {}): Promise<Result> {
+	const p = paneOf(where)
+	const params = paneParams(p)
+	if (!params) return { ok: false, error: 'not a workspace id' }
+	const r = await run(['rpc', method, JSON.stringify({ ...params, ...extra })])
+	if (!r.ok || !p.surface) return r
+	let got = ''
+	try {
+		got = String(JSON.parse(r.text).surface_id ?? '')
+	} catch {
+		return { ok: false, error: 'unreadable reply from cmux' }
+	}
+	return got.toUpperCase() === p.surface.toUpperCase() ? r : { ok: false, error: 'cmux answered from a different pane than the session is in' }
+}
 
 /**
  * The terminal as a styled grid: every span with its colour, weight and place.
@@ -73,151 +115,18 @@ const run = (args: string[]): Promise<Result> => runCmux(args, TIMEOUT)
  * project and type into another. Anything added here must assert it got the
  * surface it asked for; see the test.
  */
-export async function readGrid(workspace: string): Promise<Result> {
-	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
-	return run(['rpc', 'terminal.replay', JSON.stringify({ workspace_id: workspace })])
+export async function readGrid(where: string | Pane): Promise<Result> {
+	return rpcAt('terminal.replay', where)
 }
 
 /** What the session's terminal is showing right now, as plain text. */
-export async function readScreen(workspace: string, lines = 120, scrollback = false): Promise<Result> {
-	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
-	const args = ['read-screen', '--workspace', workspace, '--lines', String(Math.max(1, Math.min(2000, lines)))]
+export async function readScreen(where: string | Pane, lines = 120, scrollback = false): Promise<Result> {
+	const p = paneOf(where)
+	if (!paneParams(p)) return { ok: false, error: 'not a workspace id' }
+	const args = ['read-screen', '--workspace', p.workspace, '--lines', String(Math.max(1, Math.min(2000, lines)))]
+	if (p.surface) args.push('--surface', p.surface)
 	if (scrollback) args.push('--scrollback')
 	return run(args)
-}
-
-/**
- * Type `text` into the session and submit it.
- *
- * Text and Enter are one operation on purpose. Exposing them separately would
- * make a bare Enter reachable, and a bare Enter is how you accept whatever
- * prompt happens to be on screen — including a permission request.
- */
-export async function ask(workspace: string, text: string): Promise<Result> {
-	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
-	const body = text.trim()
-	if (!body) return { ok: false, error: 'nothing to send' }
-	// A single line. Newlines inside would submit early and run the remainder as
-	// separate turns, which is not what anyone typing into a box intends.
-	if (/[\r\n]/.test(body)) return { ok: false, error: 'send one line at a time' }
-	if (body.length > 4000) return { ok: false, error: 'too long' }
-	// One call, and the carriage return travels with the text.
-	//
-	// This was `send` followed by a separate `send-key Enter`: two processes, with
-	// a gap of a hundred milliseconds or so in between, and the reported failure was
-	// a message that arrived in Claude Code's prompt and just sat there unsubmitted —
-	// the text landing and the Enter not taking. Intermittent, which is what a race
-	// looks like from the outside. There is no gap to lose it in now.
-	//
-	// `terminal.input` rather than `send` for a second reason, and it is a bug in
-	// its own right: `send` INTERPRETS `\n`, `\r` and `\t` in the text it is given.
-	// Verified against a scratch shell — sending `X\nY` submits `X` and leaves `Y`
-	// behind on the next prompt. So any message containing a literal backslash-n was
-	// being split in half and its remainder run as a separate turn, which is exactly
-	// the failure the guard above is meant to prevent and could not see, because it
-	// looks for real newline characters and this is two ordinary ones. cmux offers no
-	// way to escape it. `terminal.input` takes the text raw and passes it through
-	// unread, so there is nothing to escape.
-	//
-	// Text and Enter are STILL one operation, which is the safety property that
-	// matters: no caller can reach a bare Enter, and a bare Enter is how you accept
-	// whatever prompt happens to be on screen — including a permission request.
-	const typed = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
-	if (!typed.ok) return typed
-	return settled(workspace, body)
-}
-
-/**
- * Did the message actually go in — and if not, put it right.
- *
- * Reported repeatedly as "I have to send everything twice", and every attempt to
- * fix it by reasoning about the mechanism missed, because the mechanism is not
- * reliably reproducible: 26 trials here, idle and busy, atomic and delayed, all
- * passed. Something between a phone and this function drops a send sometimes and
- * I cannot make it happen on demand.
- *
- * So this stops trying to be right about the cause and checks the outcome
- * instead. The screen is the ground truth about whether a message landed, it is
- * already readable, and reading it costs about 150ms — far less than noticing by
- * hand and typing the whole thing again.
- *
- * Two failures are possible and they need opposite repairs, which is why this
- * looks at WHERE the text is rather than just whether it worked:
- *
- *  - Still sitting in the input box. The text arrived, the Enter did not take.
- *    Send another Enter; never re-type, or the message lands twice.
- *  - Nowhere on screen at all. The text never arrived. Re-type it — this is the
- *    case that was observed live, with an empty prompt and the message simply
- *    gone.
- *
- * Anything found in the SCROLLBACK is already submitted and must be left alone.
- * That distinction is the whole reason this reads the input box specifically: a
- * submitted message echoes with the same chevron the prompt uses, and an earlier
- * version of the test harness matched those echoes and called every success a
- * failure.
- *
- * Exported so the repair can be driven against a real session rather than trusted:
- * the dangerous outcome here is a message delivered twice, and that has to be
- * demonstrated not to happen.
- */
-export async function settled(workspace: string, body: string): Promise<Result> {
-	// Compared with whitespace collapsed. The TUI wraps a long message across
-	// several lines, so a raw substring test would miss text that plainly arrived
-	// and then "repair" it by sending it a second time.
-	const flat = (s: string) => s.replace(/\s+/g, ' ').trim()
-	const needle = flat(body).slice(0, 60)
-	let retyped = false
-
-	for (let attempt = 0; attempt < 3; attempt++) {
-		// Long enough for the TUI to redraw. Measured against a real session: a
-		// submitted message clears the box well inside this.
-		await new Promise((r) => setTimeout(r, 250))
-		const seen = await readScreen(workspace, 40)
-		// Cannot see, so cannot judge. Report the send as done rather than repeat it:
-		// a message that arrives twice is worse than one this function is unsure about.
-		if (!seen.ok) return { ok: true, text: '' }
-
-		if (flat(inputBox(seen.text)).includes(needle)) {
-			// Arrived, unsent. Enter only — re-typing here would submit it twice.
-			const again = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: '\r' })])
-			if (!again.ok) return again
-			continue
-		}
-		// Out of the box and somewhere on screen: submitted. Done.
-		if (flat(seen.text).includes(needle)) return { ok: true, text: '' }
-		// Nowhere at all. It never landed — which is the case seen live, with an
-		// empty prompt and the message simply gone. Safe to type again precisely
-		// BECAUSE it is absent: it was sent moments ago, so if it had arrived it
-		// would still be on screen. Once only; a send that vanishes twice is a
-		// failure worth reporting rather than a loop worth running.
-		if (retyped) break
-		retyped = true
-		const resent = await run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: `${body}\r` })])
-		if (!resent.ok) return resent
-	}
-	return { ok: false, error: 'the message would not go in — check the session at the machine before sending it again' }
-}
-
-/**
- * The prompt's input box: the line between the last two rules.
- *
- * Not "does the text appear on screen". A message that submitted successfully is
- * echoed into the scrollback with the same `❯` the prompt draws, so searching the
- * whole screen reports every success as a stuck message.
- */
-export function inputBox(screen: string) {
-	const lines = screen.split('\n')
-	const rules: number[] = []
-	lines.forEach((l, i) => {
-		if (/^\s*─{20,}/.test(l)) rules.push(i)
-	})
-	if (rules.length < 2) return ''
-	const [a, b] = rules.slice(-2)
-	return lines
-		.slice(a + 1, b)
-		.join(' ')
-		.replace(/❯/g, '')
-		.trim()
 }
 
 /**
@@ -247,17 +156,30 @@ export function inputBox(screen: string) {
  * rather than an inference — the distinction that matters in this file, where matching a
  * session to a tab by anything approximate has gone wrong before.
  */
-async function uuidOfRef(ref: string): Promise<string | null> {
-	const listed = await run(['workspace', 'list', '--json'])
-	if (!listed.ok) return null
-	try {
-		const parsed: unknown = JSON.parse(listed.text)
-		const rows = (Array.isArray(parsed) ? parsed : ((parsed as { workspaces?: unknown[] })?.workspaces ?? [])) as { id?: unknown; ref?: unknown }[]
-		const hit = rows.find((w) => w.ref === ref)
-		return typeof hit?.id === 'string' && UUID.test(hit.id) ? hit.id : null
-	} catch {
-		return null
+export async function uuidOfRef(
+	ref: string,
+	list = () => run(['workspace', 'list', '--json']),
+	wait = (ms: number) => new Promise((r) => setTimeout(r, ms)),
+): Promise<string | null> {
+	// ASKED AGAIN until it shows up. cmux answers `workspace create` before the new tab is
+	// in its own list: measured five times in a row, it appeared after 664, 730, 810, 1069
+	// and 1242 ms. One immediate lookup found nothing and reported failure for a tab it
+	// had just made — a new project came up in cmux while the phone said
+	// "cmux did not report which workspace it made". Ten seconds is eight times the worst.
+	for (let t = 0; t < 40; t++) {
+		if (t) await wait(250)
+		const listed = await list()
+		if (!listed.ok) continue
+		try {
+			const parsed: unknown = JSON.parse(listed.text)
+			const rows = (Array.isArray(parsed) ? parsed : ((parsed as { workspaces?: unknown[] })?.workspaces ?? [])) as { id?: unknown; ref?: unknown }[]
+			const hit = rows.find((w) => w.ref === ref)
+			if (hit) return typeof hit.id === 'string' && UUID.test(hit.id) ? hit.id : null
+		} catch {
+			// a half-written reply is as good as no reply: ask again
+		}
 	}
+	return null
 }
 
 export async function spawn(dir: string, title = 'new session', resume?: string): Promise<Result> {
@@ -320,6 +242,40 @@ export async function spawn(dir: string, title = 'new session', resume?: string)
 }
 
 /**
+ * Say yes to "Is this a project you created or one you trust?" — ONLY for a folder
+ * guildhall made itself, a moment ago, empty, because it was asked to.
+ *
+ * Every new folder opens on that prompt, with "No, exit" highlighted. From a phone
+ * the obvious move is ⏎, which closes the session that was just asked for. There is
+ * nothing in a folder created seconds ago to distrust, so this answers it: ▼ to the
+ * yes, read the screen again, and Enter only if the yes is what the caret is on.
+ *
+ * Watched for a minute because `claude` takes 25-30 seconds to draw anything (see
+ * spawn). Stops as soon as the prompt is answered or an input box appears instead.
+ * Measured on a scratch folder: ▼ then Enter on this prompt led to a ready session.
+ */
+export async function trustNew(workspace: string, io = { read: readScreen, press, wait: (ms: number) => new Promise((r) => setTimeout(r, ms)) }) {
+	if (!UUID.test(workspace)) return false
+	const ASKING = /Is this a project you created or one you trust\?/
+	for (let t = 0; t < 30; t++) {
+		await io.wait(2000)
+		const screen = await io.read(workspace, 40)
+		if (!screen.ok) continue
+		if (!ASKING.test(screen.text)) {
+			// A prompt line between rules means the session is past any question.
+			if (/^\s*─{20,}[\s\S]*❯[\s\S]*─{20,}/m.test(screen.text)) return false
+			continue
+		}
+		await io.press(workspace, 'down')
+		await io.wait(300)
+		const moved = await io.read(workspace, 40)
+		if (!moved.ok || !/❯\s*Yes, I trust this folder/.test(moved.text)) return false
+		return (await io.press(workspace, 'enter')).ok
+	}
+	return false
+}
+
+/**
  * The four keys a selection prompt needs, as raw terminal input.
  *
  * Claude Code asks a lot of questions as a list you move a caret through —
@@ -348,11 +304,26 @@ const KEYS: Record<string, string> = {
 	escape: ESC,
 }
 
-export async function press(workspace: string, key: string): Promise<Result> {
-	if (!UUID.test(workspace)) return { ok: false, error: 'not a workspace id' }
+export async function press(where: string | Pane, key: string): Promise<Result> {
+	if (!paneParams(paneOf(where))) return { ok: false, error: 'not a workspace id' }
 	const seq = KEYS[String(key).toLowerCase()]
 	if (!seq) return { ok: false, error: `not an answerable key: ${String(key).slice(0, 20)}` }
-	return run(['rpc', 'terminal.input', JSON.stringify({ workspace_id: workspace, text: seq })])
+	return rpcAt('terminal.input', where, { text: seq })
+}
+
+/**
+ * A left click at a cell of a pane, through cmux's own `terminal.mouse`.
+ *
+ * For the panes BESIDE a session — a backlog TUI that folds and opens items on a
+ * click — which a phone has no other way to drive. cmux encodes the press and release
+ * the way the program asked for, and sends nothing to a program that did not ask:
+ * measured with a scratch program echoing its input, `{row, col}` (from 0) arrived as
+ * `ESC[<0;col+1;row+1M` then `…m`, and the same call into a plain shell typed nothing.
+ * `x`/`y` and `column` were accepted and ignored — cmux does not reject unknown keys.
+ */
+export async function click(where: Pane, row: number, col: number): Promise<Result> {
+	if (!Number.isInteger(row) || !Number.isInteger(col) || row < 0 || col < 0 || row > 999 || col > 999) return { ok: false, error: 'not a cell' }
+	return rpcAt('terminal.mouse', where, { row, col })
 }
 
 /** Exposed for the tests: whether a key would be refused as an approval. */

@@ -17,7 +17,7 @@
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { assignLooks } from './characters.ts'
-import { cmuxMap, tabForTty } from './data/cmux.ts'
+import { cmuxMap, seatFields, tabForTty } from './data/cmux.ts'
 import { KIND, doingText, firstSentence, shortText } from './data/describe.ts'
 import { digest } from './data/digest.ts'
 import { liveSessions } from './data/registry.ts'
@@ -160,6 +160,7 @@ export function collect(codex = false): Session[] {
 			tab: tab?.tab,
 			workspace: tab?.workspace || undefined,
 			unread: !!tab?.unread,
+			...(tab ? seatFields(tab) : {}),
 			toolKind: (d.tool && KIND[d.tool]) || 'think',
 			turns: d.turns ?? 0,
 			agents: agentsLine(d),
@@ -191,11 +192,19 @@ export function collect(codex = false): Session[] {
 	// ran at all and the fix measured as no change.
 	persistLedgers()
 	if (!extra.length) return disambiguate(folded)
-	const withLooks = extra.map((s) => ({
-		...s,
-		palette: looks.get(s.id)?.palette ?? 0,
-		hueShift: looks.get(s.id)?.hueShift ?? 0,
-	}))
+	const withLooks = extra.map((s) => {
+		// cmux records Codex panes the way it records Claude ones — `terminal.agent` with
+		// `kind: "codex"` and the thread id as `sessionId` — so the same map finds the tab.
+		// Measured: the live Codex thread here matched tab 15 by id exactly. With a tab, a
+		// Codex row gets the terminal panel (screen, keys, typing) instead of a queue box.
+		const tab = tabs.get(s.id)
+		return {
+			...s,
+			...(tab ? seatFields(tab) : {}),
+			palette: looks.get(s.id)?.palette ?? 0,
+			hueShift: looks.get(s.id)?.hueShift ?? 0,
+		}
+	})
 	return disambiguate([...folded, ...withLooks])
 }
 
@@ -243,6 +252,8 @@ export function fold(list: Session[], registry: Registry[]): Session[] {
 			job.tab = parked.tab
 			job.workspace = parked.workspace
 			job.unread = parked.unread
+			job.surface = parked.surface
+			job.panes = parked.panes
 			// Say what the tab actually is, because it is two things at once.
 			//
 			// It DRAWS the job's output and it TYPES into the parked terminal, whose own
@@ -287,9 +298,7 @@ export function pairByTty(list: Session[]): Session[] {
 	for (const s of orphans) {
 		const at = tabForTty(ttyOf(s.pid))
 		if (!at) continue
-		s.tab = at.tab
-		s.workspace = at.workspace
-		s.unread = at.unread
+		Object.assign(s, seatFields(at))
 	}
 	return list
 }

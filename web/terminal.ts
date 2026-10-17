@@ -11,8 +11,10 @@
  * you are looking at it, and polling stops dead when the panel closes — which is
  * the behaviour a phone battery wants and a stream would not give.
  */
-import { type Grid, paint } from './grid.ts'
+import { type Grid, cellAt, paint } from './grid.ts'
 import { insertCommand, tap, tapList } from './dom.ts'
+import { attacher } from './attach.ts'
+import { type PaneInfo, onCellTap, paneStrip } from './panes.ts'
 import { openTranscript } from './transcript.ts'
 import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
 
@@ -45,6 +47,37 @@ let wrap = localStorage.getItem(WRAP) !== 'exact'
  */
 let keypad = localStorage.getItem(KEYPAD) === 'on'
 
+/**
+ * What you had typed, per session, kept for the life of the tab.
+ *
+ * Reported as "I keep getting kicked out of the terminal after sending and have to
+ * re-type everything", from a desktop pasting long logs. More than one thing closes
+ * this panel — Esc, a page reload when a new build lands — and every one of them
+ * threw away the box. Rather than bet on which it was, the text now outlives the
+ * panel: reopen the session and it is still there. sessionStorage, like the control
+ * token, so it never outlives the tab and never reaches another device.
+ */
+const DRAFT = 'guildhall.terminal.draft.'
+const draftOf = (id: string) => {
+	try {
+		return sessionStorage.getItem(DRAFT + id) ?? ''
+	} catch {
+		return ''
+	}
+}
+const keepDraft = (id: string | null, text: string) => {
+	if (!id) return
+	try {
+		if (text) sessionStorage.setItem(DRAFT + id, text)
+		else sessionStorage.removeItem(DRAFT + id)
+	} catch {
+		// Full or blocked: the box still works, it just will not survive a close.
+	}
+}
+
+/** The panel that was open, so a reload for a new build can put it back. */
+const OPEN = 'guildhall.terminal.open'
+
 /** The last screen drawn, so an unchanged one is not rebuilt under your selection. */
 let lastSig = ''
 
@@ -75,6 +108,18 @@ function repaintSoon() {
 }
 
 let openId: string | null = null
+/** Which of the tab's OTHER panes is on screen, or null for the session's own. */
+let viewing: string | null = null
+/**
+ * Where to scroll once the pane just switched to is first drawn. The scroll position
+ * belonged to the pane before: leaving the chat at its bottom landed the backlog on
+ * its empty bottom half, and coming back left the chat short of its newest lines.
+ * The chat opens at its end; another pane at its top, where a TUI draws its content.
+ */
+let jump: 'top' | 'bottom' | null = null
+type Seat = { surface?: string; panes?: PaneInfo[] }
+/** Where a session sits, from the live list — so the panel can offer its tab's panes. */
+let seatOf: (id: string) => Seat | undefined = () => undefined
 let openName = ''
 /** The idempotency key for the message currently in the box, if one has been sent. */
 let msgKey: string | null = null
@@ -139,13 +184,13 @@ const token = () => sessionStorage.getItem(KEY) ?? ''
  *  while the panel sat empty. */
 let lastTag = ''
 
-async function api(path: string, init: RequestInit = {}) {
+async function api(path: string, init: RequestInit = {}, deadline = 20_000) {
 	// Every call gets a deadline. A fetch without one never settles — a phone
 	// changing networks or a sleeping laptop leaves the promise pending forever, and
 	// the send path awaits it with the button disabled, so the button stays dead and
 	// pressing it "does nothing" for the rest of the session.
 	try {
-		const res = await fetch(path, { ...init, signal: AbortSignal.timeout(20_000), headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
+		const res = await fetch(path, { ...init, signal: AbortSignal.timeout(deadline), headers: { 'x-guildhall-control': token(), ...(init.headers ?? {}) } })
 		// 304 has no body by definition, and asking for one gets "unreadable reply" —
 		// an error message for the case where everything worked and nothing changed.
 		if (res.status === 304) return { status: 304 }
@@ -215,6 +260,9 @@ function askForToken(why: string) {
 	}
 	go.addEventListener('click', submit)
 	input.addEventListener('keydown', (e) => e.key === 'Enter' && submit())
+	// The message box re-measures around its keyboard and this one did not, so the
+	// panel could stay keyboard-height after it went away — see `ask` below.
+	for (const ev of ['focus', 'blur'] as const) input.addEventListener(ev, settle)
 	wrap.append(h, p, input, go)
 	el.append(wrap)
 	input.focus()
@@ -397,6 +445,7 @@ function chrome(name: string) {
 	input.id = 'ask'
 	input.autocomplete = 'off'
 	input.placeholder = 'Type into this session…'
+	input.value = openId ? draftOf(openId) : ''
 	// The phone keyboard's return key says "send" and submits, instead of "return"
 	// and doing nothing anybody can see.
 	input.enterKeyHint = 'send'
@@ -500,6 +549,7 @@ function chrome(name: string) {
 			// or the next send would be answered with the previous one's result.
 			msgKey = null
 		}
+		keepDraft(openId, input.value)
 		labelWipe()
 		input.focus()
 	})
@@ -507,6 +557,7 @@ function chrome(name: string) {
 	// that was cleared, and offering to put the old one back would destroy the new one.
 	input.addEventListener('input', () => {
 		if (input.value) cleared = null
+		keepDraft(openId, input.value)
 		labelWipe()
 		// Type-ahead, but only while the line IS a command being written. Once there is
 		// a space the argument has started and a list of commands is in the way.
@@ -609,6 +660,7 @@ function chrome(name: string) {
 				// thing added to a request rather than the first.
 				const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name)
 				input.value = value
+				keepDraft(openId, value)
 				msgKey = null
 				closeMenu()
 				input.focus()
@@ -662,7 +714,36 @@ function chrome(name: string) {
 	note.id = 'sendnote'
 	note.hidden = true
 	note.className = 'm-0 shrink-0 border-t border-gold/40 bg-gold/10 px-3 py-2 text-[0.78rem]/[1.4] text-gold'
-	form.append(wipe, slashBtn, input, send)
+	const attach = attacher(
+		(body) => api('/api/upload', { method: 'POST', body, headers: { 'content-type': body.type || 'application/octet-stream' } }) as Promise<{ path?: string; error?: string }>,
+		input,
+		(say) => {
+			note.textContent = say
+			note.hidden = !say
+		},
+		() => {
+			cleared = null
+			msgKey = null
+			keepDraft(openId, input.value)
+			labelWipe()
+		},
+	)
+	// A picture pasted into the box (a desktop browser) or dropped on the row goes the
+	// same way as one picked on a phone. Text pastes are left alone.
+	input.addEventListener('paste', (e) => {
+		const files = [...(e.clipboardData?.files ?? [])]
+		if (!files.some((f) => f.type.startsWith('image/'))) return
+		e.preventDefault()
+		void attach.take(files)
+	})
+	form.addEventListener('dragover', (e) => e.preventDefault())
+	form.addEventListener('drop', (e) => {
+		const files = [...(e.dataTransfer?.files ?? [])]
+		if (!files.length) return
+		e.preventDefault()
+		void attach.take(files)
+	})
+	form.append(wipe, slashBtn, attach.label, input, send)
 
 	/**
 	 * The four keys a prompt needs.
@@ -713,11 +794,12 @@ function chrome(name: string) {
 		})
 		keys.append(b)
 	}
-	el.append(keys)
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault()
 		const text = input.value
-		if (!text.trim() || sending) return
+		if (!text.trim() || sending || !openId) return
+		const sentTo = openId
+		let failed: string | null = null
 		/**
 		 * One key per composed message, reused on every retry.
 		 *
@@ -752,7 +834,9 @@ function chrome(name: string) {
 			// `key` may be null if this browser has no usable randomness. The server
 			// treats an absent key as an ordinary send, which is exactly the behaviour
 			// before this existed — degraded, never broken.
-			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: openId, text, ...(key ? { key } : {}) }) })
+			// 35 seconds, not the usual 20: a long message to a Codex pane is pressed until it
+			// submits, which measured up to 21.4s for 2,900 characters (see settled in ask.ts).
+			r = await api('/api/send', { method: 'POST', body: JSON.stringify({ id: sentTo, text, ...(key ? { key } : {}) }) }, 35_000)
 		} finally {
 			sending = false
 			send.disabled = false
@@ -764,13 +848,16 @@ function chrome(name: string) {
 			// the second send. The key above makes pressing Send again safe, so the
 			// wording can be honest about not knowing rather than guessing wrong.
 			const unknown = r.status === 0
-			pre.textContent = `${unknown ? `${r.error} — it may still have gone through; sending again is safe, it will not arrive twice` : r.error}\n\n${pre.textContent}`
-			input.value = text
+			failed = unknown ? `${r.error} — it may still have gone through; sending again is safe, it will not arrive twice` : r.error
+			// Only if the box is still empty: whatever was typed while this was in the
+			// air is newer than what it would overwrite.
+			if (!input.value) input.value = text
 		} else {
 			// Confirmed. The next message is a new message and gets its own key.
 			msgKey = null
 			// Sent, not cleared: there is nothing to put back, and the button goes away.
 			cleared = null
+			if (draftOf(sentTo) === text) keepDraft(sentTo, '')
 		}
 		labelWipe()
 		// A send that worked but will sit for a while says so, ONCE, above the screen.
@@ -779,8 +866,13 @@ function chrome(name: string) {
 		// terminal text is about to be overwritten by the next poll and this has to
 		// outlive that. The whole failure was a send that looked like nothing happened;
 		// the answer is not a better send, it is telling you what happened to it.
-		note.textContent = r.note ?? ''
-		note.hidden = !r.note
+		//
+		// A failure goes here too. It used to be written into the screen, and the
+		// refresh() just below repaints the screen — so the reason a send failed was
+		// gone before it could be read, and a refused long paste just looked stuck.
+		const say = failed ?? r.note ?? ''
+		note.textContent = say
+		note.hidden = !say
 		refresh()
 		// NOT re-focused. This reply can arrive many seconds after the tap, by which
 		// time the keyboard has usually been dismissed — and focusing an input raises
@@ -791,7 +883,42 @@ function chrome(name: string) {
 		// forced back on them.
 	})
 
-	el.append(bar, pre, note, menu, form)
+	// The rest of a split tab — see panes.ts. A different pane is a different screen, so
+	// the change-guards are reset and it is read now rather than at the next tick.
+	const seat = openId ? seatOf(openId) : undefined
+	const strip = paneStrip(seat?.panes, seat?.surface, (surface) => {
+		viewing = surface
+		jump = surface ? 'top' : 'bottom'
+		lastTag = ''
+		lastSig = ''
+		// Dimmed until the screen asked for is the one drawn (poll() lifts it), so the
+		// chat staying up for a moment reads as loading rather than as being ignored.
+		pre.classList.add('opacity-40')
+		refresh()
+	})
+	// The prompt keys sit directly above the message box, where the thumb already is.
+	// They were appended first, which put them ABOVE the title bar at the very top of
+	// a phone — the farthest point from the box they are used alongside.
+	// A tap on another pane's screen is a click in it — folding a backlog group, opening
+	// an item. Never on the chat: there a tap is for reading and selecting.
+	onCellTap(pre, async (x, y) => {
+		const cell = viewing && openId ? cellAt(pre, x, y) : null
+		if (!cell || !viewing || !openId) return
+		// Shown at once, before anything goes over the network: the row tapped lights up,
+		// so a tap is visibly taken even while the screen catches up. The next repaint
+		// replaces the row and the mark with it.
+		const row = pre.querySelector<HTMLElement>(`[data-row="${cell.row}"]`)
+		if (row) row.style.background = 'rgb(255 214 92 / 22%)'
+		const r = await api('/api/click', { method: 'POST', body: JSON.stringify({ id: openId, pane: viewing, ...cell }) })
+		note.textContent = r.error ?? ''
+		note.hidden = !r.error
+		// Read the result now. The TUI redraws within a moment of the click, and a read
+		// already in flight queues this one rather than dropping it (see refresh).
+		lastTag = ''
+		refresh()
+		setTimeout(refresh, 250)
+	})
+	el.append(...(strip ? [bar, strip] : [bar]), pre, note, menu, keys, form)
 	return { pre, input }
 }
 
@@ -854,11 +981,22 @@ async function sendKey(key: string, pre: HTMLElement) {
 	refresh()
 }
 
+/** A read was asked for while one was in flight: run another as soon as it lands. */
+let again = false
+
 async function refresh() {
-	if (!openId || polling || sending) return
+	if (!openId || sending) return
+	// Queued, not dropped. A refresh asked for mid-read — after switching to another pane,
+	// or after tapping one — used to return here and wait for the next two-second tick,
+	// and the read already in flight was for the OLD screen. Measured as the panel
+	// showing the chat for seconds after Backlog was pressed.
+	if (polling) return void (again = true)
 	polling = true
 	try {
-		await poll()
+		do {
+			again = false
+			await poll()
+		} while (again && openId)
 	} finally {
 		polling = false
 	}
@@ -866,7 +1004,14 @@ async function refresh() {
 
 async function poll() {
 	if (!openId) return
-	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}`, lastTag ? { headers: { 'if-none-match': lastTag } } : {})
+	const want = viewing
+	const pane = want ? `&pane=${encodeURIComponent(want)}` : ''
+	const r = await api(`/api/screen?id=${encodeURIComponent(openId)}${pane}`, lastTag ? { headers: { 'if-none-match': lastTag } } : {})
+	// The pane was switched while this was in the air: it is the wrong screen. Dropped,
+	// and the queued read (see refresh) fetches the right one. Its tag is dropped too, or
+	// the next read would be answered "unchanged" against a screen never shown.
+	if (want !== viewing) return void (lastTag = '')
+	document.getElementById('screen')?.classList.remove('opacity-40')
 	// Nothing has changed, so there is nothing to draw and nothing was sent.
 	if (r.status === 304) return
 	if (r.status === 401) return askForToken('That password was not accepted.')
@@ -874,7 +1019,15 @@ async function poll() {
 	if (r.status === 429) return askForToken('Too many wrong tries — wait a moment.')
 	const pre = document.getElementById('screen')
 	if (!pre) return
-	if (r.error) return void (pre.textContent = r.error)
+	// The tag is forgotten with the screen. Kept, the next read asked "changed since the
+	// last screen?", the answer was a truthful 304, and the error stayed up over a
+	// session that had long since recovered — until the chat was closed and reopened.
+	if (r.error) {
+		lastTag = ''
+		lastSig = ''
+		pre.textContent = r.error
+		return
+	}
 	if (!r.render_grid) return
 	// Repaint only when the screen actually changed.
 	//
@@ -891,12 +1044,24 @@ async function poll() {
 	const btn = document.getElementById('screenmode')
 	const cramped = paint(pre, r.render_grid, el, wrap)
 	if (btn) btn.hidden = !cramped
+	if (jump) {
+		pre.scrollTop = jump === 'top' ? 0 : pre.scrollHeight
+		jump = null
+	}
 }
 
 /** Open the terminal for a session. */
 export function show(id: string, name: string) {
 	openId = id
 	openName = name
+	// Always the chat on opening, whatever was being looked at last time.
+	viewing = null
+	jump = 'bottom'
+	try {
+		sessionStorage.setItem(OPEN, JSON.stringify({ id, name }))
+	} catch {
+		// Not remembered across a reload; nothing else depends on it.
+	}
 	el.hidden = false
 	holdPage()
 	// Sized BEFORE the branch, not after: the password form is full screen too, and
@@ -917,6 +1082,11 @@ export function show(id: string, name: string) {
 export function close() {
 	openId = null
 	lastTag = ''
+	try {
+		sessionStorage.removeItem(OPEN)
+	} catch {
+		// see show()
+	}
 	clearInterval(timer)
 	timer = undefined
 	el.hidden = true
@@ -934,11 +1104,18 @@ export function close() {
 	onClose()
 }
 
-export function mountTerminal(host: HTMLElement, closed: () => void) {
+export function mountTerminal(host: HTMLElement, closed: () => void, seat?: (id: string) => Seat | undefined) {
 	el = host
 	onClose = closed
+	if (seat) seatOf = seat
 	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && openId) close()
+		if (e.key !== 'Escape' || !openId) return
+		// Not while typing into a box with something in it. Esc is what clears or backs
+		// out in a terminal, and Claude Code users press it on reflex; closing the whole
+		// panel on it threw the message away. Empty the box, or click away, then Esc.
+		const t = e.target
+		if ((t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) && t.value) return
+		close()
 	})
 	watch(host, isOpen)
 	// A rotation changes the width the type is sized from, and the grid does not
@@ -983,6 +1160,22 @@ export async function sendTo(id: string, text: string) {
 }
 
 export const isOpen = () => openId !== null
+
+/**
+ * The panel that was open when the page last unloaded, if any.
+ *
+ * The page reloads itself when a new build lands, and does so the moment the box is
+ * empty — which is right after a send. That closed the terminal you were working in,
+ * from your point of view for no reason: "kicked out after sending". Read once.
+ */
+export function wasOpen(): { id: string; name: string } | null {
+	try {
+		const v = JSON.parse(sessionStorage.getItem(OPEN) ?? 'null') as { id?: unknown; name?: unknown } | null
+		return v && typeof v.id === 'string' && typeof v.name === 'string' ? { id: v.id, name: v.name } : null
+	} catch {
+		return null
+	}
+}
 
 /**
  * Whether reloading the page right now would throw away something you cannot get

@@ -13,7 +13,7 @@ import type { Session } from '../src/data/types.ts'
 import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
-import { busy as terminalBusy, mountTerminal, show as showTerminal } from './terminal.ts'
+import { busy as terminalBusy, isOpen as terminalOpen, mountTerminal, show as showTerminal, wasOpen } from './terminal.ts'
 import { transcriptOpen } from './transcript.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
@@ -108,6 +108,9 @@ function paintCounts(list: Session[]) {
  */
 let clientStamp: string | null = null
 
+/** Whether the terminal open before this page loaded has been put back yet. */
+let reopened = false
+
 function apply(data: { sessions: Session[]; at: number; version?: string; update?: string | null; client?: string }) {
 	// Reload when the browser client on disk has been rebuilt.
 	//
@@ -129,6 +132,14 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 		else if (data.client !== clientStamp && !terminalBusy() && !pressOpen() && !newOpen() && !transcriptOpen()) return void location.reload()
 	}
 	sessions = data.sessions
+	// First data after a load: put back the terminal that was open before it, so a
+	// reload for a new build does not throw you out of the session you were in. Only
+	// if it is still there; a stale id would open a panel onto "no such session".
+	if (!reopened) {
+		reopened = true
+		const was = wasOpen()
+		if (was && !terminalOpen() && sessions.some((s) => s.id === was.id && s.workspace)) showTerminal(was.id, was.name)
+	}
 	setRoomSessions(sessions)
 	// same treatment as the terminal: grey when current, and an arrow in the
 	// working colour when something newer exists
@@ -282,7 +293,11 @@ function showRoom() {
 
 /* ── wiring ── */
 
-mountTerminal($<HTMLElement>('#terminal'), () => {})
+mountTerminal(
+	$<HTMLElement>('#terminal'),
+	() => {},
+	(id) => sessions.find((s) => s.id === id),
+)
 // One button in the header opens it, and the panel itself owns closing — it is a
 // full screen on a phone and a drawer on a desktop, so the way out has to be
 // inside it rather than back up in a header you may have scrolled past.
