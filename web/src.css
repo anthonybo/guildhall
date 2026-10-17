@@ -45,6 +45,12 @@
 	--color-ok: #5faf5f;
 	/* the version turns this colour when a newer build exists */
 	--color-newer: #a0eb96;
+	/* Your own messages in the conversation history, and nothing else. A hue no other
+	   thing here uses — gold is the accent everywhere, and the tool tints already
+	   cover blue, cyan, orange, lavender and green — so they can be found by colour
+	   alone when scrolling a long log. The soft one is for their text. */
+	--color-you: #ff79c6;
+	--color-you-soft: #ffc6e6;
 	--font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 

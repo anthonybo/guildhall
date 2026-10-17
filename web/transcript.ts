@@ -33,6 +33,7 @@
 import { ago, rgb, tap } from './dom.ts'
 import { linkParts } from './links.ts'
 import { renderMarkdown } from './mdview.ts'
+import { inserted, typedForm } from './said.ts'
 import { fullScreen, lockPage, unlockPage } from './viewport.ts'
 // The room's own tool palette, not a second one invented here. `TINT` is what paints a
 // workstation screen by what the session is doing — "so the whole room is readable at a
@@ -114,11 +115,20 @@ function toolTint(raw?: string): string {
 /** Prose: what you said, and what came back. */
 function prose(e: Entry): HTMLElement {
 	const row = document.createElement('div')
+	const notice = e.kind === 'text' && e.role === 'user' ? inserted(e.text) : null
+	if (notice !== null) {
+		row.className = 'mt-3 rounded border border-dashed border-line px-2 py-1 text-[0.68rem] text-muted break-words'
+		row.textContent = notice
+		return row
+	}
 	if (e.kind === 'text' && e.role === 'user') {
 		// Your own messages are the landmarks — three of them in ninety-four entries,
-		// and the only way to find your place. So they get a rule down the side and
-		// real space around them rather than one coloured glyph.
-		row.className = 'mt-5 border-l-2 border-gold/60 py-1 pl-2 whitespace-pre-wrap break-words text-gold'
+		// and the only way to find your place. A card of their own: a colour nothing
+		// else uses (see `--color-you`), a thick bar, a frame and a tint, and space
+		// around it. They were gold, which is also every heading, button and highlight
+		// here, so in a long log they did not stand out — reported as exactly that.
+		row.className =
+			'mt-6 mb-2 rounded-md border border-you/35 border-l-4 border-l-you bg-you/10 px-3 py-2 whitespace-pre-wrap break-words text-you-soft shadow-[0_0_0_1px_rgb(255_121_198/8%)]'
 	} else if (e.kind === 'thinking') {
 		row.className = 'mt-3 whitespace-pre-wrap break-words italic'
 		row.style.color = rgb(TINT.think)
@@ -131,14 +141,13 @@ function prose(e: Entry): HTMLElement {
 	// "3h" against one of them is what turns a wall of conversation into somewhere you
 	// can navigate. Putting it on every entry would be noise — the assistant's replies
 	// are all within a minute or two of the message above them.
-	if (e.kind === 'text' && e.role === 'user' && e.at) {
-		const when = Date.parse(e.at)
-		if (Number.isFinite(when)) {
-			const stamp = document.createElement('span')
-			stamp.className = 'mr-2 text-[0.66rem] text-muted'
-			stamp.textContent = ago(Math.max(0, Date.now() - when))
-			row.append(stamp)
-		}
+	if (e.kind === 'text' && e.role === 'user') {
+		// A label line, so the card names itself: "YOU · 3h".
+		const head = document.createElement('div')
+		head.className = 'mb-1 text-[0.64rem] font-bold tracking-[0.12em] text-you'
+		const when = e.at ? Date.parse(e.at) : NaN
+		head.textContent = Number.isFinite(when) ? `YOU · ${ago(Math.max(0, Date.now() - when))}` : 'YOU'
+		row.append(head)
 	}
 	// The assistant's replies carry structure — headings, bullets, code, a closing
 	// summary — and drawing them as one flat colour is what made a TL;DR impossible to
@@ -146,6 +155,7 @@ function prose(e: Entry): HTMLElement {
 	// short, they are already the landmark, and a heading inside one would compete
 	// with that.
 	if (e.role === 'assistant' && e.kind === 'text') row.append(renderMarkdown(e.text))
+	else if (e.role === 'user' && e.kind === 'text') row.append(withLinks(typedForm(e.text)))
 	else row.append(withLinks(e.text))
 	return row
 }
