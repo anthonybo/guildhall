@@ -26,8 +26,10 @@ import { runCmux } from './cmuxreach.ts'
 import { existsSync } from 'node:fs'
 import { spawnAllowed } from './data/projects.ts'
 
-/** Long enough for a busy app, short enough that a hung socket is not a stall. */
-const TIMEOUT = 5000
+/** Long enough for a busy app, short enough that a hung socket is not a stall.
+ *  Settable for the tests that stand a script in for cmux: in the full suite at load 80
+ *  that script measured over 5s just to start, and the key test failed on the clock. */
+const TIMEOUT = Number(process.env.GUILDHALL_CMUX_TIMEOUT) || 5000
 
 /**
  * Keys that would answer a prompt rather than type into one.

@@ -17,6 +17,9 @@ const fake = path.join(dir, 'cmux')
 // Appends its arguments, one call per line, and answers like a successful rpc.
 fs.writeFileSync(fake, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\necho '{}'\n`, { mode: 0o755 })
 process.env.GUILDHALL_CMUX = fake
+// The fake is a shell script, and starting one in a loaded full suite took over the
+// 5s default — measured, the test failed on the clock rather than on the keys.
+process.env.GUILDHALL_CMUX_TIMEOUT = '60000'
 process.env.GUILDHALL_CONFIG_DIR = dir
 
 const { press } = await import('./control.ts')
