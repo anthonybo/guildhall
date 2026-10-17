@@ -586,6 +586,11 @@ Character sprites and the simulation model come from
 `assets/characters/LICENSE-pixel-agents.txt`. The room deviates from it in three
 deliberate ways, each documented at the top of `src/office.ts`.
 
+Pictures in the live terminal come from the
+[image-preview](https://github.com/hedingerm/image-preview) Claude Code plugin by
+Manuel Hedinger (MIT), installed separately; guildhall ships none of its code. See
+[Pictures](#typing-into-a-session-from-somewhere-else).
+
 ## Typing into a session from somewhere else
 
 `"control": true` in the config lets the browser open a session's **real
@@ -611,6 +616,28 @@ end and walks backwards a chunk at a time, about 19ms for the first page.
 
 Rebuilding a scrollback from the screens guildhall already polls was tried and does
 not work; the measurements are in `MISTAKES.md`.
+
+**Pictures.** The history shows every image in the conversation, both the ones Claude
+read and the ones you pasted, straight from the transcript, so they still show after
+their files are gone. They load as you scroll near them, and tapping one opens it full
+size.
+
+The live terminal shows them too, when the session draws them. Claude Code does not
+preview images in the terminal on its own; the
+[image-preview](https://github.com/hedingerm/image-preview) plugin by Manuel Hedinger
+(MIT) does, under every image the Read tool opens, using the kitty graphics protocol
+that cmux's Ghostty speaks:
+
+```
+/plugin marketplace add hedingerm/claude-plugins
+/plugin install image-preview@hedingerm
+```
+
+Then start a new session. cmux hands guildhall only the cells a picture covers, never
+its pixels, so the browser finds the file from the name printed above the picture and
+the path the session's Read was given, and draws that. It serves only an image that
+session itself read. Pasted-image thumbnails and the plugin's `/img` viewer have no file
+behind them, so the browser shows a `[picture]` line in their place.
 
 Text and the Enter that submits it travel in **one** call. They used to be two —
 `send` then `send-key Enter` — and the gap between them was long enough to lose the
