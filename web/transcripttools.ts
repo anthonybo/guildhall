@@ -10,6 +10,27 @@ import { linkParts } from './links.ts'
 import { TINT } from '../src/screens.ts'
 import { KIND } from '../src/data/describe.ts'
 
+/** One thing in the conversation, as the server's history page sends it. */
+export type Entry = {
+	at: string
+	role: 'user' | 'assistant'
+	kind: 'text' | 'thinking' | 'tool' | 'result' | 'image'
+	text: string
+	/** On an image: where to fetch it from — see historyimage.ts. */
+	image?: string
+	/** On your messages: where its line starts in the file, for the "You" list. */
+	line?: number
+	/** On your messages: sent while Claude was working. */
+	queued?: true
+	tool?: string
+	id?: string
+	for?: string
+	error?: true
+	/** The change an edit made: what was removed, and what replaced it. */
+	before?: string
+	after?: string
+}
+
 /** Terminal output is never innerHTML. Links are built as real nodes. */
 export function withLinks(text: string): DocumentFragment {
 	const frag = document.createDocumentFragment()

@@ -35,6 +35,10 @@ export type Entry = {
 	 * `for` was pasted into a message.
 	 */
 	image?: string
+	/** On your messages: the byte offset of the line it is on, for the "You" list. */
+	line?: number
+	/** On your messages: sent while Claude was working, so it arrived queued. */
+	queued?: true
 	/** Present on a tool call: the tool's name, for the `⏺ Update(...)` line. */
 	tool?: string
 	/**
@@ -69,6 +73,74 @@ export type Page = {
 	cursor: number | null
 	/** Total bytes, so a client can show how far back it is. */
 	size: number
+	/**
+	 * On the newest page, and on anything newer: where the last COMPLETE line ends. The
+	 * history asks for what came after it to stay current. Not `size`: a line still being
+	 * written when this was read was skipped, and starting past it would lose it.
+	 */
+	end?: number
+}
+
+/** Just past the last newline at or before `size`; 0 when there is none in reach. */
+function lineEnd(fd: number, size: number): number {
+	let to = size
+	while (to > 0 && size - to < MAX_WALK) {
+		const len = Math.min(CHUNK, to)
+		const buf = Buffer.alloc(len)
+		fs.readSync(fd, buf, 0, len, to - len)
+		const nl = buf.lastIndexOf(10)
+		if (nl !== -1) return to - len + nl + 1
+		to -= len
+	}
+	return 0
+}
+
+/** More than this written since the last look, and the view starts over from the newest
+ *  page rather than being sent all of it — a long absence, or a run of big images. */
+const MAX_AFTER = 8 * 1024 * 1024
+
+/**
+ * What a session has written since `after`, oldest first — how an open history stays
+ * current. The history used to be read once, on opening, so anything said while it was
+ * open never appeared until it was closed and opened again.
+ *
+ * `reset` when there is too much to send, or `after` is past the end (the file was
+ * replaced): the view reloads its newest page instead.
+ */
+export function historyAfter(sessionId: string, after: number): { entries: Entry[]; end: number } | { reset: true } | null {
+	const file = transcriptIndex().get(sessionId)
+	if (!file) return null
+	let fd: number
+	try {
+		fd = fs.openSync(file, 'r')
+	} catch {
+		return null
+	}
+	try {
+		const size = fs.fstatSync(fd).size
+		if (after > size || size - after > MAX_AFTER) return { reset: true }
+		const buf = Buffer.alloc(size - after)
+		fs.readSync(fd, buf, 0, buf.length, after)
+		const entries: Entry[] = []
+		let from = 0
+		for (;;) {
+			const eol = buf.indexOf(10, from)
+			// A line not finished yet waits for the next look.
+			if (eol === -1) break
+			const line = buf.subarray(from, eol).toString('utf8')
+			if (line.trim()) {
+				try {
+					entries.push(...entriesOf(JSON.parse(line), after + from))
+				} catch {
+					// Not JSON even though complete: nothing to show for it.
+				}
+			}
+			from = eol + 1
+		}
+		return { entries, end: after + from }
+	} finally {
+		fs.closeSync(fd)
+	}
 }
 
 /** How much file to pull in one go. A page of conversation is far smaller than this. */
@@ -95,19 +167,45 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … +${
  * Returns several because one assistant turn is commonly a thought, some prose and a
  * tool call, and showing them as one blob loses the shape the terminal gives them.
  */
+/**
+ * The words of something typed: a string, or the text blocks of a message that has no
+ * tool results in it (those are a tool answering, not you). Empty when there are none.
+ */
+export function typedText(content: unknown): string {
+	if (typeof content === 'string') return content.trim()
+	if (!Array.isArray(content)) return ''
+	const blocks = content as { type?: string; text?: string }[]
+	if (blocks.some((b) => b?.type === 'tool_result')) return ''
+	return blocks
+		.filter((b) => b?.type === 'text' && typeof b.text === 'string')
+		.map((b) => b.text!.trim())
+		.filter(Boolean)
+		.join('\n')
+}
+
 export function entriesOf(rec: unknown, line = -1): Entry[] {
 	const r = rec as {
 		type?: string
 		timestamp?: string
 		message?: { role?: string; content?: unknown }
+		attachment?: { type?: string; prompt?: unknown; origin?: { kind?: string } }
+	}
+	// A message you sent while Claude was working. It is stored as an attachment, not a
+	// user turn, so the history skipped every one — measured: 185 in one session, most
+	// of what was typed during long turns.
+	if (r.type === 'attachment' && r.attachment?.type === 'queued_command' && r.attachment.origin?.kind === 'human') {
+		const text = typedText(r.attachment.prompt)
+		return text ? [{ at: r.timestamp ?? '', role: 'user', kind: 'text', text: clip(text, CAP.text), queued: true, ...(line >= 0 ? { line } : {}) }] : []
 	}
 	if (r.type !== 'user' && r.type !== 'assistant') return []
 	const role = r.type
 	const at = typeof r.timestamp === 'string' ? r.timestamp : ''
 	const content = r.message?.content
+	// Where your messages start in the file, so the "You" list can jump to one.
+	const mark = role === 'user' && line >= 0 ? { line } : {}
 	if (typeof content === 'string') {
 		const text = content.trim()
-		return text ? [{ at, role, kind: 'text', text: clip(text, CAP.text) }] : []
+		return text ? [{ at, role, kind: 'text', text: clip(text, CAP.text), ...mark }] : []
 	}
 	if (!Array.isArray(content)) return []
 	const out: Entry[] = []
@@ -131,7 +229,7 @@ export function entriesOf(rec: unknown, line = -1): Entry[] {
 			is_error?: boolean
 		}
 		if (b.type === 'image') picture()
-		else if (b.type === 'text' && b.text?.trim()) out.push({ at, role, kind: 'text', text: clip(b.text.trim(), CAP.text) })
+		else if (b.type === 'text' && b.text?.trim()) out.push({ at, role, kind: 'text', text: clip(b.text.trim(), CAP.text), ...mark })
 		else if (b.type === 'thinking' && b.thinking?.trim()) out.push({ at, role, kind: 'thinking', text: clip(b.thinking.trim(), CAP.thinking) })
 		else if (b.type === 'tool_use') {
 			// The one line the terminal draws for a call: the tool and its subject.
@@ -347,7 +445,7 @@ export function historyPage(sessionId: string, before?: number, want = 60): Page
 		// A cap is safe only if the cursor is moved back to match it, and there is no
 		// need for one — the loop stops at the first chunk that satisfies `want`, so a
 		// page is bounded by the chunk size, not by the record count.
-		return { entries, cursor: cursor > 0 ? cursor : null, size }
+		return { entries, cursor: cursor > 0 ? cursor : null, size, ...(before === undefined ? { end: lineEnd(fd, size) } : {}) }
 	} finally {
 		fs.closeSync(fd)
 	}

@@ -23,7 +23,7 @@ import path from 'node:path'
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-history-'))
 process.env.HOME = HOME
 
-const { historyPage, imageAt } = await import('./history.ts')
+const { historyAfter, historyPage, imageAt } = await import('./history.ts')
 
 const ID = 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb'
 const DIR = path.join(HOME, '.claude', 'projects', '-tmp-guildhall-fixture-orchard')
@@ -298,4 +298,27 @@ test('pictures in the conversation are entries that fetch the exact image, and n
 		assert.equal(imageAt(ID, ref), null, `${JSON.stringify(ref)} was served`)
 	}
 	assert.equal(imageAt('no-such-session', pics[0]!.image!), null)
+})
+
+test('an open history picks up what is written after it, including a line half-written when it looked', () => {
+	// The history used to be read once on opening, so anything said while it was open
+	// never appeared. A line still being written must not be skipped past either: the
+	// view resumes from where the last COMPLETE line ended, not from the file's size.
+	const said = (i: number) => JSON.stringify({ type: 'user', timestamp: '2026-10-17T00:00:00.000Z', message: { role: 'user', content: `TEST-ONLY message ${i}` } })
+	const file = path.join(DIR, `${ID}.jsonl`)
+	fs.mkdirSync(DIR, { recursive: true })
+	const full = said(2)
+	fs.writeFileSync(file, `${said(0)}\n${said(1)}\n${full.slice(0, 20)}`)
+	const page = historyPage(ID)!
+	assert.deepEqual(page.entries.map((e) => e.text), ['TEST-ONLY message 0', 'TEST-ONLY message 1'])
+	// Nothing new yet, and the half line is not offered.
+	assert.deepEqual(historyAfter(ID, page.end!), { entries: [], end: page.end })
+	// It finishes, and another arrives.
+	fs.writeFileSync(file, `${said(0)}\n${said(1)}\n${full}\n${said(3)}\n`)
+	const next = historyAfter(ID, page.end!)
+	assert.ok(next && 'entries' in next)
+	assert.deepEqual(next.entries.map((e) => e.text), ['TEST-ONLY message 2', 'TEST-ONLY message 3'])
+	assert.deepEqual(historyAfter(ID, next.end), { entries: [], end: next.end })
+	// The file replaced by a shorter one: start over rather than read from nowhere.
+	assert.deepEqual(historyAfter(ID, next.end + 10_000), { reset: true })
 })

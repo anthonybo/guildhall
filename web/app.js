@@ -187,10 +187,10 @@ function tapList(el4, run2) {
     run2();
   });
 }
-function insertCommand(text, start2, end, name) {
+function insertCommand(text, start2, end2, name) {
   const piece = `/${name} `;
   const from = Math.max(0, Math.min(start2, text.length));
-  const to = Math.max(from, Math.min(end, text.length));
+  const to = Math.max(from, Math.min(end2, text.length));
   const partial = /(?:^|\s)(\/[^\s]*)$/.exec(text.slice(0, from));
   const cut3 = partial ? from - partial[1].length : from;
   const value = text.slice(0, cut3) + piece + text.slice(to);
@@ -1053,12 +1053,12 @@ function forgetImages() {
   watching = null;
   for (const u of urls.splice(0)) URL.revokeObjectURL(u);
 }
-function historyImage(session, ref, token3, mine) {
+function historyImage(session, ref, token3, mine, caption) {
   const box = document.createElement("div");
   box.className = mine ? "mt-2 mb-2 border-l-4 border-l-you pl-2" : "mt-1 mb-2 ml-4";
   const label = document.createElement("div");
-  label.className = "text-[0.7rem] text-faint";
-  label.textContent = mine ? "you pasted a picture" : "picture";
+  label.className = "mb-1 truncate text-[0.66rem] text-faint";
+  label.textContent = mine ? "you pasted a picture" : `picture from ${caption ?? "a tool"}`;
   box.append(label);
   const host2 = box;
   host2.load = async () => {
@@ -1068,7 +1068,7 @@ function historyImage(session, ref, token3, mine) {
         signal: AbortSignal.timeout(3e4)
       });
       if (!res.ok) {
-        label.textContent = mine ? "you pasted a picture (it could not be read)" : "picture (it could not be read)";
+        label.textContent += " (it could not be read)";
         return;
       }
       const url = URL.createObjectURL(await res.blob());
@@ -1077,15 +1077,15 @@ function historyImage(session, ref, token3, mine) {
       const img = document.createElement("img");
       img.src = url;
       img.alt = label.textContent ?? "picture";
-      img.className = "block h-auto max-h-[70vh] max-w-full rounded border border-line";
+      img.className = `block h-auto max-w-full rounded border border-line ${mine ? "max-h-[70vh]" : "max-h-[40vh]"}`;
       const open3 = document.createElement("a");
       open3.href = url;
       open3.target = "_blank";
       open3.rel = "noopener";
+      open3.className = "inline-block";
       open3.append(img);
-      label.replaceWith(open3);
+      box.append(open3);
     } catch {
-      label.textContent = mine ? "you pasted a picture" : "picture";
       setTimeout(() => watcher?.observe(box), 5e3);
     }
   };
@@ -1137,44 +1137,7 @@ function toolTint(raw) {
   return kind ? rgb(TINT[kind]) : "var(--color-muted)";
 }
 
-// web/transcript.ts
-var MODE = "guildhall.transcript.mode";
-var el = null;
-var body = null;
-var cursor = null;
-var openId = null;
-var openToken = "";
-var loading = false;
-var exhausted = false;
-var mode = localStorage.getItem(MODE) === "all" ? "all" : "talk";
-function prose(e) {
-  const row = document.createElement("div");
-  const notice = e.kind === "text" && e.role === "user" ? inserted(e.text) : null;
-  if (notice !== null) {
-    row.className = "mt-3 rounded border border-dashed border-line px-2 py-1 text-[0.68rem] text-muted break-words";
-    row.textContent = notice;
-    return row;
-  }
-  if (e.kind === "text" && e.role === "user") {
-    row.className = "mt-6 mb-2 rounded-md border border-you/35 border-l-4 border-l-you bg-you/10 px-3 py-2 whitespace-pre-wrap break-words text-you-soft shadow-[0_0_0_1px_rgb(255_121_198/8%)]";
-  } else if (e.kind === "thinking") {
-    row.className = "mt-3 whitespace-pre-wrap break-words italic";
-    row.style.color = rgb(TINT.think);
-  } else {
-    row.className = "mt-3 whitespace-pre-wrap break-words text-label";
-  }
-  if (e.kind === "text" && e.role === "user") {
-    const head = document.createElement("div");
-    head.className = "mb-1 text-[0.64rem] font-bold tracking-[0.12em] text-you";
-    const when = e.at ? Date.parse(e.at) : NaN;
-    head.textContent = Number.isFinite(when) ? `YOU \xB7 ${ago(Math.max(0, Date.now() - when))}` : "YOU";
-    row.append(head);
-  }
-  if (e.role === "assistant" && e.kind === "text") row.append(renderMarkdown(e.text));
-  else if (e.role === "user" && e.kind === "text") row.append(withLinks(typedForm(e.text)));
-  else row.append(withLinks(e.text));
-  return row;
-}
+// web/transcriptsteps.ts
 function step2(call, result) {
   const wrap = document.createElement("div");
   wrap.className = "mt-1";
@@ -1228,7 +1191,7 @@ function step2(call, result) {
   wrap.append(line, out);
   return wrap;
 }
-function run(steps) {
+function run(steps, open3) {
   const wrap = document.createElement("div");
   wrap.className = "mt-3";
   const failed2 = steps.filter((s) => s.result?.error).length;
@@ -1254,25 +1217,171 @@ function run(steps) {
   words.textContent = failed2 ? `${summary} \xB7 ${failed2} failed` : summary;
   if (failed2) words.className = "text-hot";
   toggle.append(caret, dots, words);
-  const set = (open3) => {
-    inner.classList.toggle("hidden", !open3);
-    caret.textContent = open3 ? "\u25BE" : "\u25B8";
-    toggle.setAttribute("aria-expanded", String(open3));
+  const set = (open4) => {
+    inner.classList.toggle("hidden", !open4);
+    caret.textContent = open4 ? "\u25BE" : "\u25B8";
+    toggle.setAttribute("aria-expanded", String(open4));
   };
-  set(mode === "all");
+  set(open3);
   tap(toggle, () => set(inner.classList.contains("hidden")));
   wrap.append(toggle, inner);
   return wrap;
+}
+
+// web/yourmessages.ts
+function since(at) {
+  const t = Date.parse(at);
+  if (!Number.isFinite(t)) return "";
+  const a = ago(Math.max(0, Date.now() - t));
+  return a === "now" ? "just now" : `${a} ago`;
+}
+function yourMessages(host2, list, go) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.title = "Your messages: jump to any of them";
+  button.className = "flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-you/50 bg-transparent px-3 text-[0.72rem] text-you hover:border-you hover:bg-you/10";
+  button.textContent = "You";
+  const sheet = document.createElement("div");
+  sheet.hidden = true;
+  sheet.className = "absolute inset-x-0 top-0 z-10 flex max-h-[75%] flex-col border-b border-you/40 bg-panel shadow-[0_12px_32px_rgb(0_0_0/55%)]";
+  const head = document.createElement("div");
+  head.className = "flex shrink-0 items-center gap-2 px-3 pt-2 pb-1";
+  const title = document.createElement("span");
+  title.className = "min-w-0 flex-1 text-[0.72rem] font-bold tracking-[0.08em] text-you";
+  title.textContent = "YOUR MESSAGES";
+  const shut = document.createElement("button");
+  shut.type = "button";
+  shut.title = "Close the list";
+  shut.className = "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded text-[0.9rem] text-muted hover:text-label";
+  shut.textContent = "\u2715";
+  head.append(title, shut);
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "Find a message\u2026";
+  search.autocomplete = "off";
+  search.className = "mx-3 mb-2 min-h-11 shrink-0 rounded border border-line bg-bg px-2.5 text-[16px] text-label placeholder:text-faint";
+  const rows = document.createElement("div");
+  rows.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-2 pb-2";
+  sheet.append(head, search, rows);
+  host2.append(sheet);
+  let items = [];
+  const note = (text) => {
+    const n = document.createElement("div");
+    n.className = "py-4 text-center text-[0.72rem] text-muted";
+    n.textContent = text;
+    return n;
+  };
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    const shown = [...items].reverse().filter((m) => !q || m.text.toLowerCase().includes(q));
+    const out = [];
+    for (const m of shown.slice(0, 300)) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "mb-1 block w-full cursor-pointer rounded-r border-l-[3px] border-l-you bg-bg/60 px-2.5 py-1.5 text-left hover:bg-you/10 active:bg-you/15";
+      const meta = document.createElement("div");
+      meta.className = "text-[0.64rem] text-you/80";
+      meta.textContent = m.queued ? `${since(m.at)} \xB7 sent while Claude was working` : since(m.at);
+      const what = document.createElement("div");
+      what.className = "line-clamp-2 text-[0.76rem] leading-snug break-words text-you-soft";
+      what.textContent = m.text;
+      row.append(meta, what);
+      tap(row, async () => {
+        meta.textContent = "finding it\u2026";
+        const found = await go(m.line);
+        if (found) close4();
+        else meta.textContent = "could not find it in the history";
+      });
+      out.push(row);
+    }
+    if (!shown.length) out.push(note(items.length ? "nothing matches" : "no messages from you yet"));
+    else if (shown.length > 300) out.push(note(`${shown.length - 300} older \u2014 search to narrow it down`));
+    rows.replaceChildren(...out);
+  };
+  const close4 = () => {
+    sheet.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    search.blur();
+  };
+  const open3 = async () => {
+    sheet.hidden = false;
+    button.setAttribute("aria-expanded", "true");
+    rows.replaceChildren(note("reading\u2026"));
+    const got2 = await list();
+    if (sheet.hidden) return;
+    if (!got2) return void rows.replaceChildren(note("could not read your messages"));
+    items = got2;
+    title.textContent = `YOUR MESSAGES \xB7 ${items.length}`;
+    button.textContent = `You \xB7 ${items.length}`;
+    rows.scrollTop = 0;
+    draw();
+  };
+  tap(button, () => sheet.hidden ? void open3() : close4());
+  tap(shut, close4);
+  search.addEventListener("input", draw);
+  return { button, close: close4 };
+}
+function flash(card) {
+  card.scrollIntoView({ block: "start" });
+  card.classList.add("ring-2", "ring-you");
+  setTimeout(() => card.classList.remove("ring-2", "ring-you"), 1800);
+}
+
+// web/transcript.ts
+var MODE = "guildhall.transcript.mode";
+var el = null;
+var body = null;
+var cursor = null;
+var openId = null;
+var openToken = "";
+var end = null;
+var newestBox = null;
+var liveTimer;
+var cards = /* @__PURE__ */ new Map();
+var loading = false;
+var exhausted = false;
+var mode = localStorage.getItem(MODE) === "all" ? "all" : "talk";
+function prose(e) {
+  const row = document.createElement("div");
+  const notice = e.kind === "text" && e.role === "user" ? inserted(e.text) : null;
+  if (notice !== null) {
+    row.className = "mt-3 rounded border border-dashed border-line px-2 py-1 text-[0.68rem] text-muted break-words";
+    row.textContent = notice;
+    return row;
+  }
+  if (e.kind === "text" && e.role === "user") {
+    row.className = "mt-6 mb-2 rounded-md border border-you/35 border-l-4 border-l-you bg-you/10 px-3 py-2 whitespace-pre-wrap break-words text-you-soft shadow-[0_0_0_1px_rgb(255_121_198/8%)]";
+  } else if (e.kind === "thinking") {
+    row.className = "mt-3 whitespace-pre-wrap break-words italic";
+    row.style.color = rgb(TINT.think);
+  } else {
+    row.className = "mt-3 whitespace-pre-wrap break-words text-label";
+  }
+  if (e.kind === "text" && e.role === "user") {
+    const head = document.createElement("div");
+    head.className = "mb-1 text-[0.64rem] font-bold tracking-[0.12em] text-you";
+    const when = e.at ? Date.parse(e.at) : NaN;
+    head.textContent = Number.isFinite(when) ? `YOU \xB7 ${ago(Math.max(0, Date.now() - when))}` : "YOU";
+    if (e.queued) head.textContent += " \xB7 sent while Claude was working";
+    row.append(head);
+    if (e.line !== void 0) cards.set(e.line, row);
+  }
+  if (e.role === "assistant" && e.kind === "text") row.append(renderMarkdown(e.text));
+  else if (e.role === "user" && e.kind === "text") row.append(withLinks(typedForm(e.text)));
+  else row.append(withLinks(e.text));
+  return row;
 }
 function build(entries) {
   const frag = document.createDocumentFragment();
   const results = /* @__PURE__ */ new Map();
   for (const e of entries) if (e.kind === "result" && e.for) results.set(e.for, e);
   const orphans = entries.filter((e) => e.kind === "result" && !e.for);
+  const calls = /* @__PURE__ */ new Map();
+  for (const e of entries) if (e.kind === "tool" && e.id) calls.set(e.id, e);
   let steps = [];
   let read2 = [];
   const flush = () => {
-    if (steps.length) frag.append(run(steps));
+    if (steps.length) frag.append(run(steps, mode === "all"));
     steps = [];
     frag.append(...read2);
     read2 = [];
@@ -1280,7 +1389,9 @@ function build(entries) {
   for (const e of entries) {
     if (e.kind === "image") {
       if (!openId || !e.image) continue;
-      const pic = historyImage(openId, e.image, openToken, !e.for);
+      const call = e.for ? calls.get(e.for) : void 0;
+      const caption = call ? `${toolName(call.tool ?? "tool")}${call.tool === "Read" && call.text ? ` (${call.text.split("/").pop()})` : ""}` : void 0;
+      const pic = historyImage(openId, e.image, openToken, !e.for, caption);
       if (e.for) read2.push(pic);
       else {
         flush();
@@ -1318,14 +1429,17 @@ async function load(token3, older) {
       body.prepend(topNote(data.error ?? `the server said ${res.status}`));
       return;
     }
-    pages.push(data.entries);
+    if (older) pages.unshift(data.entries);
+    else pages.push(data.entries);
     const before = body.scrollHeight;
-    const frag = build(data.entries);
+    const box = pageBox(data.entries);
     if (older) {
-      body.prepend(frag);
+      body.prepend(box);
       body.scrollTop += body.scrollHeight - before;
     } else {
-      body.append(frag);
+      body.append(box);
+      newestBox = box;
+      end = data.end ?? null;
       body.scrollTop = body.scrollHeight;
     }
     cursor = data.cursor;
@@ -1343,6 +1457,72 @@ async function load(token3, older) {
   if (filled && !exhausted && body && body.scrollHeight - body.clientHeight < 240) void load(token3, true);
 }
 var pages = [];
+function pageBox(entries) {
+  const box = document.createElement("div");
+  box.append(build(entries));
+  return box;
+}
+async function catchUp() {
+  if (!body || !openId || loading || end === null || document.hidden) return;
+  const id = openId;
+  let data;
+  try {
+    const res = await fetch(`/api/transcript?id=${encodeURIComponent(id)}&after=${end}`, {
+      signal: AbortSignal.timeout(15e3),
+      headers: { "x-guildhall-control": openToken }
+    });
+    data = await res.json();
+  } catch {
+    return;
+  }
+  if (openId !== id || !body) return;
+  if (data.reset) {
+    pages = [];
+    end = null;
+    body.replaceChildren();
+    return void load(openToken, false);
+  }
+  if (!data.entries || data.end === void 0) return;
+  end = data.end;
+  if (!data.entries.length || !newestBox) return;
+  const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 80;
+  const newest = pages.at(-1);
+  newest.push(...data.entries);
+  newestBox.replaceChildren(build(newest));
+  if (atBottom) body.scrollTop = body.scrollHeight;
+}
+async function listMine() {
+  if (!openId) return null;
+  try {
+    const res = await fetch(`/api/transcript?id=${encodeURIComponent(openId)}&mine=1`, {
+      signal: AbortSignal.timeout(2e4),
+      headers: { "x-guildhall-control": openToken }
+    });
+    const data = await res.json();
+    return res.ok && data.items ? data.items : null;
+  } catch {
+    return null;
+  }
+}
+async function goTo(line) {
+  const id = openId;
+  for (let guard = 0; guard < 2e3 && openId === id; guard++) {
+    const card = cards.get(line);
+    if (card?.isConnected) {
+      flash(card);
+      return true;
+    }
+    if (exhausted) return false;
+    if (loading) {
+      await new Promise((r) => setTimeout(r, 60));
+      continue;
+    }
+    const before = pages.length;
+    await load(openToken, true);
+    if (pages.length === before && !exhausted) return false;
+  }
+  return false;
+}
 function topNote(text) {
   const n = document.createElement("div");
   n.className = "py-2 text-center text-[0.72rem] text-muted";
@@ -1354,6 +1534,9 @@ function openTranscript(id, name, token3) {
   cursor = null;
   exhausted = false;
   pages = [];
+  end = null;
+  newestBox = null;
+  cards = /* @__PURE__ */ new Map();
   if (!el) {
     el = document.createElement("div");
     el.id = "transcript";
@@ -1382,7 +1565,7 @@ function openTranscript(id, name, token3) {
     labelMode();
     if (!body) return;
     body.replaceChildren();
-    for (const p of pages) body.append(build(p));
+    for (const p of pages) body.append(newestBox = pageBox(p));
     if (exhausted) body.prepend(topNote("the beginning of this conversation"));
     body.scrollTop = body.scrollHeight;
   });
@@ -1400,7 +1583,10 @@ function openTranscript(id, name, token3) {
   tap(x, closeTranscript);
   const tail = document.createElement("div");
   tail.className = "ml-auto flex shrink-0 items-center gap-2";
-  tail.append(modeBtn, x);
+  const stage = document.createElement("div");
+  stage.className = "relative flex min-h-0 flex-1 flex-col";
+  const you = yourMessages(stage, listMine, goTo);
+  tail.append(you.button, modeBtn, x);
   bar3.append(title, tail);
   body = document.createElement("div");
   body.className = "min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 font-mono text-[0.78rem] leading-[1.5]";
@@ -1410,9 +1596,12 @@ function openTranscript(id, name, token3) {
   body.addEventListener("scroll", () => {
     if (body && body.scrollTop < 240) void load(token3, true);
   });
-  el.append(bar3, body);
+  stage.append(body);
+  el.append(bar3, stage);
   body.replaceChildren();
   void load(token3, false);
+  clearInterval(liveTimer);
+  liveTimer = setInterval(() => void catchUp(), 3e3);
   document.addEventListener("keydown", onKey);
 }
 function onKey(e) {
@@ -1420,8 +1609,11 @@ function onKey(e) {
 }
 function closeTranscript() {
   document.removeEventListener("keydown", onKey);
+  clearInterval(liveTimer);
+  liveTimer = void 0;
   openId = null;
   body = null;
+  newestBox = null;
   forgetImages();
   pages = [];
   if (el) {
@@ -1633,9 +1825,9 @@ async function shrink(file) {
 }
 function insertPath(input, path) {
   const at = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? at;
+  const end2 = input.selectionEnd ?? at;
   const before = input.value.slice(0, at);
-  const after = input.value.slice(end);
+  const after = input.value.slice(end2);
   const lead = before && !/\s$/.test(before) ? " " : "";
   const tail = after && /^\s/.test(after) ? "" : " ";
   input.value = before + lead + path + tail + after;

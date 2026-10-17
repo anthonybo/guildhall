@@ -36,24 +36,11 @@ import { inserted, typedForm } from './said.ts'
 import { fullScreen, lockPage, unlockPage } from './viewport.ts'
 import { TINT } from '../src/screens.ts'
 import { forgetImages, historyImage, watchImages } from './historyimage.ts'
-import { toolName, toolTint, withLinks } from './transcripttools.ts'
+import { type Entry, toolName, withLinks } from './transcripttools.ts'
+import { run } from './transcriptsteps.ts'
+import { type Mine, flash, yourMessages } from './yourmessages.ts'
 
-type Entry = {
-	at: string
-	role: 'user' | 'assistant'
-	kind: 'text' | 'thinking' | 'tool' | 'result' | 'image'
-	text: string
-	/** On an image: where to fetch it from — see historyimage.ts. */
-	image?: string
-	tool?: string
-	id?: string
-	for?: string
-	error?: true
-	/** The change an edit made: what was removed, and what replaced it. */
-	before?: string
-	after?: string
-}
-type Page = { entries: Entry[]; cursor: number | null; size: number }
+type Page = { entries: Entry[]; cursor: number | null; size: number; end?: number }
 
 const MODE = 'guildhall.transcript.mode'
 
@@ -63,6 +50,13 @@ let cursor: number | null = null
 let openId: string | null = null
 /** The control password this history was opened with, for fetching its pictures. */
 let openToken = ''
+/** Where the newest complete line ended when last read — what to ask for after. */
+let end: number | null = null
+/** The newest page's container, redrawn in place as the session writes more. */
+let newestBox: HTMLElement | null = null
+let liveTimer: ReturnType<typeof setInterval> | undefined
+/** Each of your message cards, by the byte offset of its line, for the "You" list. */
+let cards = new Map<number, HTMLElement>()
 let loading = false
 let exhausted = false
 /** `talk` is the conversation with tool runs folded; `all` opens every run. */
@@ -103,7 +97,12 @@ function prose(e: Entry): HTMLElement {
 		head.className = 'mb-1 text-[0.64rem] font-bold tracking-[0.12em] text-you'
 		const when = e.at ? Date.parse(e.at) : NaN
 		head.textContent = Number.isFinite(when) ? `YOU · ${ago(Math.max(0, Date.now() - when))}` : 'YOU'
+		// Typed during a long turn, it reached Claude between tool calls rather than as a
+		// turn of its own — worth knowing when reading what came back.
+		if (e.queued) head.textContent += ' · sent while Claude was working'
 		row.append(head)
+		// So the "You" list can jump to it.
+		if (e.line !== undefined) cards.set(e.line, row)
 	}
 	// The assistant's replies carry structure — headings, bullets, code, a closing
 	// summary — and drawing them as one flat colour is what made a TL;DR impossible to
@@ -116,139 +115,6 @@ function prose(e: Entry): HTMLElement {
 	return row
 }
 
-/** One tool call, with its result folded underneath until asked for. */
-function step(call: Entry, result?: Entry): HTMLElement {
-	const wrap = document.createElement('div')
-	wrap.className = 'mt-1'
-	const line = document.createElement('button')
-	line.type = 'button'
-	// A whole-width target. These sit in a list of similar lines on a phone, and a
-	// small one is the difference between opening what you meant and the one below it.
-	// `items-center`, not `items-start`. A 44px target around one line of 12px text
-	// leaves ~24px of slack, and top-aligning the label pushed all of it BELOW the
-	// text — so an opened result appeared to float, detached from the call it belongs
-	// to. Centring splits the slack and the result sits against its line.
-	line.className = 'flex w-full min-h-11 cursor-pointer items-center gap-2 rounded px-1 text-left'
-	// Tinted by what the tool DOES, so a run can be scanned by colour instead of read.
-	// A failure overrides it: something that went wrong is not first a "read" or an
-	// "edit", it is a failure, and it should look like one.
-	line.style.color = result?.error ? 'var(--color-hot)' : toolTint(call.tool)
-	const caret = document.createElement('span')
-	caret.className = 'shrink-0 text-muted'
-	caret.textContent = result || call.before || call.after ? '▸' : '·'
-	const label = document.createElement('span')
-	label.className = 'min-w-0 flex-1 break-words'
-	label.textContent = `${toolName(call.tool ?? 'tool')}${call.text ? `(${call.text})` : ''}`
-	line.append(caret, label)
-
-	const out = document.createElement('div')
-	// Given its own ground and a heavier rule, so it reads as belonging to the line
-	// above rather than as the next item in the list.
-	out.className = 'mt-0.5 hidden rounded-sm border-l-2 bg-bg/60 px-2 py-1.5 text-[0.72rem] text-muted'
-	// The rule carries the call's colour, so an opened output is tied to the line it
-	// came from even when several are open at once.
-	out.style.borderLeftColor = result?.error ? 'var(--color-hot)' : toolTint(call.tool)
-
-	/**
-	 * The change, where there was one.
-	 *
-	 * Opening an edit used to show its RECEIPT — "the file has been updated" — because
-	 * that is what the tool returns. The code is in what was sent, not in what came
-	 * back. Removed above added, red then green, each scrolling rather than wrapping:
-	 * reflowed code is code you cannot trust to read.
-	 */
-	const chunk = (text: string, mark: string, colour: string) => {
-		const box = document.createElement('div')
-		// `whitespace-pre` belongs on the TEXT, not on the box. On the container it also
-		// preserves the whitespace between child elements, which shows up as blank bands
-		// above and below the code the moment anything appends a stray text node.
-		box.className = 'mt-1 overflow-x-auto rounded-sm border-l-2 bg-bg/70 px-2 py-1 text-[0.7rem]'
-		box.style.borderLeftColor = colour
-		box.style.color = colour
-		const tag = document.createElement('div')
-		tag.className = 'text-[0.62rem] tracking-wide opacity-70'
-		tag.textContent = mark
-		const body = document.createElement('div')
-		body.className = 'whitespace-pre text-label'
-		body.textContent = text
-		box.append(tag, body)
-		return box
-	}
-	if (call.before) out.append(chunk(call.before, 'removed', 'var(--color-hot)'))
-	if (call.after) out.append(chunk(call.after, call.before ? 'added' : 'written', 'var(--color-ok)'))
-	if (result) {
-		const said = document.createElement('div')
-		said.className = 'mt-1 whitespace-pre-wrap break-words'
-		said.append(withLinks(result.text || (result.error ? 'failed, with no output' : '')))
-		out.append(said)
-	}
-
-	// Expandable when there is anything to show — the change counts, not just a result.
-	if (result || call.before || call.after) {
-		tap(line, () => {
-			const open = out.classList.toggle('hidden')
-			caret.textContent = open ? '▸' : '▾'
-			line.setAttribute('aria-expanded', String(!open))
-		})
-		line.setAttribute('aria-expanded', 'false')
-	} else {
-		line.disabled = true
-		line.className += ' cursor-default'
-	}
-	wrap.append(line, out)
-	return wrap
-}
-
-/**
- * A run of tool work between two pieces of prose, as one line that opens.
- *
- * The summary has to be worth reading on its own, or it is just a door with nothing
- * written on it: it says how many steps ran and how many failed, so a run you do not
- * need can be skipped without opening it, and a run that went wrong announces itself.
- */
-function run(steps: { call: Entry; result?: Entry }[]): HTMLElement {
-	const wrap = document.createElement('div')
-	wrap.className = 'mt-3'
-	const failed = steps.filter((s) => s.result?.error).length
-	const inner = document.createElement('div')
-	inner.className = 'mt-1 border-l border-line pl-2'
-	for (const s of steps) inner.append(step(s.call, s.result))
-
-	const toggle = document.createElement('button')
-	toggle.type = 'button'
-	toggle.className =
-		'flex min-h-11 w-full cursor-pointer items-center gap-2 rounded border border-line/70 px-2 text-left text-[0.72rem] text-muted hover:border-gold hover:text-gold'
-	const caret = document.createElement('span')
-	// One dot per class of work in the run. A folded run is the common case, so it has
-	// to say something without being opened: four blue dots is a stretch of editing,
-	// orange is commands, and a red one is a failure — legible before the words are.
-	const dots = document.createElement('span')
-	dots.className = 'flex shrink-0 items-center gap-0.5'
-	for (const k of [...new Set(steps.map((s) => (s.result?.error ? 'error' : toolTint(s.call.tool))))]) {
-		const d = document.createElement('span')
-		d.textContent = '\u25cf'
-		d.style.color = k === 'error' ? 'var(--color-hot)' : k
-		dots.append(d)
-	}
-	const words = document.createElement('span')
-	words.className = 'min-w-0 flex-1 truncate'
-	const names = [...new Set(steps.map((s) => toolName(s.call.tool ?? 'tool')))]
-	const summary = `${steps.length} step${steps.length === 1 ? '' : 's'} · ${names.slice(0, 3).join(', ')}${names.length > 3 ? '…' : ''}`
-	words.textContent = failed ? `${summary} · ${failed} failed` : summary
-	if (failed) words.className = 'text-hot'
-	toggle.append(caret, dots, words)
-
-	const set = (open: boolean) => {
-		inner.classList.toggle('hidden', !open)
-		caret.textContent = open ? '▾' : '▸'
-		toggle.setAttribute('aria-expanded', String(open))
-	}
-	set(mode === 'all')
-	tap(toggle, () => set(inner.classList.contains('hidden')))
-	wrap.append(toggle, inner)
-	return wrap
-}
-
 /** Turn a page of entries into rows, folding each stretch of tool work into a run. */
 function build(entries: Entry[]): DocumentFragment {
 	const frag = document.createDocumentFragment()
@@ -257,13 +123,16 @@ function build(entries: Entry[]): DocumentFragment {
 	const results = new Map<string, Entry>()
 	for (const e of entries) if (e.kind === 'result' && e.for) results.set(e.for, e)
 	const orphans = entries.filter((e) => e.kind === 'result' && !e.for)
+	// Which call a picture came back from, for its caption.
+	const calls = new Map<string, Entry>()
+	for (const e of entries) if (e.kind === 'tool' && e.id) calls.set(e.id, e)
 
 	let steps: { call: Entry; result?: Entry }[] = []
 	// Pictures Claude read go under the run of steps that read them, the way the terminal
 	// draws them under the Read; they stay visible when the run is folded.
 	let read: HTMLElement[] = []
 	const flush = () => {
-		if (steps.length) frag.append(run(steps))
+		if (steps.length) frag.append(run(steps, mode === 'all'))
 		steps = []
 		frag.append(...read)
 		read = []
@@ -271,7 +140,9 @@ function build(entries: Entry[]): DocumentFragment {
 	for (const e of entries) {
 		if (e.kind === 'image') {
 			if (!openId || !e.image) continue
-			const pic = historyImage(openId, e.image, openToken, !e.for)
+			const call = e.for ? calls.get(e.for) : undefined
+			const caption = call ? `${toolName(call.tool ?? 'tool')}${call.tool === 'Read' && call.text ? ` (${call.text.split('/').pop()})` : ''}` : undefined
+			const pic = historyImage(openId, e.image, openToken, !e.for, caption)
 			if (e.for) read.push(pic)
 			else {
 				flush()
@@ -316,15 +187,20 @@ async function load(token: string, older: boolean) {
 			body.prepend(topNote(data.error ?? `the server said ${res.status}`))
 			return
 		}
-		pages.push(data.entries)
+		// Oldest first, so a redraw puts them back in order. Older pages were pushed onto
+		// the END, which drew the conversation out of order after switching mode.
+		if (older) pages.unshift(data.entries)
+		else pages.push(data.entries)
 		const before = body.scrollHeight
-		const frag = build(data.entries)
+		const box = pageBox(data.entries)
 		if (older) {
-			body.prepend(frag)
+			body.prepend(box)
 			// Hold the reader's place: the content above them just got taller.
 			body.scrollTop += body.scrollHeight - before
 		} else {
-			body.append(frag)
+			body.append(box)
+			newestBox = box
+			end = data.end ?? null
 			body.scrollTop = body.scrollHeight
 		}
 		cursor = data.cursor
@@ -349,6 +225,95 @@ async function load(token: string, older: boolean) {
 /** Every page fetched, oldest first, so switching mode redraws without refetching. */
 let pages: Entry[][] = []
 
+/** One page's rows in a container of their own, so the newest can be redrawn alone. */
+function pageBox(entries: Entry[]): HTMLElement {
+	const box = document.createElement('div')
+	box.append(build(entries))
+	return box
+}
+
+/**
+ * Bring an open history up to date: what the session wrote since it was last read.
+ *
+ * It used to be read once, on opening, and never again — so a reply that arrived while
+ * it was open was not there until it was closed and opened again. Reported as "doesn't
+ * seem to have the latest chats". The newest page is redrawn whole rather than appended
+ * to, because a tool's result often arrives after its call was drawn, and only a redraw
+ * puts it back under the call it answers.
+ */
+async function catchUp() {
+	if (!body || !openId || loading || end === null || document.hidden) return
+	const id = openId
+	let data: { entries?: Entry[]; end?: number; reset?: true; error?: string }
+	try {
+		const res = await fetch(`/api/transcript?id=${encodeURIComponent(id)}&after=${end}`, {
+			signal: AbortSignal.timeout(15_000),
+			headers: { 'x-guildhall-control': openToken },
+		})
+		data = await res.json()
+	} catch {
+		return // the next tick tries again
+	}
+	if (openId !== id || !body) return
+	if (data.reset) {
+		// Too much since the last look: start over from the newest page.
+		pages = []
+		end = null
+		body.replaceChildren()
+		return void load(openToken, false)
+	}
+	if (!data.entries || data.end === undefined) return
+	end = data.end
+	if (!data.entries.length || !newestBox) return
+	const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 80
+	const newest = pages.at(-1)!
+	newest.push(...data.entries)
+	newestBox.replaceChildren(build(newest))
+	// Follow along only if already at the bottom; someone reading further up stays put.
+	if (atBottom) body.scrollTop = body.scrollHeight
+}
+
+/** Every message you typed in this session, oldest first — see data/mine.ts. */
+async function listMine(): Promise<Mine[] | null> {
+	if (!openId) return null
+	try {
+		const res = await fetch(`/api/transcript?id=${encodeURIComponent(openId)}&mine=1`, {
+			signal: AbortSignal.timeout(20_000),
+			headers: { 'x-guildhall-control': openToken },
+		})
+		const data = (await res.json()) as { items?: Mine[] }
+		return res.ok && data.items ? data.items : null
+	} catch {
+		return null
+	}
+}
+
+/**
+ * Show one of your messages: read further back until its page is loaded, then jump.
+ *
+ * Paging back is what scrolling up does anyway, one page at a time; this just does it
+ * for you. Bounded by the start of the conversation, and by a page that will not load.
+ */
+async function goTo(line: number): Promise<boolean> {
+	const id = openId
+	for (let guard = 0; guard < 2000 && openId === id; guard++) {
+		const card = cards.get(line)
+		if (card?.isConnected) {
+			flash(card)
+			return true
+		}
+		if (exhausted) return false
+		if (loading) {
+			await new Promise((r) => setTimeout(r, 60))
+			continue
+		}
+		const before = pages.length
+		await load(openToken, true)
+		if (pages.length === before && !exhausted) return false
+	}
+	return false
+}
+
 function topNote(text: string): HTMLElement {
 	const n = document.createElement('div')
 	n.className = 'py-2 text-center text-[0.72rem] text-muted'
@@ -362,6 +327,9 @@ export function openTranscript(id: string, name: string, token: string) {
 	cursor = null
 	exhausted = false
 	pages = []
+	end = null
+	newestBox = null
+	cards = new Map()
 	if (!el) {
 		el = document.createElement('div')
 		el.id = 'transcript'
@@ -399,7 +367,7 @@ export function openTranscript(id: string, name: string, token: string) {
 		// scrolled up to.
 		if (!body) return
 		body.replaceChildren()
-		for (const p of pages) body.append(build(p))
+		for (const p of pages) body.append((newestBox = pageBox(p)))
 		if (exhausted) body.prepend(topNote('the beginning of this conversation'))
 		body.scrollTop = body.scrollHeight
 	})
@@ -420,7 +388,11 @@ export function openTranscript(id: string, name: string, token: string) {
 
 	const tail = document.createElement('div')
 	tail.className = 'ml-auto flex shrink-0 items-center gap-2'
-	tail.append(modeBtn, x)
+	// The history and the "You" sheet that slides over it.
+	const stage = document.createElement('div')
+	stage.className = 'relative flex min-h-0 flex-1 flex-col'
+	const you = yourMessages(stage, listMine, goTo)
+	tail.append(you.button, modeBtn, x)
 	bar.append(title, tail)
 
 	body = document.createElement('div')
@@ -433,9 +405,14 @@ export function openTranscript(id: string, name: string, token: string) {
 		if (body && body.scrollTop < 240) void load(token, true)
 	})
 
-	el.append(bar, body)
+	stage.append(body)
+	el.append(bar, stage)
 	body.replaceChildren()
 	void load(token, false)
+	// Every three seconds while open: a reply shows up about as fast as it is written,
+	// and an idle session costs one small read that comes back empty.
+	clearInterval(liveTimer)
+	liveTimer = setInterval(() => void catchUp(), 3000)
 	document.addEventListener('keydown', onKey)
 }
 
@@ -445,8 +422,11 @@ function onKey(e: KeyboardEvent) {
 
 export function closeTranscript() {
 	document.removeEventListener('keydown', onKey)
+	clearInterval(liveTimer)
+	liveTimer = undefined
 	openId = null
 	body = null
+	newestBox = null
 	forgetImages()
 	pages = []
 	if (el) {

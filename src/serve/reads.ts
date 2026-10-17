@@ -11,7 +11,8 @@ import fs from 'node:fs'
 import zlib from 'node:zlib'
 import { controlAttempt, controlLockedFor, controlReachable } from '../controlauth.ts'
 import { readGrid } from '../control.ts'
-import { historyPage, imageAt } from '../data/history.ts'
+import { historyAfter, historyPage, imageAt } from '../data/history.ts'
+import { yourMessages } from '../data/mine.ts'
 import { shownImage } from '../data/shown.ts'
 import { commands } from '../data/commands.ts'
 import { closedSessions } from '../data/closed.ts'
@@ -100,6 +101,21 @@ export async function transcriptRoute(c: Call) {
 	if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
 	const id = url.searchParams.get('id') ?? ''
 	if (!sessions().some((s) => s.id === id)) return send(res, 404, MIME['.json'], '{"error":"no such session"}')
+	// Every message you typed, for the "You" list — see data/mine.ts.
+	if (url.searchParams.get('mine') !== null) {
+		const items = await yourMessages(id)
+		if (!items) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
+		return send(res, 200, MIME['.json'], JSON.stringify({ items }))
+	}
+	// What was written since the view last looked — see historyAfter.
+	const since = url.searchParams.get('after')
+	if (since !== null) {
+		const after = Number(since)
+		if (!Number.isInteger(after) || after < 0) return send(res, 400, MIME['.json'], '{"error":"bad cursor"}')
+		const fresh = historyAfter(id, after)
+		if (!fresh) return send(res, 404, MIME['.json'], '{"error":"no transcript on disk for that session"}')
+		return send(res, 200, MIME['.json'], JSON.stringify(fresh))
+	}
 	const raw = url.searchParams.get('before')
 	// A junk cursor must not become `NaN` and read as "from the end" — that would
 	// silently restart the paging and loop the same page forever.

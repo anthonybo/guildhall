@@ -45,12 +45,14 @@ export function forgetImages() {
  * The element for one picture. `mine` draws it as yours — a pasted image — with the
  * left bar your messages have; a picture Claude read sits under its steps, indented.
  */
-export function historyImage(session: string, ref: string, token: string, mine: boolean): HTMLElement {
+export function historyImage(session: string, ref: string, token: string, mine: boolean, caption?: string): HTMLElement {
 	const box = document.createElement('div')
 	box.className = mine ? 'mt-2 mb-2 border-l-4 border-l-you pl-2' : 'mt-1 mb-2 ml-4'
+	// Says where a picture came from. Without it, a screenshot a tool took of some page
+	// sat in the conversation looking like part of this one — reported as looking bad.
 	const label = document.createElement('div')
-	label.className = 'text-[0.7rem] text-faint'
-	label.textContent = mine ? 'you pasted a picture' : 'picture'
+	label.className = 'mb-1 truncate text-[0.66rem] text-faint'
+	label.textContent = mine ? 'you pasted a picture' : `picture from ${caption ?? 'a tool'}`
 	box.append(label)
 	const host = box as HTMLElement & { load?: () => Promise<void> }
 	host.load = async () => {
@@ -60,7 +62,7 @@ export function historyImage(session: string, ref: string, token: string, mine: 
 				signal: AbortSignal.timeout(30_000),
 			})
 			if (!res.ok) {
-				label.textContent = mine ? 'you pasted a picture (it could not be read)' : 'picture (it could not be read)'
+				label.textContent += ' (it could not be read)'
 				return
 			}
 			const url = URL.createObjectURL(await res.blob())
@@ -70,18 +72,20 @@ export function historyImage(session: string, ref: string, token: string, mine: 
 			const img = document.createElement('img')
 			img.src = url
 			img.alt = label.textContent ?? 'picture'
-			img.className = 'block h-auto max-h-[70vh] max-w-full rounded border border-line'
+			// A tool's picture is smaller than yours: it is evidence of a step, not the
+			// conversation, and full width it dominated the screen.
+			img.className = `block h-auto max-w-full rounded border border-line ${mine ? 'max-h-[70vh]' : 'max-h-[40vh]'}`
 			// Tap for the whole picture, at full size, in its own tab.
 			const open = document.createElement('a')
 			open.href = url
 			open.target = '_blank'
 			open.rel = 'noopener'
+			open.className = 'inline-block'
 			open.append(img)
-			label.replaceWith(open)
+			box.append(open)
 		} catch {
 			// Unreachable for now: watched again after a pause, so it tries again while in
 			// view without retrying in a tight loop.
-			label.textContent = mine ? 'you pasted a picture' : 'picture'
 			setTimeout(() => watcher?.observe(box), 5000)
 		}
 	}
