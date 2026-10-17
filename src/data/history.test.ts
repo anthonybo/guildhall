@@ -29,11 +29,12 @@ const ID = 'aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb'
 const DIR = path.join(HOME, '.claude', 'projects', '-tmp-guildhall-fixture-orchard')
 
 /** `n` turns of invented conversation, each padded so the file crosses chunk boundaries. */
-function write(n: number, pad = 0) {
+function write(n: number, pad: number | ((turn: number) => number) = 0) {
 	fs.mkdirSync(DIR, { recursive: true })
 	const lines: string[] = []
 	for (let i = 0; i < n; i++) {
-		const filler = pad ? ' ' + 'x'.repeat(pad) : ''
+		const width = typeof pad === 'number' ? pad : pad(i)
+		const filler = width ? ' ' + 'x'.repeat(width) : ''
 		lines.push(
 			JSON.stringify({
 				type: 'user',
@@ -105,6 +106,21 @@ test('paging back across chunk boundaries loses nothing and duplicates nothing',
 		assert.match(all[i * 3]!.text, new RegExp(`^question ${i}( |$)`), `turn ${i} question missing or out of order`)
 		assert.match(all[i * 3 + 1]!.text, new RegExp(`^answer ${i}( |$)`), `turn ${i} answer missing or out of order`)
 		assert.equal(all[i * 3 + 2]!.kind, 'tool')
+	}
+})
+
+test('a line longer than a read chunk is read through, not stopped at', () => {
+	// Reported as "why is the history so short": a screenshot in the conversation makes one
+	// line far longer than the 256KB chunk, and paging stalled in front of it for good — the
+	// same cursor back with an empty page, forever. A real 538MB transcript had 485 such
+	// lines and the history ended three screens up. One line here is also bigger than the
+	// 4MB walk limit, which must not wedge the cursor either.
+	const turns = write(60, (i) => (i === 30 ? 5 * 1024 * 1024 : i % 7 === 0 ? 700 * 1024 : 300))
+	const all = readAll()
+	assert.equal(all.length, turns * 3, `expected ${turns * 3} entries, got ${all.length}`)
+	for (let i = 0; i < turns; i++) {
+		assert.match(all[i * 3]!.text, new RegExp(`^question ${i}( |$)`), `turn ${i} question missing or out of order`)
+		assert.match(all[i * 3 + 1]!.text, new RegExp(`^answer ${i}( |$)`), `turn ${i} answer missing or out of order`)
 	}
 })
 

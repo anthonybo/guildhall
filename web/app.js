@@ -1144,6 +1144,7 @@ function build(entries) {
 async function load(token3, older) {
   if (!body || !openId || loading || older && exhausted) return;
   loading = true;
+  let filled = false;
   const note = older ? topNote("reading older\u2026") : null;
   if (note && older) body.prepend(note);
   try {
@@ -1173,12 +1174,14 @@ async function load(token3, older) {
       exhausted = true;
       body.prepend(topNote("the beginning of this conversation"));
     }
+    filled = true;
   } catch {
     note?.remove();
     body.prepend(topNote("could not reach guildhall"));
   } finally {
     loading = false;
   }
+  if (filled && !exhausted && body && body.scrollHeight - body.clientHeight < 240) void load(token3, true);
 }
 var pages = [];
 function topNote(text) {

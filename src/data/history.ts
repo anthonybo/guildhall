@@ -87,7 +87,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … +${
  * Returns several because one assistant turn is commonly a thought, some prose and a
  * tool call, and showing them as one blob loses the shape the terminal gives them.
  */
-function entriesOf(rec: unknown): Entry[] {
+export function entriesOf(rec: unknown): Entry[] {
 	const r = rec as {
 		type?: string
 		timestamp?: string
@@ -184,19 +184,44 @@ export function historyPage(sessionId: string, before?: number, want = 60): Page
 		let end = before === undefined ? size : Math.max(0, Math.min(before, size))
 		const entries: Entry[] = []
 		let walked = 0
-		while (end > 0 && entries.length < want && walked < MAX_WALK) {
+		// The bytes read but not yet parsed: the tail end of a line that began before the
+		// chunk just read. Joined onto the next chunk back, so a line longer than a chunk
+		// is completed rather than lost.
+		//
+		// It used to be dropped. A chunk with no newline in it — any line over 256KB, which
+		// a screenshot in the conversation always is — moved the cursor to the END of the
+		// chunk, which is where it already was. The page came back empty with the same
+		// cursor, every later request asked for the same page, and the history simply
+		// stopped. Measured on a real 538MB transcript with 485 such lines: 78 entries,
+		// then 29, then nothing, from three screens above the bottom.
+		let carry = Buffer.alloc(0)
+		// Two offsets, because carried bytes sit between them: `end` is where the next read
+		// stops, and `cursor` is the start of the oldest line actually parsed — the page
+		// boundary. Using one for both re-read the carried bytes and duplicated them.
+		let cursor = end
+		// Bounded by MAX_WALK only once something has been parsed, so a single line bigger
+		// than the walk is still read through rather than wedging the cursor in front of it.
+		while (end > 0 && entries.length < want && (walked < MAX_WALK || !entries.length)) {
 			const len = Math.min(CHUNK, end)
 			const start = end - len
 			const buf = Buffer.alloc(len)
 			fs.readSync(fd, buf, 0, len, start)
 			walked += len
-			const text = buf.toString('utf8')
-			// The first line is almost certainly cut in half by the chunk boundary, so it
-			// is dropped and the cursor is left pointing at its start — the next page picks
-			// it up whole. Except at offset 0, where nothing precedes it.
-			const nl = text.indexOf('\n')
-			const usable = start === 0 ? text : nl === -1 ? '' : text.slice(nl + 1)
-			const consumed = start === 0 ? 0 : start + (nl === -1 ? len : nl + 1)
+			const joined = carry.length ? Buffer.concat([buf, carry]) : buf
+			// The first line is almost certainly cut in half by the chunk boundary, so it is
+			// kept back for the next chunk and the cursor is left pointing just past it.
+			// Except at offset 0, where nothing precedes it. Searched in bytes, not text: a
+			// newline byte is never part of a multi-byte character, so splitting there
+			// cannot cut one in half the way decoding a raw chunk boundary can.
+			const nl = start === 0 ? -1 : joined.indexOf(10)
+			if (start > 0 && nl === -1) {
+				// No line ends in here: all of it belongs to a line that started further back.
+				carry = joined
+				end = start
+				continue
+			}
+			carry = start === 0 ? Buffer.alloc(0) : joined.subarray(0, nl + 1)
+			const usable = joined.subarray(start === 0 ? 0 : nl + 1).toString('utf8')
 			const page: Entry[] = []
 			for (const line of usable.split('\n')) {
 				if (!line.trim()) continue
@@ -208,7 +233,8 @@ export function historyPage(sessionId: string, before?: number, want = 60): Page
 				}
 			}
 			entries.unshift(...page)
-			end = consumed
+			end = start
+			cursor = start === 0 ? 0 : start + nl + 1
 			if (start === 0) break
 		}
 		// Every entry read is returned, and the cursor is exactly where reading stopped.
@@ -219,7 +245,7 @@ export function historyPage(sessionId: string, before?: number, want = 60): Page
 		// A cap is safe only if the cursor is moved back to match it, and there is no
 		// need for one — the loop stops at the first chunk that satisfies `want`, so a
 		// page is bounded by the chunk size, not by the record count.
-		return { entries, cursor: end > 0 ? end : null, size }
+		return { entries, cursor: cursor > 0 ? cursor : null, size }
 	} finally {
 		fs.closeSync(fd)
 	}

@@ -330,6 +330,7 @@ function build(entries: Entry[]): DocumentFragment {
 async function load(token: string, older: boolean) {
 	if (!body || !openId || loading || (older && exhausted)) return
 	loading = true
+	let filled = false
 	const note = older ? topNote('reading older…') : null
 	if (note && older) body.prepend(note)
 	try {
@@ -360,12 +361,18 @@ async function load(token: string, older: boolean) {
 			exhausted = true
 			body.prepend(topNote('the beginning of this conversation'))
 		}
+		filled = true
 	} catch {
 		note?.remove()
 		body.prepend(topNote('could not reach guildhall'))
 	} finally {
 		loading = false
 	}
+	// Older pages load as you scroll near the top, and a page too short to fill the screen
+	// has nothing to scroll — so the history just ended there, with no sign there was more.
+	// Keep reading back until it overflows. Only after a page that arrived: a failure must
+	// not turn into a retry loop.
+	if (filled && !exhausted && body && body.scrollHeight - body.clientHeight < 240) void load(token, true)
 }
 
 /** Every page fetched, oldest first, so switching mode redraws without refetching. */
