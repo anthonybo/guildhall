@@ -217,6 +217,27 @@ body.stale .sweep::after {
  * its comment says "the commit is its own element so a phone can drop it"; nothing
  * dropped it, and it was 120px of a 338px phone header.
  */
+/*
+ * Nothing of the page shows around a full-screen overlay on a phone.
+ *
+ * The overlay is sized from visualViewport around the keyboard (viewport.ts),
+ * and iOS does not always report the keyboard going away: the password panel was
+ * left at keyboard height with the session list drawn and tappable in the space
+ * below it. Hiding the page means a mis-sized panel shows plain panel color
+ * instead, and a tap there cannot open some other session. `visibility` rather
+ * than `display` so the list keeps its layout and the scroll position restores.
+ * Phone width only: on a desktop these overlays are drawers beside the page.
+ */
+@media (width < 880px) {
+	html.held,
+	html.held body {
+		background: var(--color-panel);
+	}
+	html.held body > :is(#bar, #offline, #room, #list, #empty, #foot) {
+		visibility: hidden;
+	}
+}
+
 #ver.newer {
 	color: var(--color-newer);
 }

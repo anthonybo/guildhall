@@ -88,6 +88,8 @@ export function lockPage(who: string) {
 		s.left = '0'
 		s.right = '0'
 		s.width = '100%'
+		// Hides the page under the overlay on a phone; see `html.held` in src.css.
+		document.documentElement.classList.add('held')
 	}
 	holders.add(who)
 }
@@ -100,6 +102,7 @@ export function unlockPage(who: string) {
 	s.left = ''
 	s.right = ''
 	s.width = ''
+	document.documentElement.classList.remove('held')
 	window.scrollTo(0, savedScroll)
 }
 
