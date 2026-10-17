@@ -123,21 +123,21 @@ var ago = (ms) => {
   const h = Math.round(m / 60);
   return h < 48 ? `${h}h` : `${Math.round(h / 24)}d`;
 };
-function tap(el5, run2) {
+function tap(el4, run2) {
   let actedAt = 0;
   const GESTURE_MS = 700;
   const fire = () => {
     actedAt = Date.now();
     run2();
   };
-  el5.addEventListener("pointerdown", (e) => {
+  el4.addEventListener("pointerdown", (e) => {
     const pe = e;
     if (pe.pointerType !== "touch") return;
     pe.preventDefault();
     eatNextClick();
     fire();
   });
-  el5.addEventListener("click", () => {
+  el4.addEventListener("click", () => {
     if (Date.now() - actedAt < GESTURE_MS) return;
     fire();
   });
@@ -150,10 +150,10 @@ function eatNextClick() {
   addEventListener("click", eat, { capture: true, once: true });
   setTimeout(() => removeEventListener("click", eat, { capture: true }), 400);
 }
-function tapList(el5, run2) {
+function tapList(el4, run2) {
   const SLOP = 12;
   let touched = false;
-  el5.addEventListener(
+  el4.addEventListener(
     "pointerdown",
     (e) => {
       const pe = e;
@@ -179,7 +179,7 @@ function tapList(el5, run2) {
     // NOT cancelled: cancelling is what stops the list scrolling.
     { passive: true }
   );
-  el5.addEventListener("click", () => {
+  el4.addEventListener("click", () => {
     if (touched) {
       touched = false;
       return;
@@ -327,10 +327,10 @@ function step() {
   if (stable >= STEADY || performance.now() > until) return;
   raf = requestAnimationFrame(step);
 }
-function watch(el5, open3) {
-  host = el5;
+function watch(el4, open3) {
+  host = el4;
   showing = open3;
-  el5.addEventListener("pointerdown", measure, { passive: true });
+  el4.addEventListener("pointerdown", measure, { passive: true });
   window.visualViewport?.addEventListener("resize", settle);
   window.visualViewport?.addEventListener("scroll", measure);
 }
@@ -414,7 +414,7 @@ function advanceRatio(host2) {
   ratio = w > 0 ? w / 1e4 : 0.6;
   return ratio;
 }
-function paint(pre, g, panel, wrap2) {
+function paint(pre, g, panel, wrap) {
   const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24;
   const byId = new Map(g.styles.map((st) => [st.id, st]));
   const rows = /* @__PURE__ */ new Map();
@@ -431,7 +431,7 @@ function paint(pre, g, panel, wrap2) {
   const usable = Math.max(200, pre.clientWidth - PAD);
   const exact = Math.min(COMFORTABLE, usable / (g.columns * advance));
   const cramped = exact < READABLE;
-  const reflow = wrap2 && cramped;
+  const reflow = wrap && cramped;
   const size = reflow ? READABLE : Math.max(LEGIBLE, exact);
   pre.style.fontSize = `${size.toFixed(2)}px`;
   pre.style.lineHeight = "1.25";
@@ -508,93 +508,6 @@ function paint(pre, g, panel, wrap2) {
   pre.replaceChildren(...out);
   if (atBottom) pre.scrollTop = pre.scrollHeight;
   return cramped;
-}
-
-// web/attach.ts
-var MAX_SIDE = 2e3;
-var KEEP_BYTES = 15e5;
-async function shrink(file) {
-  const plain = /^image\/(png|jpeg|gif|webp)$/.test(file.type);
-  let img;
-  try {
-    img = await createImageBitmap(file);
-  } catch {
-    return file;
-  }
-  const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
-  if (plain && scale === 1 && file.size <= KEEP_BYTES) {
-    img.close();
-    return file;
-  }
-  const canvas2 = document.createElement("canvas");
-  canvas2.width = Math.round(img.width * scale);
-  canvas2.height = Math.round(img.height * scale);
-  const ctx = canvas2.getContext("2d");
-  if (!ctx) return file;
-  ctx.fillStyle = "#fff";
-  ctx.fillRect(0, 0, canvas2.width, canvas2.height);
-  ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
-  img.close();
-  return new Promise((resolve) => canvas2.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.85));
-}
-function insertPath(input, path) {
-  const at = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? at;
-  const before = input.value.slice(0, at);
-  const after = input.value.slice(end);
-  const lead = before && !/\s$/.test(before) ? " " : "";
-  const tail = after && /^\s/.test(after) ? "" : " ";
-  input.value = before + lead + path + tail + after;
-  const caret = (before + lead + path + tail).length;
-  input.setSelectionRange(caret, caret);
-}
-var CLIP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>';
-function attacher(upload, input, said, changed) {
-  const label = document.createElement("label");
-  label.title = "Attach an image";
-  label.setAttribute("aria-label", "Attach an image");
-  const idle = () => {
-    label.innerHTML = CLIP;
-    label.append(picker);
-    label.className = "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border border-muted/50 bg-transparent text-[16px] text-muted";
-  };
-  const picker = document.createElement("input");
-  picker.type = "file";
-  picker.accept = "image/*";
-  picker.multiple = true;
-  picker.hidden = true;
-  let busy2 = false;
-  async function take(files) {
-    const images = [...files].filter((f) => f.type.startsWith("image/") || f.type === "");
-    if (!images.length || busy2) return;
-    busy2 = true;
-    label.textContent = "\u2026";
-    label.append(picker);
-    let added = 0;
-    let failed2 = "";
-    try {
-      for (const f of images) {
-        const r = await upload(await shrink(f));
-        if (r.path) {
-          insertPath(input, r.path);
-          added++;
-        } else failed2 = r.error ?? "the upload failed";
-      }
-    } finally {
-      busy2 = false;
-      idle();
-    }
-    if (added) changed();
-    const done = added ? `${added === 1 ? "image" : `${added} images`} attached \u2014 finish your message and send` : "";
-    said([done, failed2].filter(Boolean).join("; "));
-  }
-  picker.addEventListener("change", () => {
-    const files = [...picker.files ?? []];
-    picker.value = "";
-    void take(files);
-  });
-  idle();
-  return { label, take };
 }
 
 // web/panes.ts
@@ -930,14 +843,14 @@ function runs(list) {
   return frag;
 }
 function one(b) {
-  const el5 = document.createElement("div");
+  const el4 = document.createElement("div");
   if (b.kind === "code") {
-    el5.className = "mt-2 overflow-x-auto rounded border border-line bg-bg/70 px-2 py-1.5 text-[0.72rem] whitespace-pre text-muted";
-    el5.textContent = b.text;
-    return el5;
+    el4.className = "mt-2 overflow-x-auto rounded border border-line bg-bg/70 px-2 py-1.5 text-[0.72rem] whitespace-pre text-muted";
+    el4.textContent = b.text;
+    return el4;
   }
   if (b.kind === "bullet") {
-    el5.className = "mt-2";
+    el4.className = "mt-2";
     for (const item of b.items) {
       const row = document.createElement("div");
       row.className = "flex gap-2 whitespace-pre-wrap break-words text-label";
@@ -948,26 +861,26 @@ function one(b) {
       body2.className = "min-w-0 flex-1";
       body2.append(runs(item));
       row.append(dot, body2);
-      el5.append(row);
+      el4.append(row);
     }
-    return el5;
+    return el4;
   }
   if (b.kind === "heading") {
-    el5.className = "mt-4 font-bold whitespace-pre-wrap break-words";
-    el5.style.color = rgb(TINT.read);
-    el5.append(runs(b.runs));
-    return el5;
+    el4.className = "mt-4 font-bold whitespace-pre-wrap break-words";
+    el4.style.color = rgb(TINT.read);
+    el4.append(runs(b.runs));
+    return el4;
   }
   if (b.kind === "tldr") {
-    el5.className = "mt-4 rounded-sm border-l-2 border-newer bg-bg/40 px-2 py-1.5 whitespace-pre-wrap break-words text-newer";
+    el4.className = "mt-4 rounded-sm border-l-2 border-newer bg-bg/40 px-2 py-1.5 whitespace-pre-wrap break-words text-newer";
     const tag = document.createElement("span");
     tag.className = "mr-2 text-[0.66rem] font-bold tracking-wide text-newer/80";
     tag.textContent = "TL;DR";
-    el5.append(tag, runs(b.runs));
-    return el5;
+    el4.append(tag, runs(b.runs));
+    return el4;
   }
   if (b.kind === "table") {
-    el5.className = "mt-3 overflow-x-auto overscroll-x-contain rounded border border-muted/25";
+    el4.className = "mt-3 overflow-x-auto overscroll-x-contain rounded border border-muted/25";
     const table = document.createElement("table");
     table.className = "w-max border-collapse text-[0.72rem]";
     const cell = (kind, runsIn, align) => {
@@ -992,17 +905,17 @@ function one(b) {
       tbody.append(tr);
     }
     table.append(thead, tbody);
-    el5.append(table);
-    return el5;
+    el4.append(table);
+    return el4;
   }
   if (b.kind === "quote") {
-    el5.className = "mt-2 border-l-2 border-line pl-2 whitespace-pre-wrap break-words text-muted italic";
-    el5.append(runs(b.runs));
-    return el5;
+    el4.className = "mt-2 border-l-2 border-line pl-2 whitespace-pre-wrap break-words text-muted italic";
+    el4.append(runs(b.runs));
+    return el4;
   }
-  el5.className = "mt-2 whitespace-pre-wrap break-words text-label";
-  el5.append(runs(b.runs));
-  return el5;
+  el4.className = "mt-2 whitespace-pre-wrap break-words text-label";
+  el4.append(runs(b.runs));
+  return el4;
 }
 function renderMarkdown(text) {
   const frag = document.createDocumentFragment();
@@ -1117,8 +1030,8 @@ function prose(e) {
   return row;
 }
 function step2(call, result) {
-  const wrap2 = document.createElement("div");
-  wrap2.className = "mt-1";
+  const wrap = document.createElement("div");
+  wrap.className = "mt-1";
   const line = document.createElement("button");
   line.type = "button";
   line.className = "flex w-full min-h-11 cursor-pointer items-center gap-2 rounded px-1 text-left";
@@ -1166,12 +1079,12 @@ function step2(call, result) {
     line.disabled = true;
     line.className += " cursor-default";
   }
-  wrap2.append(line, out);
-  return wrap2;
+  wrap.append(line, out);
+  return wrap;
 }
 function run(steps) {
-  const wrap2 = document.createElement("div");
-  wrap2.className = "mt-3";
+  const wrap = document.createElement("div");
+  wrap.className = "mt-3";
   const failed2 = steps.filter((s) => s.result?.error).length;
   const inner = document.createElement("div");
   inner.className = "mt-1 border-l border-line pl-2";
@@ -1202,8 +1115,8 @@ function run(steps) {
   };
   set(mode === "all");
   tap(toggle, () => set(inner.classList.contains("hidden")));
-  wrap2.append(toggle, inner);
-  return wrap2;
+  wrap.append(toggle, inner);
+  return wrap;
 }
 function build(entries) {
   const frag = document.createDocumentFragment();
@@ -1354,12 +1267,40 @@ function closeTranscript() {
 }
 var transcriptOpen = () => openId !== null;
 
-// web/terminal.ts
+// web/termstate.ts
 var KEY = "guildhall.control";
 var WRAP = "guildhall.terminal.wrap";
 var KEYPAD = "guildhall.terminal.keys";
-var wrap = localStorage.getItem(WRAP) !== "exact";
-var keypad = localStorage.getItem(KEYPAD) === "on";
+var OPEN = "guildhall.terminal.open";
+var term = {
+  wrap: localStorage.getItem(WRAP) !== "exact",
+  keypad: localStorage.getItem(KEYPAD) === "on",
+  lastSig: "",
+  lastTag: "",
+  openId: null,
+  viewing: null,
+  jump: null,
+  seatOf: () => void 0,
+  openName: "",
+  msgKey: null,
+  slash: [],
+  timer: void 0,
+  // set by mountTerminal before anything can open the panel
+  el: void 0,
+  onClose: () => {
+  },
+  polling: false,
+  sending: false,
+  again: false
+};
+var saveWrap = () => localStorage.setItem(WRAP, term.wrap ? "wrap" : "exact");
+var saveKeypad = () => localStorage.setItem(KEYPAD, term.keypad ? "on" : "off");
+var hooks = {
+  show: (_id, _name) => {
+  },
+  close: () => {
+  }
+};
 var DRAFT = "guildhall.terminal.draft.";
 var draftOf = (id) => {
   try {
@@ -1376,19 +1317,10 @@ var keepDraft = (id, text) => {
   } catch {
   }
 };
-var OPEN = "guildhall.terminal.open";
-var lastSig = "";
 function repaintSoon() {
-  lastSig = "";
-  lastTag = "";
+  term.lastSig = "";
+  term.lastTag = "";
 }
-var openId2 = null;
-var viewing = null;
-var jump = null;
-var seatOf = () => void 0;
-var openName = "";
-var msgKey = null;
-var slash = [];
 function newKey() {
   try {
     const b = new Uint8Array(16);
@@ -1402,21 +1334,12 @@ function newKey() {
     }
   }
 }
-var timer;
-var el2;
-var onClose = () => {
-};
-function holdPage() {
-  if (fullScreen()) lockPage("terminal");
-  else unlockPage("terminal");
-}
 var token = () => sessionStorage.getItem(KEY) ?? "";
-var lastTag = "";
 async function api(path, init = {}, deadline = 2e4) {
   try {
     const res = await fetch(path, { ...init, signal: AbortSignal.timeout(deadline), headers: { "x-guildhall-control": token(), ...init.headers ?? {} } });
     if (res.status === 304) return { status: 304 };
-    lastTag = res.headers.get("etag") ?? lastTag;
+    term.lastTag = res.headers.get("etag") ?? term.lastTag;
     const body2 = await res.json().catch(() => ({ error: "unreadable reply" }));
     return { status: res.status, ...body2 };
   } catch (e) {
@@ -1424,15 +1347,284 @@ async function api(path, init = {}, deadline = 2e4) {
     return { status: 0, error: timedOut ? "the machine did not answer in time" : "could not reach guildhall" };
   }
 }
+
+// web/termbar.ts
+function titleBar(name, subtitle) {
+  const bar3 = document.createElement("div");
+  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "shrink-0 text-[0.72rem] text-faint";
+  live2.textContent = subtitle;
+  const x = document.createElement("button");
+  x.type = "button";
+  x.textContent = "\u2715 Close";
+  x.title = "Close the terminal (Esc)";
+  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, () => hooks.close());
+  bar3.append(title, live2, x);
+  return bar3;
+}
+function screenBar(name, refresh3) {
+  const bar3 = document.createElement("div");
+  bar3.id = "screenbar";
+  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
+  const title = document.createElement("span");
+  title.className = "min-w-0 flex-1 truncate font-bold text-label";
+  title.textContent = name;
+  const live2 = document.createElement("span");
+  live2.className = "hidden shrink-0 text-[0.72rem] text-faint min-[480px]:inline";
+  live2.textContent = "live terminal";
+  const mode2 = document.createElement("button");
+  mode2.type = "button";
+  mode2.id = "screenmode";
+  mode2.hidden = true;
+  mode2.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+  const label = () => {
+    mode2.textContent = term.wrap ? "Wrapped" : "Exact";
+    mode2.title = term.wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
+  };
+  label();
+  mode2.addEventListener("click", () => {
+    term.wrap = !term.wrap;
+    saveWrap();
+    label();
+    repaintSoon();
+    refresh3();
+  });
+  const x = document.createElement("button");
+  x.type = "button";
+  const xMark = document.createElement("span");
+  xMark.textContent = "\u2715";
+  const xWord = document.createElement("span");
+  xWord.className = "hidden min-[400px]:inline";
+  xWord.textContent = "Close";
+  x.append(xMark, xWord);
+  x.setAttribute("aria-label", "Close the terminal");
+  x.title = "Close the terminal (Esc)";
+  x.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
+  tap(x, () => hooks.close());
+  const keysBtn = document.createElement("button");
+  keysBtn.type = "button";
+  keysBtn.id = "keystoggle";
+  const labelKeys = () => {
+    keysBtn.textContent = "\u2328";
+    keysBtn.title = term.keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
+    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${term.keypad ? "border-gold text-gold" : "border-line text-muted"}`;
+  };
+  labelKeys();
+  tap(keysBtn, () => {
+    term.keypad = !term.keypad;
+    saveKeypad();
+    labelKeys();
+    const row = document.getElementById("promptkeys");
+    if (row) row.hidden = !term.keypad;
+  });
+  const logBtn = document.createElement("button");
+  logBtn.type = "button";
+  logBtn.id = "transcripttoggle";
+  logBtn.textContent = "\u2630";
+  logBtn.title = "Read the conversation history \u2014 the terminal itself keeps no scrollback";
+  logBtn.setAttribute("aria-label", "Read the conversation history");
+  logBtn.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-line bg-transparent px-2 text-[0.95rem] text-muted";
+  tap(logBtn, () => {
+    if (term.openId) openTranscript(term.openId, term.openName, token());
+  });
+  const tail = document.createElement("div");
+  tail.className = "ml-auto flex shrink-0 items-center gap-2";
+  tail.append(mode2, logBtn, keysBtn, x);
+  bar3.append(title, live2, tail);
+  return bar3;
+}
+
+// web/attach.ts
+var MAX_SIDE = 2e3;
+var KEEP_BYTES = 15e5;
+async function shrink(file) {
+  const plain = /^image\/(png|jpeg|gif|webp)$/.test(file.type);
+  let img;
+  try {
+    img = await createImageBitmap(file);
+  } catch {
+    return file;
+  }
+  const scale = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+  if (plain && scale === 1 && file.size <= KEEP_BYTES) {
+    img.close();
+    return file;
+  }
+  const canvas2 = document.createElement("canvas");
+  canvas2.width = Math.round(img.width * scale);
+  canvas2.height = Math.round(img.height * scale);
+  const ctx = canvas2.getContext("2d");
+  if (!ctx) return file;
+  ctx.fillStyle = "#fff";
+  ctx.fillRect(0, 0, canvas2.width, canvas2.height);
+  ctx.drawImage(img, 0, 0, canvas2.width, canvas2.height);
+  img.close();
+  return new Promise((resolve) => canvas2.toBlob((b) => resolve(b ?? file), "image/jpeg", 0.85));
+}
+function insertPath(input, path) {
+  const at = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? at;
+  const before = input.value.slice(0, at);
+  const after = input.value.slice(end);
+  const lead = before && !/\s$/.test(before) ? " " : "";
+  const tail = after && /^\s/.test(after) ? "" : " ";
+  input.value = before + lead + path + tail + after;
+  const caret = (before + lead + path + tail).length;
+  input.setSelectionRange(caret, caret);
+}
+var CLIP = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5l-8.6 8.6a5.5 5.5 0 0 1-7.8-7.8l8.6-8.6a3.7 3.7 0 0 1 5.2 5.2l-8.6 8.6a1.8 1.8 0 0 1-2.6-2.6l7.9-7.9"/></svg>';
+function attacher(upload, input, said, changed) {
+  const label = document.createElement("label");
+  label.title = "Attach an image";
+  label.setAttribute("aria-label", "Attach an image");
+  const idle = () => {
+    label.innerHTML = CLIP;
+    label.append(picker);
+    label.className = "flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border border-muted/50 bg-transparent text-[16px] text-muted";
+  };
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = "image/*";
+  picker.multiple = true;
+  picker.hidden = true;
+  let busy2 = false;
+  async function take(files) {
+    const images = [...files].filter((f) => f.type.startsWith("image/") || f.type === "");
+    if (!images.length || busy2) return;
+    busy2 = true;
+    label.textContent = "\u2026";
+    label.append(picker);
+    let added = 0;
+    let failed2 = "";
+    try {
+      for (const f of images) {
+        const r = await upload(await shrink(f));
+        if (r.path) {
+          insertPath(input, r.path);
+          added++;
+        } else failed2 = r.error ?? "the upload failed";
+      }
+    } finally {
+      busy2 = false;
+      idle();
+    }
+    if (added) changed();
+    const done = added ? `${added === 1 ? "image" : `${added} images`} attached \u2014 finish your message and send` : "";
+    said([done, failed2].filter(Boolean).join("; "));
+  }
+  picker.addEventListener("change", () => {
+    const files = [...picker.files ?? []];
+    picker.value = "";
+    void take(files);
+  });
+  idle();
+  return { label, take };
+}
+
+// web/slashmenu.ts
+function slashMenu(input) {
+  const menu = document.createElement("div");
+  menu.hidden = true;
+  menu.className = "flex max-h-[60%] min-h-0 flex-col border-t border-line bg-panel";
+  const find = document.createElement("input");
+  find.type = "search";
+  find.autocomplete = "off";
+  find.placeholder = "Search commands\u2026";
+  find.className = "m-2 min-h-11 shrink-0 rounded border border-muted/50 bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
+  find.addEventListener("input", () => paintMenu(find.value.replace(/^\//, "")));
+  const count = document.createElement("div");
+  count.className = "shrink-0 px-3 pb-1 text-[0.62rem] tracking-wide text-muted";
+  const list = document.createElement("div");
+  list.className = "min-h-0 flex-1 overflow-y-auto overscroll-contain";
+  const paintMenu = (filter) => {
+    const slash = term.slash;
+    const q = filter.toLowerCase();
+    const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
+    list.replaceChildren();
+    count.textContent = slash.length ? hits.length === slash.length ? `${slash.length} commands` : `${hits.length} of ${slash.length}` : "";
+    if (!hits.length) {
+      const empty = document.createElement("div");
+      empty.className = "px-3 py-2 text-[0.72rem] text-muted";
+      empty.textContent = slash.length ? `nothing matching "${filter}"` : "no commands found on this machine";
+      list.append(empty);
+      return;
+    }
+    for (const c of hits) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "flex min-h-11 w-full cursor-pointer flex-col justify-center border-b border-line/60 px-3 py-1 text-left";
+      const name = document.createElement("span");
+      name.className = "text-[0.8rem] font-bold text-gold";
+      name.textContent = `/${c.name}`;
+      row.append(name);
+      if (c.description) {
+        const desc = document.createElement("span");
+        desc.className = "truncate text-[0.68rem] text-muted";
+        desc.textContent = c.description;
+        row.append(desc);
+      }
+      tapList(row, () => {
+        const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name);
+        input.value = value;
+        keepDraft(term.openId, value);
+        term.msgKey = null;
+        closeMenu();
+        input.focus();
+        input.setSelectionRange(caret, caret);
+      });
+      list.append(row);
+    }
+  };
+  menu.append(find, count, list);
+  const closeMenu = () => {
+    menu.hidden = true;
+    labelSlash();
+  };
+  const openMenu = async (focusSearch = false) => {
+    menu.hidden = false;
+    labelSlash();
+    if (!term.slash.length) {
+      const r = await api(`/api/commands${term.openId ? `?id=${encodeURIComponent(term.openId)}` : ""}`);
+      term.slash = Array.isArray(r.commands) ? r.commands : [];
+    }
+    const seed = input.value.startsWith("/") ? input.value.slice(1).split(" ")[0] ?? "" : "";
+    if (focusSearch) {
+      find.value = seed;
+      find.focus();
+    }
+    paintMenu(focusSearch ? seed : find.value || seed);
+  };
+  const slashBtn = document.createElement("button");
+  slashBtn.type = "button";
+  slashBtn.textContent = "/";
+  function labelSlash() {
+    const open3 = !menu.hidden;
+    slashBtn.title = open3 ? "Hide the commands" : "Pick a slash command";
+    slashBtn.setAttribute("aria-label", "Pick a slash command");
+    slashBtn.setAttribute("aria-expanded", String(open3));
+    slashBtn.className = `flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border bg-transparent text-[16px] font-bold ${open3 ? "border-gold text-gold" : "border-muted/50 text-muted"}`;
+  }
+  labelSlash();
+  tap(slashBtn, () => menu.hidden ? void openMenu(true) : closeMenu());
+  return { menu, slashBtn, openMenu, closeMenu };
+}
+
+// web/termpass.ts
 function askForToken(why) {
-  clearInterval(timer);
-  timer = void 0;
-  el2.innerHTML = "";
-  el2.style.maxWidth = "";
-  el2.style.marginInline = "";
-  el2.append(titleBar(openName, "password needed"));
-  const wrap2 = document.createElement("div");
-  wrap2.className = "p-4";
+  const el4 = term.el;
+  clearInterval(term.timer);
+  term.timer = void 0;
+  el4.innerHTML = "";
+  el4.style.maxWidth = "";
+  el4.style.marginInline = "";
+  el4.append(titleBar(term.openName, "password needed"));
+  const wrap = document.createElement("div");
+  wrap.className = "p-4";
   const h = document.createElement("p");
   h.className = "mt-0 mb-2 text-label";
   h.textContent = "Control password";
@@ -1451,114 +1643,84 @@ function askForToken(why) {
   go.className = "mt-2 cursor-pointer rounded border border-gold bg-gold px-3 py-1.5 font-bold text-bg";
   const submit = () => {
     sessionStorage.setItem(KEY, input.value.trim());
-    if (openId2) show(openId2, openName);
+    if (term.openId) hooks.show(term.openId, term.openName);
   };
   go.addEventListener("click", submit);
   input.addEventListener("keydown", (e) => e.key === "Enter" && submit());
   for (const ev of ["focus", "blur"]) input.addEventListener(ev, settle);
-  wrap2.append(h, p, input, go);
-  el2.append(wrap2);
+  wrap.append(h, p, input, go);
+  el4.append(wrap);
   input.focus();
 }
-function titleBar(name, subtitle) {
-  const bar3 = document.createElement("div");
-  bar3.className = "flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "truncate font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "shrink-0 text-[0.72rem] text-faint";
-  live2.textContent = subtitle;
-  const x = document.createElement("button");
-  x.type = "button";
-  x.textContent = "\u2715 Close";
-  x.title = "Close the terminal (Esc)";
-  x.className = "ml-auto flex min-h-11 shrink-0 cursor-pointer items-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  bar3.append(title, live2, x);
-  return bar3;
+
+// web/termpoll.ts
+async function sendKey(key, pre) {
+  if (!term.openId) return;
+  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: term.openId, key }) });
+  if (r.error) {
+    pre.textContent = `${r.error}
+
+${pre.textContent}`;
+    return;
+  }
+  await new Promise((r2) => setTimeout(r2, 120));
+  for (let i = 0; term.polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
+  refresh();
 }
-function chrome(name) {
-  el2.innerHTML = "";
-  const bar3 = document.createElement("div");
-  bar3.id = "screenbar";
-  bar3.className = "flex items-center gap-2 border-b border-line bg-panel px-3 py-2";
-  const title = document.createElement("span");
-  title.className = "min-w-0 flex-1 truncate font-bold text-label";
-  title.textContent = name;
-  const live2 = document.createElement("span");
-  live2.className = "hidden shrink-0 text-[0.72rem] text-faint min-[480px]:inline";
-  live2.textContent = "live terminal";
-  const mode2 = document.createElement("button");
-  mode2.type = "button";
-  mode2.id = "screenmode";
-  mode2.hidden = true;
-  mode2.className = "flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
-  const label = () => {
-    mode2.textContent = wrap ? "Wrapped" : "Exact";
-    mode2.title = wrap ? "Lines are reflowed to fit. Tap for the true grid." : "The true grid, scrolled sideways. Tap to reflow it to fit.";
-  };
-  label();
-  mode2.addEventListener("click", () => {
-    wrap = !wrap;
-    localStorage.setItem(WRAP, wrap ? "wrap" : "exact");
-    label();
-    repaintSoon();
-    refresh();
-  });
-  const x = document.createElement("button");
-  x.type = "button";
-  const xMark = document.createElement("span");
-  xMark.textContent = "\u2715";
-  const xWord = document.createElement("span");
-  xWord.className = "hidden min-[400px]:inline";
-  xWord.textContent = "Close";
-  x.append(xMark, xWord);
-  x.setAttribute("aria-label", "Close the terminal");
-  x.title = "Close the terminal (Esc)";
-  x.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
-  tap(x, close);
-  const keysBtn = document.createElement("button");
-  keysBtn.type = "button";
-  keysBtn.id = "keystoggle";
-  const labelKeys = () => {
-    keysBtn.textContent = "\u2328";
-    keysBtn.title = keypad ? "Hide the prompt keys" : "Show arrows and enter, for answering a prompt";
-    keysBtn.className = `flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border bg-transparent px-2 text-[0.95rem] ${keypad ? "border-gold text-gold" : "border-line text-muted"}`;
-  };
-  labelKeys();
-  tap(keysBtn, () => {
-    keypad = !keypad;
-    localStorage.setItem(KEYPAD, keypad ? "on" : "off");
-    labelKeys();
-    const row = document.getElementById("promptkeys");
-    if (row) row.hidden = !keypad;
-  });
-  const logBtn = document.createElement("button");
-  logBtn.type = "button";
-  logBtn.id = "transcripttoggle";
-  logBtn.textContent = "\u2630";
-  logBtn.title = "Read the conversation history \u2014 the terminal itself keeps no scrollback";
-  logBtn.setAttribute("aria-label", "Read the conversation history");
-  logBtn.className = "flex min-h-11 min-w-11 cursor-pointer items-center justify-center rounded border border-line bg-transparent px-2 text-[0.95rem] text-muted";
-  tap(logBtn, () => {
-    if (openId2) openTranscript(openId2, openName, token());
-  });
-  const tail = document.createElement("div");
-  tail.className = "ml-auto flex shrink-0 items-center gap-2";
-  tail.append(mode2, logBtn, keysBtn, x);
-  bar3.append(title, live2, tail);
-  const pre = document.createElement("pre");
-  pre.id = "screen";
-  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
-  pre.textContent = "reading\u2026";
+async function refresh() {
+  if (!term.openId || term.sending) return;
+  if (term.polling) return void (term.again = true);
+  term.polling = true;
+  try {
+    do {
+      term.again = false;
+      await poll();
+    } while (term.again && term.openId);
+  } finally {
+    term.polling = false;
+  }
+}
+async function poll() {
+  if (!term.openId) return;
+  const want = term.viewing;
+  const pane = want ? `&pane=${encodeURIComponent(want)}` : "";
+  const r = await api(`/api/screen?id=${encodeURIComponent(term.openId)}${pane}`, term.lastTag ? { headers: { "if-none-match": term.lastTag } } : {});
+  if (want !== term.viewing) return void (term.lastTag = "");
+  document.getElementById("screen")?.classList.remove("opacity-40");
+  if (r.status === 304) return;
+  if (r.status === 401) return askForToken("That password was not accepted.");
+  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
+  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
+  const pre = document.getElementById("screen");
+  if (!pre) return;
+  if (r.error) {
+    term.lastTag = "";
+    term.lastSig = "";
+    pre.textContent = r.error;
+    return;
+  }
+  if (!r.render_grid) return;
+  const sig = JSON.stringify(r.render_grid.row_spans);
+  if (sig === term.lastSig && pre.childElementCount) return;
+  term.lastSig = sig;
+  const btn = document.getElementById("screenmode");
+  const cramped = paint(pre, r.render_grid, term.el, term.wrap);
+  if (btn) btn.hidden = !cramped;
+  if (term.jump) {
+    pre.scrollTop = term.jump === "top" ? 0 : pre.scrollHeight;
+    term.jump = null;
+  }
+}
+
+// web/termform.ts
+function messageForm(pre) {
   const form = document.createElement("form");
   form.className = "flex gap-2 border-t border-line p-2";
   const input = document.createElement("input");
   input.id = "ask";
   input.autocomplete = "off";
   input.placeholder = "Type into this session\u2026";
-  input.value = openId2 ? draftOf(openId2) : "";
+  input.value = term.openId ? draftOf(term.openId) : "";
   input.enterKeyHint = "send";
   input.addEventListener("keydown", (e) => {
     if (e.key !== "Enter" || e.shiftKey || e.isComposing) return;
@@ -1591,103 +1753,22 @@ function chrome(name) {
       if (!input.value) return;
       cleared = input.value;
       input.value = "";
-      msgKey = null;
+      term.msgKey = null;
     }
-    keepDraft(openId2, input.value);
+    keepDraft(term.openId, input.value);
     labelWipe();
     input.focus();
   });
+  const { menu, slashBtn, openMenu, closeMenu } = slashMenu(input);
   input.addEventListener("input", () => {
     if (input.value) cleared = null;
-    keepDraft(openId2, input.value);
+    keepDraft(term.openId, input.value);
     labelWipe();
     const typing = /^\/[^\s]*$/.test(input.value);
     if (typing) void openMenu();
     else if (!menu.hidden) closeMenu();
   });
   labelWipe();
-  const menu = document.createElement("div");
-  menu.hidden = true;
-  menu.className = "flex max-h-[60%] min-h-0 flex-col border-t border-line bg-panel";
-  const find = document.createElement("input");
-  find.type = "search";
-  find.autocomplete = "off";
-  find.placeholder = "Search commands\u2026";
-  find.className = "m-2 min-h-11 shrink-0 rounded border border-muted/50 bg-bg px-2.5 py-2 font-mono text-[16px] text-label";
-  find.addEventListener("input", () => paintMenu(find.value.replace(/^\//, "")));
-  const count = document.createElement("div");
-  count.className = "shrink-0 px-3 pb-1 text-[0.62rem] tracking-wide text-muted";
-  const list = document.createElement("div");
-  list.className = "min-h-0 flex-1 overflow-y-auto overscroll-contain";
-  const paintMenu = (filter) => {
-    const q = filter.toLowerCase();
-    const hits = slash.filter((c) => c.name.toLowerCase().includes(q)).slice(0, 40);
-    list.replaceChildren();
-    count.textContent = slash.length ? hits.length === slash.length ? `${slash.length} commands` : `${hits.length} of ${slash.length}` : "";
-    if (!hits.length) {
-      const empty = document.createElement("div");
-      empty.className = "px-3 py-2 text-[0.72rem] text-muted";
-      empty.textContent = slash.length ? `nothing matching "${filter}"` : "no commands found on this machine";
-      list.append(empty);
-      return;
-    }
-    for (const c of hits) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "flex min-h-11 w-full cursor-pointer flex-col justify-center border-b border-line/60 px-3 py-1 text-left";
-      const name2 = document.createElement("span");
-      name2.className = "text-[0.8rem] font-bold text-gold";
-      name2.textContent = `/${c.name}`;
-      row.append(name2);
-      if (c.description) {
-        const desc = document.createElement("span");
-        desc.className = "truncate text-[0.68rem] text-muted";
-        desc.textContent = c.description;
-        row.append(desc);
-      }
-      tapList(row, () => {
-        const { value, caret } = insertCommand(input.value, input.selectionStart ?? input.value.length, input.selectionEnd ?? input.value.length, c.name);
-        input.value = value;
-        keepDraft(openId2, value);
-        msgKey = null;
-        closeMenu();
-        input.focus();
-        input.setSelectionRange(caret, caret);
-      });
-      list.append(row);
-    }
-  };
-  menu.append(find, count, list);
-  const closeMenu = () => {
-    menu.hidden = true;
-    labelSlash();
-  };
-  const openMenu = async (focusSearch = false) => {
-    menu.hidden = false;
-    labelSlash();
-    if (!slash.length) {
-      const r = await api(`/api/commands${openId2 ? `?id=${encodeURIComponent(openId2)}` : ""}`);
-      slash = Array.isArray(r.commands) ? r.commands : [];
-    }
-    const seed = input.value.startsWith("/") ? input.value.slice(1).split(" ")[0] ?? "" : "";
-    if (focusSearch) {
-      find.value = seed;
-      find.focus();
-    }
-    paintMenu(focusSearch ? seed : find.value || seed);
-  };
-  const slashBtn = document.createElement("button");
-  slashBtn.type = "button";
-  slashBtn.textContent = "/";
-  function labelSlash() {
-    const open3 = !menu.hidden;
-    slashBtn.title = open3 ? "Hide the commands" : "Pick a slash command";
-    slashBtn.setAttribute("aria-label", "Pick a slash command");
-    slashBtn.setAttribute("aria-expanded", String(open3));
-    slashBtn.className = `flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center rounded border bg-transparent text-[16px] font-bold ${open3 ? "border-gold text-gold" : "border-muted/50 text-muted"}`;
-  }
-  labelSlash();
-  tap(slashBtn, () => menu.hidden ? void openMenu(true) : closeMenu());
   const note = document.createElement("p");
   note.id = "sendnote";
   note.hidden = true;
@@ -1701,8 +1782,8 @@ function chrome(name) {
     },
     () => {
       cleared = null;
-      msgKey = null;
-      keepDraft(openId2, input.value);
+      term.msgKey = null;
+      keepDraft(term.openId, input.value);
       labelWipe();
     }
   );
@@ -1722,13 +1803,13 @@ function chrome(name) {
   form.append(wipe, slashBtn, attach.label, input, send);
   const keys = document.createElement("div");
   keys.id = "promptkeys";
-  keys.hidden = !keypad;
+  keys.hidden = !term.keypad;
   keys.className = "flex shrink-0 items-center gap-2 border-t border-line px-2 py-2";
   const hint = document.createElement("span");
   hint.className = "mr-auto text-[0.72rem] text-faint";
   hint.textContent = "answer a prompt";
   keys.append(hint);
-  for (const [label2, key, title2] of [
+  for (const [label, key, title] of [
     ["\u25B2", "up", "Move up the list"],
     ["\u25BC", "down", "Move down the list"],
     ["\u23CE", "enter", "Choose the highlighted option"],
@@ -1736,8 +1817,8 @@ function chrome(name) {
   ]) {
     const b = document.createElement("button");
     b.type = "button";
-    b.title = title2;
-    b.textContent = label2;
+    b.title = title;
+    b.textContent = label;
     b.className = "min-h-11 min-w-11 cursor-pointer rounded border border-line bg-transparent px-3 text-[0.9rem] text-label active:border-gold active:text-gold";
     tap(b, () => {
       if (key === "enter" && input.value.trim()) return void form.requestSubmit();
@@ -1748,20 +1829,20 @@ function chrome(name) {
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const text = input.value;
-    if (!text.trim() || sending || !openId2) return;
-    const sentTo = openId2;
+    if (!text.trim() || term.sending || !term.openId) return;
+    const sentTo = term.openId;
     let failed2 = null;
-    if (!msgKey) msgKey = newKey();
-    const key = msgKey;
+    if (!term.msgKey) term.msgKey = newKey();
+    const key = term.msgKey;
     input.value = "";
-    sending = true;
+    term.sending = true;
     send.disabled = true;
     send.textContent = "Sending\u2026";
     let r;
     try {
       r = await api("/api/send", { method: "POST", body: JSON.stringify({ id: sentTo, text, ...key ? { key } : {} }) }, 35e3);
     } finally {
-      sending = false;
+      term.sending = false;
       send.disabled = false;
       send.textContent = "Send";
     }
@@ -1770,7 +1851,7 @@ function chrome(name) {
       failed2 = unknown ? `${r.error} \u2014 it may still have gone through; sending again is safe, it will not arrive twice` : r.error;
       if (!input.value) input.value = text;
     } else {
-      msgKey = null;
+      term.msgKey = null;
       cleared = null;
       if (draftOf(sentTo) === text) keepDraft(sentTo, "");
     }
@@ -1780,135 +1861,95 @@ function chrome(name) {
     note.hidden = !say2;
     refresh();
   });
-  const seat = openId2 ? seatOf(openId2) : void 0;
+  return { form, input, note, menu, keys };
+}
+
+// web/terminal.ts
+function holdPage() {
+  if (fullScreen()) lockPage("terminal");
+  else unlockPage("terminal");
+}
+function chrome(name) {
+  const el4 = term.el;
+  el4.innerHTML = "";
+  const bar3 = screenBar(name, refresh);
+  const pre = document.createElement("pre");
+  pre.id = "screen";
+  pre.className = "m-0 min-h-0 flex-1 overflow-auto overscroll-contain px-3 py-2 whitespace-pre";
+  pre.textContent = "reading\u2026";
+  const { form, input, note, menu, keys } = messageForm(pre);
+  const seat = term.openId ? term.seatOf(term.openId) : void 0;
   const strip = paneStrip(seat?.panes, seat?.surface, (surface) => {
-    viewing = surface;
-    jump = surface ? "top" : "bottom";
-    lastTag = "";
-    lastSig = "";
+    term.viewing = surface;
+    term.jump = surface ? "top" : "bottom";
+    term.lastTag = "";
+    term.lastSig = "";
     pre.classList.add("opacity-40");
     refresh();
   });
-  onCellTap(pre, async (x2, y) => {
-    const cell = viewing && openId2 ? cellAt(pre, x2, y) : null;
-    if (!cell || !viewing || !openId2) return;
+  onCellTap(pre, async (x, y) => {
+    const cell = term.viewing && term.openId ? cellAt(pre, x, y) : null;
+    if (!cell || !term.viewing || !term.openId) return;
     const row = pre.querySelector(`[data-row="${cell.row}"]`);
     if (row) row.style.background = "rgb(255 214 92 / 22%)";
-    const r = await api("/api/click", { method: "POST", body: JSON.stringify({ id: openId2, pane: viewing, ...cell }) });
+    const r = await api("/api/click", { method: "POST", body: JSON.stringify({ id: term.openId, pane: term.viewing, ...cell }) });
     note.textContent = r.error ?? "";
     note.hidden = !r.error;
-    lastTag = "";
+    term.lastTag = "";
     refresh();
     setTimeout(refresh, 250);
   });
-  el2.append(...strip ? [bar3, strip] : [bar3], pre, note, menu, keys, form);
+  el4.append(...strip ? [bar3, strip] : [bar3], pre, note, menu, keys, form);
   return { pre, input };
 }
-var polling = false;
-var sending = false;
-async function sendKey(key, pre) {
-  if (!openId2) return;
-  const r = await api("/api/key", { method: "POST", body: JSON.stringify({ id: openId2, key }) });
-  if (r.error) {
-    pre.textContent = `${r.error}
-
-${pre.textContent}`;
-    return;
-  }
-  await new Promise((r2) => setTimeout(r2, 120));
-  for (let i = 0; polling && i < 12; i++) await new Promise((r2) => setTimeout(r2, 100));
-  refresh();
-}
-var again = false;
-async function refresh() {
-  if (!openId2 || sending) return;
-  if (polling) return void (again = true);
-  polling = true;
-  try {
-    do {
-      again = false;
-      await poll();
-    } while (again && openId2);
-  } finally {
-    polling = false;
-  }
-}
-async function poll() {
-  if (!openId2) return;
-  const want = viewing;
-  const pane = want ? `&pane=${encodeURIComponent(want)}` : "";
-  const r = await api(`/api/screen?id=${encodeURIComponent(openId2)}${pane}`, lastTag ? { headers: { "if-none-match": lastTag } } : {});
-  if (want !== viewing) return void (lastTag = "");
-  document.getElementById("screen")?.classList.remove("opacity-40");
-  if (r.status === 304) return;
-  if (r.status === 401) return askForToken("That password was not accepted.");
-  if (r.status === 403) return askForToken("Control is off, or this device is not on the machine or its tailnet.");
-  if (r.status === 429) return askForToken("Too many wrong tries \u2014 wait a moment.");
-  const pre = document.getElementById("screen");
-  if (!pre) return;
-  if (r.error) {
-    lastTag = "";
-    lastSig = "";
-    pre.textContent = r.error;
-    return;
-  }
-  if (!r.render_grid) return;
-  const sig = JSON.stringify(r.render_grid.row_spans);
-  if (sig === lastSig && pre.childElementCount) return;
-  lastSig = sig;
-  const btn = document.getElementById("screenmode");
-  const cramped = paint(pre, r.render_grid, el2, wrap);
-  if (btn) btn.hidden = !cramped;
-  if (jump) {
-    pre.scrollTop = jump === "top" ? 0 : pre.scrollHeight;
-    jump = null;
-  }
-}
 function show(id, name) {
-  openId2 = id;
-  openName = name;
-  viewing = null;
-  jump = "bottom";
+  term.openId = id;
+  term.openName = name;
+  term.viewing = null;
+  term.jump = "bottom";
   try {
     sessionStorage.setItem(OPEN, JSON.stringify({ id, name }));
   } catch {
   }
-  el2.hidden = false;
+  term.el.hidden = false;
   holdPage();
   measure();
   if (!token()) return askForToken("This is behind a separate password from the passcode.");
   const { input } = chrome(name);
   refresh();
-  clearInterval(timer);
-  timer = setInterval(refresh, 2e3);
+  clearInterval(term.timer);
+  term.timer = setInterval(refresh, 2e3);
   if (!fullScreen()) input.focus();
 }
 function close() {
-  openId2 = null;
-  lastTag = "";
+  const el4 = term.el;
+  term.openId = null;
+  term.lastTag = "";
   try {
     sessionStorage.removeItem(OPEN);
   } catch {
   }
-  clearInterval(timer);
-  timer = void 0;
-  el2.hidden = true;
-  el2.innerHTML = "";
-  el2.style.maxWidth = "";
-  el2.style.marginInline = "";
-  el2.style.height = "";
-  el2.style.top = "";
-  el2.style.bottom = "";
-  el2.style.transform = "";
+  clearInterval(term.timer);
+  term.timer = void 0;
+  el4.hidden = true;
+  el4.innerHTML = "";
+  el4.style.maxWidth = "";
+  el4.style.marginInline = "";
+  el4.style.height = "";
+  el4.style.top = "";
+  el4.style.bottom = "";
+  el4.style.transform = "";
   unlockPage("terminal");
-  onClose();
+  term.onClose();
 }
+hooks.show = show;
+hooks.close = close;
 function mountTerminal(host2, closed, seat) {
-  el2 = host2;
-  onClose = closed;
-  if (seat) seatOf = seat;
+  term.el = host2;
+  term.onClose = closed;
+  if (seat) term.seatOf = seat;
   document.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape" || !openId2) return;
+    if (e.key !== "Escape" || !term.openId) return;
     const t2 = e.target;
     if ((t2 instanceof HTMLInputElement || t2 instanceof HTMLTextAreaElement) && t2.value) return;
     close();
@@ -1916,7 +1957,7 @@ function mountTerminal(host2, closed, seat) {
   watch(host2, isOpen);
   let t;
   addEventListener("resize", () => {
-    if (!openId2) return;
+    if (!term.openId) return;
     holdPage();
     settle();
     clearTimeout(t);
@@ -1935,7 +1976,7 @@ async function sendTo(id, text) {
     body: JSON.stringify({ id, text })
   });
 }
-var isOpen = () => openId2 !== null;
+var isOpen = () => term.openId !== null;
 function wasOpen() {
   try {
     const v = JSON.parse(sessionStorage.getItem(OPEN) ?? "null");
@@ -1945,8 +1986,8 @@ function wasOpen() {
   }
 }
 var busy = () => {
-  if (!openId2) return false;
-  if (sending) return true;
+  if (!term.openId) return false;
+  if (term.sending) return true;
   return !!document.getElementById("ask")?.value.trim();
 };
 
@@ -2190,9 +2231,9 @@ function sendBox(s) {
     e.stopPropagation();
     void submit();
   });
-  for (const el5 of [text, pass]) {
-    el5.addEventListener("click", (e) => e.stopPropagation());
-    el5.addEventListener("keydown", (e) => {
+  for (const el4 of [text, pass]) {
+    el4.addEventListener("click", (e) => e.stopPropagation());
+    el4.addEventListener("keydown", (e) => {
       e.stopPropagation();
       if (e.key === "Enter") void submit();
     });
@@ -2277,16 +2318,16 @@ function paintList(list) {
     }
     li.querySelector(".doing").textContent = s.doing || s.last || "\u2014";
     if (s.workspace) {
-      const term = document.createElement("button");
-      term.type = "button";
-      term.title = `Open ${s.proj}'s terminal`;
-      term.className = "[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
-      term.append(crtIcon());
-      term.addEventListener("click", (e) => {
+      const term2 = document.createElement("button");
+      term2.type = "button";
+      term2.title = `Open ${s.proj}'s terminal`;
+      term2.className = "[grid-area:term] flex h-9 w-11 cursor-pointer items-center justify-center self-center rounded bg-transparent text-ok hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold";
+      term2.append(crtIcon());
+      term2.addEventListener("click", (e) => {
         e.stopPropagation();
         onTerminal?.(s.id, s.proj);
       });
-      li.append(term);
+      li.append(term2);
     }
     li.tabIndex = 0;
     li.setAttribute("role", "button");
@@ -4466,7 +4507,7 @@ function mountSettings(button, panel, onChange) {
           localStorage.setItem(KEY2, JSON.stringify(settings));
         } catch {
         }
-        for (const el5 of choices.querySelectorAll("[role=radio]")) el5.setAttribute("aria-checked", "false");
+        for (const el4 of choices.querySelectorAll("[role=radio]")) el4.setAttribute("aria-checked", "false");
         b.setAttribute("aria-checked", "true");
         onChange();
       });
@@ -4636,9 +4677,9 @@ function drawLabels(pxW, pxH) {
     }
   }
 }
-function mountRoom(room, el5) {
+function mountRoom(room, el4) {
   roomEl = room;
-  canvas = el5;
+  canvas = el4;
   ctx2d = canvas.getContext("2d");
   buffer2 = document.createElement("canvas");
   bufferCtx = buffer2.getContext("2d");
@@ -4652,13 +4693,13 @@ function mountRoom(room, el5) {
 var DEPLOYS = "guildhall.press.deploys";
 var LOCAL_WAIT = 2e4;
 var FULL_WAIT = 1e5;
-var el3;
-var timer2;
+var el2;
+var timer;
 var open = false;
 var settled2 = false;
 var lastRender = "";
 var deploys = localStorage.getItem(DEPLOYS) === "1";
-var onClose2 = () => {
+var onClose = () => {
 };
 function hue(name) {
   let h = 0;
@@ -4789,16 +4830,16 @@ function heading(text, count) {
 }
 function render(snap) {
   const sig = JSON.stringify([snap.items, snap.repos, snap.local, snap.error, snap.stale, snap.githubError, snap.cloudflareError, !!snap.loading, deploys]);
-  if (sig === lastRender && el3.childElementCount) {
-    const meta2 = el3.querySelector(".press-meta");
+  if (sig === lastRender && el2.childElementCount) {
+    const meta2 = el2.querySelector(".press-meta");
     if (meta2) meta2.textContent = snap.error ? "" : `${snap.repos.length} repos \xB7 ${ago(Date.now() - snap.at)}`;
     return;
   }
   lastRender = sig;
-  const priorScroll = el3.querySelector(".press-body")?.scrollTop ?? 0;
-  const priorOpen = el3.querySelector("details")?.open ?? false;
-  const wrap2 = document.createElement("div");
-  wrap2.className = "flex h-full min-h-0 flex-col";
+  const priorScroll = el2.querySelector(".press-body")?.scrollTop ?? 0;
+  const priorOpen = el2.querySelector("details")?.open ?? false;
+  const wrap = document.createElement("div");
+  wrap.className = "flex h-full min-h-0 flex-col";
   const bar3 = document.createElement("div");
   bar3.className = "flex shrink-0 items-center gap-2 border-b border-line px-2.5 py-2";
   const title = document.createElement("span");
@@ -4824,7 +4865,7 @@ function render(snap) {
   x.className = "flex min-h-9 shrink-0 cursor-pointer items-center rounded border border-hot bg-transparent px-2.5 text-[0.72rem] font-bold text-hot hover:bg-hot hover:text-bg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-hot";
   x.addEventListener("click", close2);
   bar3.append(title, meta, toggle, x);
-  wrap2.append(bar3);
+  wrap.append(bar3);
   const body2 = document.createElement("div");
   body2.className = "press-body min-h-0 flex-1 overflow-auto overscroll-contain text-[0.78rem]/[1.5]";
   if (snap.error) {
@@ -4890,10 +4931,10 @@ function render(snap) {
     for (const i of snap.items) feed2.append(feedRow(i));
     body2.append(feed2);
   }
-  wrap2.append(body2);
-  el3.replaceChildren(wrap2);
+  wrap.append(body2);
+  el2.replaceChildren(wrap);
   body2.scrollTop = priorScroll;
-  const details2 = el3.querySelector("details");
+  const details2 = el2.querySelector("details");
   if (details2) details2.open = priorOpen;
 }
 function normalise(snap) {
@@ -4930,38 +4971,38 @@ async function refresh2() {
     render({ at: Date.now(), items: [], repos: [], local: true, error: `could not draw this: ${e instanceof Error ? e.message : "unknown error"}` });
   }
   if (shaped.loading) {
-    clearInterval(timer2);
-    timer2 = setInterval(refresh2, 1200);
+    clearInterval(timer);
+    timer = setInterval(refresh2, 1200);
   } else if (settled2 !== true) {
     settled2 = true;
-    clearInterval(timer2);
-    timer2 = setInterval(refresh2, 6e4);
+    clearInterval(timer);
+    timer = setInterval(refresh2, 6e4);
   }
 }
 function show2() {
   open = true;
   settled2 = false;
-  el3.hidden = false;
+  el2.hidden = false;
   lockPage("press");
   render({ at: Date.now(), items: [], repos: [], local: !deploys });
   refresh2();
-  clearInterval(timer2);
-  timer2 = setInterval(refresh2, 3e4);
+  clearInterval(timer);
+  timer = setInterval(refresh2, 3e4);
 }
 function close2() {
   open = false;
-  clearInterval(timer2);
-  timer2 = void 0;
-  el3.hidden = true;
-  el3.replaceChildren();
+  clearInterval(timer);
+  timer = void 0;
+  el2.hidden = true;
+  el2.replaceChildren();
   lastRender = "";
   unlockPage("press");
-  onClose2();
+  onClose();
 }
 var isOpen2 = () => open;
 function mountPress(host2, closed) {
-  el3 = host2;
-  onClose2 = closed;
+  el2 = host2;
+  onClose = closed;
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && open) close2();
   });
@@ -4977,19 +5018,19 @@ function ago2(ms) {
   if (s < 86400) return `${Math.round(s / 3600)}h`;
   return `${Math.round(s / 86400)}d`;
 }
-var el4;
+var el3;
 var onPick = () => {
 };
 var open2 = false;
 function mountNewSession(host2, picked) {
-  el4 = host2;
+  el3 = host2;
   onPick = picked;
 }
 var isOpen3 = () => open2;
 function close3() {
   open2 = false;
-  el4.hidden = true;
-  el4.replaceChildren();
+  el3.hidden = true;
+  el3.replaceChildren();
   unlockPage("newsession");
 }
 function bar(title) {
@@ -5014,8 +5055,8 @@ function say(host2, text, tone = "text-faint") {
 }
 function askHere(body2) {
   body2.replaceChildren();
-  const wrap2 = document.createElement("div");
-  wrap2.className = "p-4";
+  const wrap = document.createElement("div");
+  wrap.className = "p-4";
   const h = document.createElement("p");
   h.className = "mt-0 mb-2 text-label";
   h.textContent = "Control password";
@@ -5042,18 +5083,18 @@ function askHere(body2) {
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") submit();
   });
-  wrap2.append(h, why, input, go);
-  body2.append(wrap2);
+  wrap.append(h, why, input, go);
+  body2.append(wrap);
   input.focus();
 }
 async function show3() {
   open2 = true;
-  el4.hidden = false;
+  el3.hidden = false;
   lockPage("newsession");
-  el4.replaceChildren(bar("Open a session"));
+  el3.replaceChildren(bar("Open a session"));
   const body2 = document.createElement("div");
   body2.className = "min-h-0 flex-1 overflow-auto overscroll-contain";
-  el4.append(body2);
+  el3.append(body2);
   say(body2, "Loading projects\u2026");
   let projects = [];
   try {
@@ -5252,20 +5293,20 @@ function paintCounts(list) {
   for (const s of list) counts[s.state] = (counts[s.state] ?? 0) + 1;
   bar2.counts.replaceChildren(
     ...["error", "needs", "working", "shell", "review", "done", "parked"].filter((k) => counts[k]).map((k) => {
-      const el5 = document.createElement("span");
-      el5.style.color = rgb(LOOK[k].color);
-      el5.className = "whitespace-nowrap";
-      el5.textContent = `${LOOK[k].glyph} `;
+      const el4 = document.createElement("span");
+      el4.style.color = rgb(LOOK[k].color);
+      el4.className = "whitespace-nowrap";
+      el4.textContent = `${LOOK[k].glyph} `;
       const n = document.createElement("span");
       n.className = "text-label";
       n.textContent = String(counts[k]);
       const word2 = document.createElement("span");
       word2.className = "text-label hidden min-[560px]:inline";
       word2.textContent = ` ${LOOK[k].label}`;
-      el5.title = `${counts[k]} ${LOOK[k].label}`;
-      el5.setAttribute("aria-label", `${counts[k]} ${LOOK[k].label}`);
-      el5.append(n, word2);
-      return el5;
+      el4.title = `${counts[k]} ${LOOK[k].label}`;
+      el4.setAttribute("aria-label", `${counts[k]} ${LOOK[k].label}`);
+      el4.append(n, word2);
+      return el4;
     })
   );
 }
@@ -5324,10 +5365,10 @@ function freshness() {
 function connect() {
   let es = null;
   let delay = 1e3;
-  let timer3;
+  let timer2;
   const retry = () => {
-    clearTimeout(timer3);
-    timer3 = setTimeout(probe, delay);
+    clearTimeout(timer2);
+    timer2 = setTimeout(probe, delay);
     delay = Math.min(delay * 2, 3e4);
   };
   const probe = async () => {
