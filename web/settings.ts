@@ -11,6 +11,8 @@
  * `settings.<key>` where it applies; the panel, the persistence and the
  * round-tripping all follow from the declaration.
  */
+import { dropEscape, holdEscape } from './escape.ts'
+import { COVERED } from './viewport.ts'
 
 export type Settings = {
 	/** how a project's name sits by its desks: down the side, or along the aisle */
@@ -123,9 +125,23 @@ export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onC
 	const open = (want: boolean) => {
 		panel.hidden = !want
 		button.setAttribute('aria-expanded', String(want))
-		if (want) panel.querySelector<HTMLButtonElement>('[role=radio]')?.focus()
-		else button.focus()
+		// Esc closes it while it is the top thing open — see escape.ts. It listened on
+		// the document by itself, so an Esc that closed a panel over it left it open.
+		if (want) {
+			holdEscape('settings', () => {
+				open(false)
+				return true
+			})
+			panel.querySelector<HTMLButtonElement>('[role=radio]')?.focus()
+		} else {
+			dropEscape('settings')
+			button.focus()
+		}
 	}
+	// A terminal opened from the keyboard over it — see COVERED in viewport.ts.
+	document.addEventListener(COVERED, () => {
+		if (!panel.hidden) open(false)
+	})
 	button.addEventListener('click', (e) => {
 		e.stopPropagation()
 		// `hidden` is `boolean | "until-found"`, so coerce: hidden by any means means open it
@@ -135,8 +151,5 @@ export function mountSettings(button: HTMLButtonElement, panel: HTMLElement, onC
 	// that starts outside does not leave the panel open under the cursor.
 	document.addEventListener('pointerdown', (e) => {
 		if (!panel.hidden && !panel.contains(e.target as Node) && e.target !== button) open(false)
-	})
-	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && !panel.hidden) open(false)
 	})
 }

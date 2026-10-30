@@ -22,26 +22,35 @@ import { messageForm } from './termform.ts'
 import { askForToken } from './termpass.ts'
 import { refresh } from './termpoll.ts'
 import { KEY, OPEN, type Seat, api, hooks, repaintSoon, term, token } from './termstate.ts'
-import { fullScreen, lockPage, measure, settle, unlockPage, watch } from './viewport.ts'
+import { cover, lockPage, measure, settle, uncover, unlockPage, watch } from './viewport.ts'
+import { dropEscape, holdEscape, typing } from './escape.ts'
+import { SLASH } from './slashmenu.ts'
+import { releaseFit } from './termfit.ts'
+import { pastTop } from './pasttop.ts'
+import { openTranscript, transcriptOpen } from './transcript.ts'
 
 /**
- * Freeze the page behind the panel — but only when the panel is covering it.
+ * Freeze the page behind the panel.
  *
- * Full screen on a phone, nothing behind should move: a flick past the end of the
- * scrollback would otherwise drag the session list around underneath, and on iOS
- * the browser scrolls the page on its own initiative whenever an input takes
- * focus, which is what put the terminal halfway down the screen.
+ * Nothing behind should move: a flick past the end of the scrollback would otherwise
+ * drag the session list around underneath, and on iOS the browser scrolls the page on
+ * its own initiative whenever an input takes focus, which is what put the terminal
+ * halfway down the screen.
  *
- * Above 880px the panel is INLINE — part of the page, below the list. Freezing
- * the page there strands it: on a 779px window the panel starts at y=717 and its
- * input sits at y=1377, off the bottom of a document that can no longer scroll.
- * The old `overflow: hidden` had the same effect and the same excuse; it is a
- * scroll lock for an overlay, and inline is not an overlay.
+ * At every width now. It used to be phone-only because above 880px the panel was
+ * INLINE, and freezing the page stranded it off the bottom of a document that could no
+ * longer scroll. The panel is an overlay at every width since (see index.html), so the
+ * lock is what keeps the page still under it.
  */
 function holdPage() {
-	if (fullScreen()) lockPage('terminal')
-	else unlockPage('terminal')
+	lockPage('terminal')
+	// And out of reach: on a desktop the page shows, dimmed, in the margin around the
+	// panel, and a click there must not land on it — see `cover` in viewport.ts.
+	cover('terminal')
 }
+
+/** What had focus before the panel opened, handed back when it closes. */
+let returnFocus: HTMLElement | null = null
 
 function chrome(name: string) {
 	const el = term.el
@@ -101,12 +110,20 @@ function chrome(name: string) {
 		refresh()
 		setTimeout(refresh, 250)
 	})
+	// Further up than the screen goes is the history. The chat only: another pane's
+	// screen is a backlog or a shell, not this conversation.
+	pastTop(pre, () => {
+		if (term.openId && !term.viewing && !transcriptOpen()) openTranscript(term.openId, term.openName, token())
+	})
 	el.append(...(strip ? [bar, strip] : [bar]), pre, note, menu, keys, form)
 	return { pre, input }
 }
 
 /** Open the terminal for a session. */
 export function show(id: string, name: string) {
+	// Switching straight to another session gives the last one's terminal back first, while
+	// its id is still the one to ask about (see termfit.ts).
+	if (term.openId && term.openId !== id) releaseFit()
 	term.openId = id
 	term.openName = name
 	// Always the chat on opening, whatever was being looked at last time.
@@ -117,8 +134,26 @@ export function show(id: string, name: string) {
 	} catch {
 		// Not remembered across a reload; nothing else depends on it.
 	}
+	// show() also runs on a panel already open — the password form's unlock, a started
+	// session arriving — and only a real opening may change what Esc closes. Re-holding
+	// on a re-show moved the terminal above a history or picture still open over it, and
+	// the next Esc closed the terminal hidden underneath.
+	const opening = term.el.hidden
+	if (opening && document.activeElement instanceof HTMLElement) returnFocus = document.activeElement
 	term.el.hidden = false
+	// Announced as the session it is (the dialog role is on #terminal in index.html).
+	term.el.setAttribute('aria-label', `${name} terminal`)
 	holdPage()
+	// Esc closes it while it is the top thing open — see escape.ts. Not while typing
+	// into a box with something in it: Esc is what clears or backs out in a terminal,
+	// and Claude Code users press it on reflex; closing the whole panel on it threw the
+	// message away. Empty the box, or click away, then Esc.
+	if (opening)
+		holdEscape('terminal', () => {
+			if (typing()) return false
+			close()
+			return true
+		})
 	// Sized BEFORE the branch, not after: the password form is full screen too, and
 	// putting this after the early return left that state anchored to the layout
 	// viewport — the one state where you most need the input to be reachable.
@@ -128,14 +163,17 @@ export function show(id: string, name: string) {
 	refresh()
 	clearInterval(term.timer)
 	term.timer = setInterval(refresh, 2000)
-	// Deliberately NOT focused on a phone. Focusing raises the keyboard immediately,
-	// so opening a terminal to read what a session said would cost half the screen
-	// before you had read a word of it. Tap the box when you actually want to type.
-	if (!fullScreen()) input.focus()
+	// Deliberately NOT focused on a touch screen. Focusing raises the keyboard
+	// immediately, so opening a terminal to read what a session said would cost half the
+	// screen before you had read a word of it. Tap the box when you actually want to type.
+	// By pointer, not width: a large iPhone in landscape is wider than 880px.
+	if (matchMedia('(pointer: fine)').matches) input.focus()
 }
 
 export function close() {
 	const el = term.el
+	// Before the id is forgotten: letting the terminal's size go asks about this session.
+	releaseFit()
 	term.openId = null
 	term.lastTag = ''
 	try {
@@ -147,17 +185,21 @@ export function close() {
 	term.timer = undefined
 	el.hidden = true
 	el.innerHTML = ''
-	el.style.maxWidth = ''
-	el.style.marginInline = ''
-	// hand the inline layout its sizing back, or a desktop panel keeps a phone's height
+	// Drop the keyboard-time sizing measure() set, or the panel reopens at the height
+	// the keyboard left it
 	el.style.height = ''
-	el.style.top = ''
 	el.style.bottom = ''
 	// and the keyboard offset, or the panel reopens shifted down the screen with its
 	// hit region somewhere else again
 	el.style.transform = ''
 	unlockPage('terminal')
+	uncover('terminal')
+	dropEscape('terminal')
+	dropEscape(SLASH)
 	term.onClose()
+	// Back to where you were — the row's terminal button — rather than to nothing.
+	if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true })
+	returnFocus = null
 }
 
 hooks.show = show
@@ -167,15 +209,6 @@ export function mountTerminal(host: HTMLElement, closed: () => void, seat?: (id:
 	term.el = host
 	term.onClose = closed
 	if (seat) term.seatOf = seat
-	document.addEventListener('keydown', (e) => {
-		if (e.key !== 'Escape' || !term.openId) return
-		// Not while typing into a box with something in it. Esc is what clears or backs
-		// out in a terminal, and Claude Code users press it on reflex; closing the whole
-		// panel on it threw the message away. Empty the box, or click away, then Esc.
-		const t = e.target
-		if ((t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement) && t.value) return
-		close()
-	})
 	watch(host, isOpen)
 	// A rotation changes the width the type is sized from, and the grid does not
 	// change at all — so without this the screen keeps the old size until the session
@@ -183,11 +216,6 @@ export function mountTerminal(host: HTMLElement, closed: () => void, seat?: (id:
 	let t: ReturnType<typeof setTimeout> | undefined
 	addEventListener('resize', () => {
 		if (!term.openId) return
-		// A window dragged across 880px turns an overlay into an inline panel and back,
-		// so the hold has to be re-decided rather than kept from whichever side it was
-		// opened on — otherwise widening the window leaves the page frozen with a panel
-		// sitting in it that is no longer covering anything.
-		holdPage()
 		settle()
 		clearTimeout(t)
 		t = setTimeout(() => {

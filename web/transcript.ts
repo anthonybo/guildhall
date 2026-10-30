@@ -33,12 +33,13 @@
 import { ago, rgb, tap } from './dom.ts'
 import { renderMarkdown } from './mdview.ts'
 import { inserted, typedForm } from './said.ts'
-import { fullScreen, lockPage, unlockPage } from './viewport.ts'
+import { cover, lockPage, uncover, unlockPage } from './viewport.ts'
 import { TINT } from '../src/screens.ts'
 import { forgetImages, historyImage, watchImages } from './historyimage.ts'
 import { type Entry, toolName, withLinks } from './transcripttools.ts'
 import { run } from './transcriptsteps.ts'
 import { type Mine, flash, yourMessages } from './yourmessages.ts'
+import { dropEscape, holdEscape, typing } from './escape.ts'
 
 type Page = { entries: Entry[]; cursor: number | null; size: number; end?: number }
 
@@ -323,6 +324,7 @@ function topNote(text: string): HTMLElement {
 
 /** Open the transcript for a session. `token` is the control token the terminal holds. */
 export function openTranscript(id: string, name: string, token: string) {
+	if (openId === null && document.activeElement instanceof HTMLElement) returnFocus = document.activeElement
 	openId = id
 	cursor = null
 	exhausted = false
@@ -335,12 +337,26 @@ export function openTranscript(id: string, name: string, token: string) {
 		el.id = 'transcript'
 		document.body.append(el)
 	}
-	// Same shell as the terminal panel: full screen on a phone, a centred panel on a
-	// desktop, above everything else on the page.
-	el.className = `fixed inset-0 z-50 flex flex-col border-line bg-panel text-label ${fullScreen() ? '' : 'sm:inset-8 sm:rounded-lg sm:border'}`
+	// Same shell as the terminal panel: full screen on a phone, inset over a dimmed page
+	// on a desktop — a little further in than the terminal, so a history opened from it
+	// reads as on top of it. By the stylesheet's breakpoint rather than decided once on
+	// opening, so dragging the window across 880px is followed.
+	el.className =
+		'fixed inset-0 z-50 flex flex-col border-line bg-panel text-label min-[880px]:inset-8 min-[880px]:rounded-lg min-[880px]:border min-[880px]:shadow-[0_0_0_100vmax_rgb(0_0_0/40%)]'
+	el.setAttribute('role', 'dialog')
+	el.setAttribute('aria-modal', 'true')
+	el.setAttribute('aria-label', `History of ${name}`)
 	el.hidden = false
 	el.replaceChildren()
 	lockPage('transcript')
+	cover('transcript')
+	// The terminal it was opened from stays open underneath, and was still reachable:
+	// measured, Tab from ☰ walked the terminal's keys, box and Send under the history.
+	const under = document.getElementById('terminal')
+	if (under && !under.hidden) {
+		under.inert = true
+		madeInert = under
+	}
 
 	const bar = document.createElement('div')
 	bar.className = 'flex items-center gap-2 border-b border-line px-3 py-2'
@@ -385,6 +401,8 @@ export function openTranscript(id: string, name: string, token: string) {
 	x.className =
 		'flex min-h-11 min-w-11 shrink-0 cursor-pointer items-center justify-center gap-1 rounded border border-hot bg-transparent px-3 text-[0.78rem] font-bold text-hot hover:bg-hot hover:text-bg'
 	tap(x, closeTranscript)
+	// Into the history, so a keyboard is where the eye is.
+	queueMicrotask(() => x.focus({ preventScroll: true }))
 
 	const tail = document.createElement('div')
 	tail.className = 'ml-auto flex shrink-0 items-center gap-2'
@@ -413,15 +431,18 @@ export function openTranscript(id: string, name: string, token: string) {
 	// and an idle session costs one small read that comes back empty.
 	clearInterval(liveTimer)
 	liveTimer = setInterval(() => void catchUp(), 3000)
-	document.addEventListener('keydown', onKey)
-}
-
-function onKey(e: KeyboardEvent) {
-	if (e.key === 'Escape') closeTranscript()
+	// Esc closes the history and not the terminal under it — see escape.ts. Not while
+	// the search in the "You" sheet has text: that box is `type=search` (yourmessages.ts),
+	// whose own Esc clears it — make it a plain text box and that stops being true.
+	holdEscape('transcript', () => {
+		if (typing()) return false
+		closeTranscript()
+		return true
+	})
 }
 
 export function closeTranscript() {
-	document.removeEventListener('keydown', onKey)
+	dropEscape('transcript')
 	clearInterval(liveTimer)
 	liveTimer = undefined
 	openId = null
@@ -434,7 +455,18 @@ export function closeTranscript() {
 		el.replaceChildren()
 	}
 	unlockPage('transcript')
+	uncover('transcript')
+	if (madeInert) madeInert.inert = false
+	madeInert = null
+	// Back to where you were — the ☰ button — rather than to nothing.
+	if (returnFocus?.isConnected && !returnFocus.closest('[inert]')) returnFocus.focus({ preventScroll: true })
+	returnFocus = null
 }
+
+/** What had focus before the history opened, handed back when it closes. */
+let returnFocus: HTMLElement | null = null
+/** The terminal under the history, made inert while the history is open. */
+let madeInert: HTMLElement | null = null
 
 /** Whether the transcript is on screen, so the page does not reload underneath it. */
 export const transcriptOpen = () => openId !== null

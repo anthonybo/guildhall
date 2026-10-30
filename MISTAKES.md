@@ -251,7 +251,10 @@ magnify to fill" — argued in a comment on the grounds that stretching 70 colum
 "not full width so much as zoomed in — the columns to fill it do not exist". True,
 and beside the point: a terminal that stops halfway across its own window reads as
 a fault in the window. No value of the cap fixes that, which is why three were
-tried. Type size now has no ceiling at all.
+tried. Type size had no ceiling for a while after this; the ceiling is back
+(`COMFORTABLE = 15` in grid.ts), because the width is now filled a different way:
+on a desktop the pane's own line breaks are undone (reflow.ts) rather than the
+columns being magnified, and "Fit" asks cmux to make the pane as wide as the window.
 
 **Do not re-measure the panes.** `stty -f /dev/ttysNNN size` reads the real
 dimensions; `cmux`'s state file does not record them, and cols/rows are absent from
@@ -1393,3 +1396,20 @@ showed a Codex-specific failure: a long message sat in the composer, unsent.
 it with the same mark), and press Enter again on a growing schedule until it clears —
 an early Enter loses nothing. 60, 800, 2,900 (×3) and 8,000 characters each arrived
 once and were answered; the slowest took 21.4s, so the browser's send deadline is 35s.
+
+## The header "falling off" when the desktop page locks
+
+**Status: not a bug. The fix was wrong and was taken out before it shipped.**
+
+When the terminal became an overlay on a desktop, the page under it started being
+locked the same way a phone's is: the body is fixed at `top: -scrollY`. A review read
+that and concluded the sticky header (`#bar`) would be carried up off the screen with
+the body, leaving list rows in the dimmed margin where the header had been.
+
+| What was tried | Why it looked right | What happened |
+|---|---|---|
+| Move `#bar` back down by the scroll offset (`translateY(scrollY)`) while locked | A fixed body at -600px should take a child with it to -600px | Measured at 1440x900 scrolled 600px: the header sat at **600px**, pushed down the screen. Without it, the header stays at **0** — sticky still holds it to the top of the viewport while the body is fixed |
+
+The lesson is the house one: it was reasoned from the code and never measured. Measure
+`#bar`'s `getBoundingClientRect().top` with the page scrolled and the terminal open
+before changing anything here.

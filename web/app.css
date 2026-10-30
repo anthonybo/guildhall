@@ -230,6 +230,9 @@
   .inset-0 {
     inset: 0px;
   }
+  .inset-4 {
+    inset: calc(var(--spacing) * 4);
+  }
   .inset-x-0 {
     inset-inline: 0px;
   }
@@ -244,6 +247,9 @@
   }
   .right-3\.5 {
     right: calc(var(--spacing) * 3.5);
+  }
+  .z-7 {
+    z-index: 7;
   }
   .z-10 {
     z-index: 10;
@@ -1234,6 +1240,10 @@
   .opacity-70 {
     opacity: 70%;
   }
+  .shadow {
+    --tw-shadow: 0 1px 3px 0 var(--tw-shadow-color, rgb(0 0 0 / 0.1)), 0 1px 2px -1px var(--tw-shadow-color, rgb(0 0 0 / 0.1));
+    box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
+  }
   .shadow-\[0_0_0_1px_rgb\(255_121_198\/8\%\)\] {
     --tw-shadow: 0 0 0 1px var(--tw-shadow-color, rgb(255 121 198/8%));
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
@@ -1535,6 +1545,15 @@
     }
   }
   @media (width >= 880px) {
+    .min-\[880px\]\:fixed {
+      position: fixed;
+    }
+    .min-\[880px\]\:inset-4 {
+      inset: calc(var(--spacing) * 4);
+    }
+    .min-\[880px\]\:inset-8 {
+      inset: calc(var(--spacing) * 8);
+    }
     .min-\[880px\]\:inset-y-0 {
       inset-block: 0px;
     }
@@ -1544,17 +1563,23 @@
     .min-\[880px\]\:left-auto {
       left: auto;
     }
-    .min-\[880px\]\:mx-3\.5 {
-      margin-inline: calc(var(--spacing) * 3.5);
+    .min-\[880px\]\:z-\[6\] {
+      z-index: 6;
     }
-    .min-\[880px\]\:mt-2\.5 {
-      margin-top: calc(var(--spacing) * 2.5);
+    .min-\[880px\]\:flex {
+      display: flex;
     }
     .min-\[880px\]\:w-\[min\(30rem\,72vw\)\] {
       width: min(30rem, 72vw);
     }
     .min-\[880px\]\:w-\[min\(52rem\,72vw\)\] {
       width: min(52rem, 72vw);
+    }
+    .min-\[880px\]\:flex-col {
+      flex-direction: column;
+    }
+    .min-\[880px\]\:rounded-lg {
+      border-radius: var(--radius-lg);
     }
     .min-\[880px\]\:rounded-md {
       border-radius: var(--radius-md);
@@ -1567,17 +1592,13 @@
       border-left-style: var(--tw-border-style);
       border-left-width: 1px;
     }
-  }
-  @media (width >= 40rem) {
-    .sm\:inset-8 {
-      inset: calc(var(--spacing) * 8);
+    .min-\[880px\]\:shadow-\[0_0_0_100vmax_rgb\(0_0_0\/40\%\)\] {
+      --tw-shadow: 0 0 0 100vmax var(--tw-shadow-color, rgb(0 0 0/40%));
+      box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
     }
-    .sm\:rounded-lg {
-      border-radius: var(--radius-lg);
-    }
-    .sm\:border {
-      border-style: var(--tw-border-style);
-      border-width: 1px;
+    .min-\[880px\]\:shadow-\[0_0_0_100vmax_rgb\(0_0_0\/55\%\)\] {
+      --tw-shadow: 0 0 0 100vmax var(--tw-shadow-color, rgb(0 0 0/55%));
+      box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
     }
   }
   .\[\&\:\:-webkit-scrollbar\]\:hidden::-webkit-scrollbar {
@@ -1624,6 +1645,11 @@ body.stale .sweep::after {
   }
   html.held body > :is(#bar, #offline, #room, #list, #empty, #foot) {
     visibility: hidden;
+  }
+}
+@media (width >= 880px) {
+  html {
+    scrollbar-gutter: stable;
   }
 }
 #ver.newer {

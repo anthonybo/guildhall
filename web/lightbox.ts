@@ -8,6 +8,8 @@
  * Zoom is done here rather than left to the browser. Pinching a page on iOS zooms the
  * whole app, panel and all, and leaves it zoomed after the picture closes.
  */
+import { dropEscape, holdEscape } from './escape.ts'
+import { COVERED } from './viewport.ts'
 
 const MAX = 6
 const DOUBLE_TAP_MS = 300
@@ -19,6 +21,7 @@ export function lightbox(url: string, caption: string) {
 	const box = document.createElement('div')
 	box.className = 'fixed inset-0 z-[70] flex flex-col bg-black/92'
 	box.setAttribute('role', 'dialog')
+	box.setAttribute('aria-modal', 'true')
 	box.setAttribute('aria-label', caption)
 
 	const bar = document.createElement('div')
@@ -151,22 +154,35 @@ export function lightbox(url: string, caption: string) {
 		{ passive: false },
 	)
 
-	const onKey = (e: KeyboardEvent) => {
-		if (e.key !== 'Escape') return
-		// Only this closes; the panel underneath must not take the same Escape.
-		e.stopImmediatePropagation()
-		close()
-	}
+	// Everything else out of reach while the picture is up — the page, and the terminal
+	// or history it was opened from — so Tab stays on the picture's controls. Only what
+	// this made inert is handed back: the terminal and history keep their own holds.
+	const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null
+	const stilled = [...document.body.children].filter((c): c is HTMLElement => c instanceof HTMLElement && !c.inert)
 	const close = () => {
-		document.removeEventListener('keydown', onKey, true)
+		document.removeEventListener(COVERED, close)
+		dropEscape('lightbox')
 		box.remove()
+		for (const c of stilled) c.inert = false
+		if (opener?.isConnected && !opener.closest('[inert]')) opener.focus({ preventScroll: true })
 		if (current === handle) current = null
 	}
+	// Top of the Esc stack while open, so Esc closes the picture and not the panel
+	// under it — see escape.ts.
+	holdEscape('lightbox', () => {
+		close()
+		return true
+	})
 	const handle = { close }
 	current = handle
 	shut.addEventListener('click', close)
-	document.addEventListener('keydown', onKey, true)
+	for (const c of stilled) c.inert = true
+	// A panel covering the page while this is up — a started session's terminal
+	// arriving — closes it first, so handing back what it stilled cannot undo that
+	// panel's own cover.
+	document.addEventListener(COVERED, close)
 	document.body.append(box)
+	shut.focus({ preventScroll: true })
 }
 
 /**

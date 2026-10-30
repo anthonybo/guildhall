@@ -117,6 +117,7 @@
 		     nothing — so it names the age and the likely reason. -->
 		<p
 			id="offline"
+			role="status"
 			class="m-0 border-b border-[color-mix(in_srgb,var(--color-gold)_35%,var(--color-line))] bg-[color-mix(in_srgb,var(--color-gold)_12%,var(--color-bg))] px-3.5 py-2.5 text-[0.78rem]/[1.45] text-gold"
 			hidden
 		></p>
@@ -136,12 +137,19 @@
 		     until a row's terminal button is pressed, and built by terminal.ts. -->
 		<!-- On a phone this is the whole screen, not a panel in a page. A terminal you
 		     are reading IS the task, and sharing the glass with a list you are not
-		     looking at costs the rows that matter. Above 880px it stays inline, where
-		     there is room for both. `dvh` rather than `vh` so the on-screen keyboard
-		     shrinks it instead of pushing the input under the keyboard. -->
+		     looking at costs the rows that matter. `dvh` rather than `vh` so the
+		     on-screen keyboard shrinks it instead of pushing the input under the keyboard.
+		     Above 880px it is the same overlay with a margin and a dimmed page around it.
+		     It used to be INLINE there, under a room canvas 1,200-1,800px tall: measured
+		     at 1440x900 it opened 1,136px down the page, and the bar, screen and input
+		     were all on screen only inside a 22px band of scrolling — never, with the
+		     keypad open. Full width still, because a narrower terminal was reported as
+		     broken every time (MISTAKES.md). -->
 		<section
 			id="terminal"
-			class="overflow-hidden border-gold/50 bg-panel max-[880px]:fixed max-[880px]:inset-0 max-[880px]:z-[6] max-[880px]:flex max-[880px]:h-[100dvh] max-[880px]:flex-col max-[880px]:pt-[env(safe-area-inset-top)] max-[880px]:pb-[env(safe-area-inset-bottom)] min-[880px]:mx-3.5 min-[880px]:mt-2.5 min-[880px]:rounded-md min-[880px]:border"
+			role="dialog"
+			aria-modal="true"
+			class="overflow-hidden border-gold/50 bg-panel max-[880px]:fixed max-[880px]:inset-0 max-[880px]:z-[6] max-[880px]:flex max-[880px]:h-[100dvh] max-[880px]:flex-col max-[880px]:pt-[env(safe-area-inset-top)] max-[880px]:pb-[env(safe-area-inset-bottom)] min-[880px]:fixed min-[880px]:inset-4 min-[880px]:z-[6] min-[880px]:flex min-[880px]:flex-col min-[880px]:rounded-md min-[880px]:border min-[880px]:shadow-[0_0_0_100vmax_rgb(0_0_0/55%)]"
 			hidden
 		></section>
 

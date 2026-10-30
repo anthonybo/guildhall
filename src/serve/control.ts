@@ -33,6 +33,7 @@ import { MAX_ASK, ask } from '../ask.ts'
 import { MAX_UPLOAD, readBytes, saveUpload } from '../upload.ts'
 import { askCodex, click, press as pressKey, spawn, trustNew } from '../control.ts'
 import { createProject } from '../data/projects.ts'
+import { fitOff, fitOn } from '../fit.ts'
 import { type Call, MIME, cmuxRefusal, readBody, send } from './http.ts'
 
 /**
@@ -268,6 +269,35 @@ export async function clickRoute(c: Call) {
  * moment you could do least. Four keys only; see `press` in control.ts for why
  * that list is not longer.
  */
+/**
+ * "Fit to window" from a desktop browser: hold the session's terminal at the panel's
+ * size while it is viewed, or let it go — see fit.ts for what it costs and how it is
+ * always let go of.
+ *
+ * The guards of /api/key: it changes how a session is drawn everywhere, the Mac's own
+ * pane included, so it is an act like a key press and not a read.
+ */
+export async function fitRoute(c: Call) {
+	const { req, res, addr, opts, sessions } = c
+	if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')
+	if (!controlReachable(addr)) return send(res, 403, MIME['.json'], '{"error":"control is loopback or tailnet only"}')
+	if (await cmuxRefusal(res)) return
+	const waitFit = controlLockedFor(addr)
+	if (waitFit > 0) return send(res, 429, MIME['.json'], `{"error":"too many wrong tries, wait ${Math.ceil(waitFit / 1000)}s"}`)
+	if (!controlAttempt(addr, req.headers['x-guildhall-control'] as string | undefined)) return send(res, 401, MIME['.json'], '{"error":"wrong control password"}')
+	let body: { id?: string; on?: boolean; cols?: number; rows?: number }
+	try {
+		body = JSON.parse(await readBody(req))
+	} catch {
+		return send(res, 400, MIME['.json'], '{"error":"bad json"}')
+	}
+	const target = sessions().find((s) => s.id === body.id)
+	// The pane itself, never the tab: a tab-only address is whichever pane is focused.
+	if (!target?.workspace || !target.surface) return send(res, 404, MIME['.json'], '{"error":"no such session, or not one pane of a cmux tab"}')
+	const out = body.on ? await fitOn({ workspace: target.workspace, surface: target.surface }, Number(body.cols), Number(body.rows)) : await fitOff(target.surface)
+	return send(res, out.ok ? 200 : 400, MIME['.json'], JSON.stringify(out.ok ? { ok: true } : { error: out.error }))
+}
+
 export async function keyRoute(c: Call) {
 	const { req, res, addr, opts, sessions } = c
 	if (!opts.control?.()) return send(res, 403, MIME['.json'], '{"error":"control is off"}')

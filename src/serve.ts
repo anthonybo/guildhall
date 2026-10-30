@@ -33,7 +33,8 @@ import { demoSessions } from './demo.ts'
 import { press } from './data/press.ts'
 import { usage } from './data/usage.ts'
 import { type Call, MIME, type ServeOptions, addressOf, login, readBody, send, sessionOf } from './serve/http.ts'
-import { clickRoute, keyRoute, sendRoute, spawnRoute, uploadRoute } from './serve/control.ts'
+import { clickRoute, fitRoute, keyRoute, sendRoute, spawnRoute, uploadRoute } from './serve/control.ts'
+import { releaseLeftovers, sweep } from './fit.ts'
 import { closedRoute, commandsRoute, historyImageRoute, imageRoute, projectsRoute, screenRoute, transcriptRoute } from './serve/reads.ts'
 import { clientStamp, serveStatic } from './serve/static.ts'
 import type { Session } from './data.ts'
@@ -50,6 +51,7 @@ const ACTS = new Map<string, (c: Call) => Promise<void>>([
 	['/api/upload', uploadRoute],
 	['/api/click', clickRoute],
 	['/api/key', keyRoute],
+	['/api/fit', fitRoute],
 ])
 
 /** The routes that read a session's insides, behind the control gate too. Reached only
@@ -164,6 +166,11 @@ export function createServer(opts: ServeOptions) {
 	}
 	const timer = setInterval(tick, 2000)
 	timer.unref?.()
+	// "Fit to window" is always let go of: what a previous server held when it stopped,
+	// now; what a browser stopped asking for, within a check (fit.ts).
+	void releaseLeftovers()
+	const fits = setInterval(() => void sweep(), 10_000)
+	fits.unref?.()
 
 	/**
 	 * Every request, wrapped so a handler cannot take the process with it.
@@ -223,7 +230,9 @@ export function createServer(opts: ServeOptions) {
 
 		if (req.method !== 'GET' && req.method !== 'HEAD') {
 			// nothing else here mutates anything; say so plainly rather than 404ing
-			res.writeHead(405, { allow: 'GET, HEAD, POST /auth, POST /api/send, POST /api/upload, POST /api/click' }).end('read-only')
+			// From the table, not written out: the hand-kept list had already lost /api/key
+			// and /api/spawn.
+			res.writeHead(405, { allow: ['GET', 'HEAD', 'POST /auth', ...[...ACTS.keys()].map((p) => `POST ${p}`)].join(', ') }).end('read-only')
 			return
 		}
 
@@ -298,7 +307,10 @@ export function createServer(opts: ServeOptions) {
 		serveStatic(ROOT, res, url.pathname, String(req.headers['accept-encoding'] ?? ''))
 	}
 
-	server.on('close', () => clearInterval(timer))
+	server.on('close', () => {
+		clearInterval(timer)
+		clearInterval(fits)
+	})
 	return server
 }
 

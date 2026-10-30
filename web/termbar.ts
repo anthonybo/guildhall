@@ -1,6 +1,7 @@
 /** The bars across the top of the terminal panel: the way out, and the view controls. */
 import { tap } from './dom.ts'
 import { openTranscript } from './transcript.ts'
+import { fitButton } from './termfit.ts'
 import { hooks, repaintSoon, saveKeypad, saveWrap, term, token } from './termstate.ts'
 
 /**
@@ -72,7 +73,7 @@ export function screenBar(name: string, refresh: () => void) {
 	mode.className = 'flex min-h-11 cursor-pointer items-center rounded border border-line bg-transparent px-3 text-[0.78rem] text-muted hover:border-gold hover:text-gold focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold'
 	const label = () => {
 		mode.textContent = term.wrap ? 'Wrapped' : 'Exact'
-		mode.title = term.wrap ? 'Lines are reflowed to fit. Tap for the true grid.' : 'The true grid, scrolled sideways. Tap to reflow it to fit.'
+		mode.title = term.wrap ? 'Lines are reflowed to fit the window. Tap for the true grid.' : 'The true grid, exactly as the terminal draws it. Tap to fit it to the window.'
 	}
 	label()
 	mode.addEventListener('click', () => {
@@ -155,7 +156,7 @@ export function screenBar(name: string, refresh: () => void) {
 	// here is a target you have to be able to hit; the title above is not.
 	const tail = document.createElement('div')
 	tail.className = 'ml-auto flex shrink-0 items-center gap-2'
-	tail.append(mode, logBtn, keysBtn, x)
+	tail.append(fitButton(), mode, logBtn, keysBtn, x)
 	bar.append(title, live, tail)
 	return bar
 }

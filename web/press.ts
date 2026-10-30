@@ -24,6 +24,7 @@
  */
 import { ago } from './dom.ts'
 import { lockPage, unlockPage } from './viewport.ts'
+import { dropEscape, holdEscape } from './escape.ts'
 
 type Item =
 	| { kind: 'commit'; repo: string; at: number; short: string; subject: string; author: string; files: number; insertions: number; deletions: number }
@@ -511,6 +512,7 @@ async function refresh() {
 }
 
 export function show() {
+	if (!open && document.activeElement instanceof HTMLElement) returnFocus = document.activeElement
 	open = true
 	settled = false
 	el.hidden = false
@@ -519,6 +521,11 @@ export function show() {
 	// ignores `overflow: hidden` here, which is why this is a shared helper and not
 	// a class — see viewport.ts.
 	lockPage('press')
+	// Esc closes it while it is the top thing open — see escape.ts.
+	holdEscape('press', () => {
+		close()
+		return true
+	})
 	// Paint the chrome BEFORE the fetch, never after.
 	//
 	// This used to clear the panel and then await the request, so between the tap
@@ -528,6 +535,8 @@ export function show() {
 	// a cold one it is seconds, and with deploys on it can be much longer. A blank
 	// screen is indistinguishable from a broken app.
 	render({ at: Date.now(), items: [], repos: [], local: !deploys })
+	// Into the panel, so a keyboard is where the eye is.
+	el.querySelector<HTMLElement>('button')?.focus({ preventScroll: true })
 	refresh()
 	clearInterval(timer)
 	// Slower than the session poll: commits do not land twice a second, and every
@@ -544,15 +553,19 @@ export function close() {
 	// or reopening would match the signature of a panel that no longer has any nodes
 	lastRender = ''
 	unlockPage('press')
+	dropEscape('press')
 	onClose()
+	// Back to the header button it was opened from, rather than to nothing.
+	if (returnFocus?.isConnected && !returnFocus.closest('[inert]')) returnFocus.focus({ preventScroll: true })
+	returnFocus = null
 }
+
+/** What had focus before this opened, handed back when it closes. */
+let returnFocus: HTMLElement | null = null
 
 export const isOpen = () => open
 
 export function mountPress(host: HTMLElement, closed: () => void) {
 	el = host
 	onClose = closed
-	document.addEventListener('keydown', (e) => {
-		if (e.key === 'Escape' && open) close()
-	})
 }

@@ -62,6 +62,7 @@ test('the view passcode does not buy the right to type', () => {
 			['send', await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}' })],
 			['upload', await hit('/api/upload', { method: 'POST', body: PNG })],
 			['click', await hit('/api/click', { method: 'POST', body: '{"id":"tidepool","pane":"x","row":0,"col":0}' })],
+			['fit', await hit('/api/fit', { method: 'POST', body: '{"id":"tidepool","on":true,"cols":180,"rows":50}' })],
 		] as const) {
 			assert.equal(r.status, 401, `${what} allowed a view-only session through: ${r.text}`)
 		}
@@ -71,6 +72,8 @@ test('the view passcode does not buy the right to type', () => {
 
 test('a wrong control token is refused', () =>
 	boot().then(async ({ hit, srv }) => {
+		// The test above makes five refused attempts, which is exactly the throttle's limit.
+		resetControlThrottle()
 		const r = await hit('/api/screen?id=tidepool', { headers: { 'x-guildhall-control': 'deadbeef'.repeat(4) } })
 		assert.equal(r.status, 401)
 		srv.close()
@@ -88,6 +91,7 @@ test('switching control off closes it immediately, token or not', () =>
 			await hit('/api/send', { method: 'POST', body: '{"id":"tidepool","text":"hi"}', headers: { 'x-guildhall-control': token } }),
 			await hit('/api/upload', { method: 'POST', body: PNG, headers: { 'x-guildhall-control': token } }),
 			await hit('/api/click', { method: 'POST', body: '{"id":"tidepool","row":0,"col":0}', headers: { 'x-guildhall-control': token } }),
+			await hit('/api/fit', { method: 'POST', body: '{"id":"tidepool","on":true,"cols":180,"rows":50}', headers: { 'x-guildhall-control': token } }),
 		]) {
 			assert.equal(r.status, 403, `still reachable with control off: ${r.text}`)
 			assert.match(r.text, /control is off/)

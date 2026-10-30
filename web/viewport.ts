@@ -1,11 +1,11 @@
 /**
  * Keeping a full-screen panel where the phone can actually see it.
  *
- * Two overlays here cover the whole screen on a phone — the terminal and
- * pressroom — and both have to survive the one thing a phone does that a desktop
- * never does: raise a keyboard over half the display. This is the shared answer,
- * because the terminal learned it the hard way and pressroom had the same bug
- * sitting in it unnoticed.
+ * The overlays here — the terminal and pressroom on a phone, and the terminal at every
+ * width since it stopped being inline on a desktop — all have to survive the one thing
+ * a touch screen does that a desktop never does: raise a keyboard over half the
+ * display. This is the shared answer, because the terminal learned it the hard way and
+ * pressroom had the same bug sitting in it unnoticed.
  *
  * There are two viewports on iOS and they disagree exactly when it matters. The
  * LAYOUT viewport is the box CSS lays out against and `position: fixed` anchors
@@ -21,16 +21,15 @@
  */
 
 /**
- * Full screen rather than a panel in the page.
+ * The phone layout: overlays edge to edge, and the page hidden behind them.
  *
  * The SAME query the stylesheet uses, character for character, and that matters
  * more than which form it is written in.
  *
- * Every branch that makes a phone work hangs off this one boolean: the scroll
- * lock, sizing to the visual viewport, the height maths, and whether `show()`
- * raises the keyboard on open. If it ever disagrees with the CSS, the JS drives
- * the full-screen behaviour over a panel the stylesheet has laid out inline —
- * which is worse than either answer on its own.
+ * What hangs off it now is layout, not whether something is an overlay: the terminal
+ * is an overlay at every width (inset by a margin from 880px), so its scroll lock and
+ * its keyboard sizing no longer ask this. If it ever disagrees with the CSS, the JS
+ * lays out for one width while the stylesheet draws the other.
  *
  * So they must fail together or not at all. I briefly rewrote this as
  * `max-width: 879.98px` on the grounds that the range form needs Safari 16.4,
@@ -106,6 +105,48 @@ export function unlockPage(who: string) {
 	window.scrollTo(0, savedScroll)
 }
 
+/**
+ * The page behind a panel that covers it — header, room, list and footer. Not
+ * #offline: it is a live status, and inert would take it out of what a screen reader
+ * hears, so a connection dropping while a panel is open would go unannounced.
+ */
+const PAGE = 'body > :is(#bar, #room, #list, #empty, #foot)'
+
+/** Who is covering the page, by name, as with `holders` above. */
+const covering = new Set<string>()
+
+/**
+ * Take the page out of reach while a panel covers it: `inert`, so a click, a Tab or a
+ * screen reader cannot get to it.
+ *
+ * On a desktop the terminal sits 16px in from the edges over a dimmed page, and the
+ * dimming is only a shadow — measured, a click in that margin opened a list row, and
+ * one on the header's pressroom button opened pressroom UNDER the terminal, where the
+ * next Esc closed it unseen. Only for panels that cover the page: pressroom and the
+ * new-session drawer sit beside it on a desktop and leave it usable on purpose.
+ */
+export function cover(who: string) {
+	covering.add(who)
+	// What sits on the page and is open — the settings popover, the new-session drawer,
+	// a picture — closes itself on this. Left open, it was either inert under the panel
+	// while still holding Esc, or above it (the drawer is z-7) while the panel held Esc.
+	// Sent BEFORE the page goes inert: the picture viewer hands back what it stilled as it
+	// closes, and after would undo the inert set here.
+	document.dispatchEvent(new Event(COVERED))
+	for (const el of document.querySelectorAll<HTMLElement>(PAGE)) el.inert = true
+}
+
+/** Sent on the document whenever a panel covers the page. */
+export const COVERED = 'guildhall:covered'
+
+export function uncover(who: string) {
+	if (!covering.delete(who) || covering.size) return
+	for (const el of document.querySelectorAll<HTMLElement>(PAGE)) el.inert = false
+}
+
+/** Whether a panel covers the page, so the room can stop drawing what nobody sees. */
+export const covered = () => covering.size > 0
+
 let host: HTMLElement | null = null
 let showing: () => boolean = () => false
 
@@ -114,7 +155,6 @@ let showing: () => boolean = () => false
 function release() {
 	if (!host) return
 	host.style.height = ''
-	host.style.top = ''
 	host.style.bottom = ''
 	host.style.transform = ''
 }
@@ -146,9 +186,22 @@ function release() {
 export function measure() {
 	if (!host) return
 	const vv = window.visualViewport
-	if (!vv || !showing() || !fullScreen()) return release()
-	if (window.innerHeight - vv.height < KEYBOARD) return release()
-	host.style.height = `${vv.height}px`
+	// Not only below 880px. A large iPhone in landscape is 926-956px wide and an iPad
+	// wider still, and the panel is a fixed overlay there too now, so the keyboard does
+	// to it exactly what it does on a phone held upright. A desktop never gets past
+	// the keyboard test below.
+	if (!vv || !showing()) return release()
+	// A pinch-zoom shrinks the visual viewport too, by the zoom, and is not a keyboard:
+	// at 1.25x on a 900px window it read as 180px of "keyboard" and squeezed the panel.
+	// So above 880px the height is taken at the zoom's scale, which a keyboard leaves at
+	// 1. Not below: a phone has always resized the panel on a pinch, and its behavior is
+	// left exactly as it was.
+	const seen = fullScreen() ? vv.height : vv.height * vv.scale
+	if (window.innerHeight - seen < KEYBOARD) return release()
+	// Above 880px the panel is inset from the edges (`inset-4`); keep the same margin
+	// at the bottom, above the keyboard.
+	const inset = parseFloat(getComputedStyle(host).top) || 0
+	host.style.height = `${vv.height - inset * 2}px`
 	host.style.transform = vv.offsetTop ? `translateY(${vv.offsetTop}px)` : ''
 	// `inset-0` sets bottom too, which would fight an explicit height
 	host.style.bottom = 'auto'

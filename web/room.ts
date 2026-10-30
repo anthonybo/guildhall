@@ -20,6 +20,7 @@ import type { Session } from '../src/data/types.ts'
 import type { Image } from '../src/png.ts'
 import { rgb } from './dom.ts'
 import { settings } from './settings.ts'
+import { covered } from './viewport.ts'
 
 let roomEl: HTMLElement
 let canvas: HTMLCanvasElement
@@ -105,7 +106,9 @@ function frame(now: number) {
 	requestAnimationFrame(frame)
 	const dt = Math.min((now - last) / 1000, 0.25)
 	last = now
-	if (!sheetsReady || roomEl.hidden || !sessions.length) return
+	// Nor under the terminal or the history, which cover it at every width now: drawing
+	// a room nobody can see is the whole of this loop's cost.
+	if (!sheetsReady || roomEl.hidden || covered() || !sessions.length) return
 
 	const off = ensureOffice(sessions)
 	off.update(dt, sessions)

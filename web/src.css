@@ -226,7 +226,9 @@ body.stale .sweep::after {
  * below it. Hiding the page means a mis-sized panel shows plain panel color
  * instead, and a tap there cannot open some other session. `visibility` rather
  * than `display` so the list keeps its layout and the scroll position restores.
- * Phone width only: on a desktop these overlays are drawers beside the page.
+ * Phone width only. On a desktop the drawers sit beside the page and leave it in
+ * view, and the terminal and history dim it and make it inert (`cover` in
+ * viewport.ts) rather than hiding it.
  */
 @media (width < 880px) {
 	html.held,
@@ -235,6 +237,21 @@ body.stale .sweep::after {
 	}
 	html.held body > :is(#bar, #offline, #room, #list, #empty, #foot) {
 		visibility: hidden;
+	}
+}
+
+/*
+ * The page does not jump sideways when a panel opens on a desktop.
+ *
+ * The terminal locks the page at every width now, and the lock fixes the body in
+ * place, which takes the page's scrollbar away. Where scrollbars take up room — a
+ * Mac set to always show them, or Windows — everything behind the dimmed panel
+ * moved over by the scrollbar's width. Reserving the gutter keeps it still.
+ * Phones draw scrollbars over the page, so there is nothing to reserve.
+ */
+@media (width >= 880px) {
+	html {
+		scrollbar-gutter: stable;
 	}
 }
 

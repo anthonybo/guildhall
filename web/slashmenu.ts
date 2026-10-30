@@ -13,6 +13,11 @@
  */
 import { insertCommand, tap, tapList } from './dom.ts'
 import { api, keepDraft, term } from './termstate.ts'
+import { dropEscape, holdEscape } from './escape.ts'
+
+/** The slash menu's name on the Esc stack; the terminal drops it when it closes with
+ *  the menu still open, since that takes the menu away without `closeMenu`. */
+export const SLASH = 'slash'
 
 /** The list and the button that opens it, both working on the message box `input`. */
 export function slashMenu(input: HTMLInputElement) {
@@ -111,10 +116,18 @@ export function slashMenu(input: HTMLInputElement) {
 	const closeMenu = () => {
 		menu.hidden = true
 		labelSlash()
+		dropEscape(SLASH)
 	}
 	const openMenu = async (focusSearch = false) => {
 		menu.hidden = false
 		labelSlash()
+		// Esc closes the menu, not the terminal: opened from its button, the menu's empty
+		// search box has focus, and Esc there closed the whole panel — measured.
+		holdEscape(SLASH, () => {
+			closeMenu()
+			input.focus({ preventScroll: true })
+			return true
+		})
 		if (!term.slash.length) {
 			// `api()` describes the screen reply; this route answers something else, so it
 			// goes through `unknown` rather than pretending the shapes overlap.

@@ -14,7 +14,7 @@ import { $, ago, rgb } from './dom.ts'
 import { mountList, paintList } from './list.ts'
 import { mountRoom, relayout, setRoomSessions } from './room.ts'
 import { busy as terminalBusy, isOpen as terminalOpen, mountTerminal, show as showTerminal, wasOpen } from './terminal.ts'
-import { transcriptOpen } from './transcript.ts'
+import { closeTranscript, transcriptOpen } from './transcript.ts'
 import { mountSettings, settings } from './settings.ts'
 import { close as closePress, isOpen as pressOpen, mountPress, show as showPress } from './press.ts'
 import { isOpen as newOpen, mountNewSession, show as showNewSession } from './newsession.ts'
@@ -166,6 +166,11 @@ function apply(data: { sessions: Session[]; at: number; version?: string; update
 		const fresh = sessions.filter((s) => s.cwd === awaitingDir && s.workspace).sort((a, b) => a.stale - b.stale)[0]
 		if (fresh) {
 			awaitingDir = null
+			// Over everything, as asked for. A drawer reopened while this waited closes
+			// itself when the terminal covers the page (COVERED in viewport.ts); a history
+			// open over another session's terminal is closed here, or the new session's
+			// terminal would open beneath it.
+			if (transcriptOpen()) closeTranscript()
 			showTerminal(fresh.id, fresh.name)
 		} else if (Date.now() - awaitingSince > SPAWN_WAIT) {
 			const where = awaitingDir

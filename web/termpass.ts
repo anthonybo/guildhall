@@ -23,9 +23,6 @@ export function askForToken(why: string) {
 	clearInterval(term.timer)
 	term.timer = undefined
 	el.innerHTML = ''
-	// the panel was sized to a terminal; a password form is not one
-	el.style.maxWidth = ''
-	el.style.marginInline = ''
 	// A way out, first.
 	//
 	// Full screen on a phone, this branch had no Close button at all — so a stale or

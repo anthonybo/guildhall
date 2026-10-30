@@ -15,7 +15,8 @@
  * strictly more powerful than typing into one.
  */
 import { tap } from './dom.ts'
-import { lockPage, unlockPage } from './viewport.ts'
+import { COVERED, lockPage, unlockPage } from './viewport.ts'
+import { dropEscape, holdEscape, typing } from './escape.ts'
 
 const KEY = 'guildhall.control'
 const token = () => sessionStorage.getItem(KEY) ?? ''
@@ -40,15 +41,26 @@ let open = false
 export function mountNewSession(host: HTMLElement, picked: (dir: string) => void) {
 	el = host
 	onPick = picked
+	// A terminal opening — from the keyboard, or a session started here coming up — goes
+	// on top: this drawer is z-7 and would otherwise sit over it. See COVERED.
+	document.addEventListener(COVERED, () => {
+		if (open) close()
+	})
 }
 
 export const isOpen = () => open
+
+/** What had focus before this opened, handed back when it closes. */
+let returnFocus: HTMLElement | null = null
 
 export function close() {
 	open = false
 	el.hidden = true
 	el.replaceChildren()
 	unlockPage('newsession')
+	dropEscape('newsession')
+	if (returnFocus?.isConnected && !returnFocus.closest('[inert]')) returnFocus.focus({ preventScroll: true })
+	returnFocus = null
 }
 
 function bar(title: string) {
@@ -125,12 +137,24 @@ function askHere(body: HTMLElement) {
 }
 
 export async function show() {
+	if (!open && document.activeElement instanceof HTMLElement) returnFocus = document.activeElement
 	open = true
 	el.hidden = false
 	lockPage('newsession')
+	// Esc closes it while it is the top thing open — see escape.ts. It had no Esc at
+	// all: its ✕ was the only way out. Not while its password or new-project box has
+	// text in it, which Esc on reflex would throw away.
+	holdEscape('newsession', () => {
+		if (typing()) return false
+		close()
+		return true
+	})
 	// "Open", not "Start": this panel now leads with the sessions you closed, and a heading
 	// that only promises a new one is how a feature ends up shipped and unfindable.
 	el.replaceChildren(bar('Open a session'))
+	// Into the drawer, so a keyboard is where the eye is: its Close, the one control that
+	// exists before the list arrives.
+	el.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
 	const body = document.createElement('div')
 	body.className = 'min-h-0 flex-1 overflow-auto overscroll-contain'
 	el.append(body)

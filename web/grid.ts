@@ -12,14 +12,13 @@
  * with spaces, because a terminal row is a fixed number of cells and a missing
  * one shifts everything after it.
  */
-import { linkParts } from './links.ts'
+import { type Grid, type Span, fill, styledCell } from './cell.ts'
+import { fitLine } from './gridfit.ts'
 import { enlargeOnTap } from './lightbox.ts'
 import { type Picture, pictures } from './picture.ts'
-import { fullScreen } from './viewport.ts'
+import { type Line, reflow as reflowLines } from './reflow.ts'
 
-type Style = { foreground?: string; background?: string; bold?: boolean; faint?: boolean; italic?: boolean; underline?: boolean; strikethrough?: boolean; inverse?: boolean; invisible?: boolean; id: number }
-type Span = { row: number; column: number; style_id: number; text: string }
-export type Grid = { rows: number; columns: number; styles: Style[]; row_spans: Span[]; terminal_foreground?: string; terminal_background?: string }
+export type { Grid }
 
 /**
  * Draw the grid.
@@ -175,35 +174,6 @@ export function cellAt(pre: HTMLElement, x: number, y: number): { row: number; c
 /** One non-space character repeated a long way: a divider, not words. */
 const RULE = /^(\S)\1{7,}$/
 
-/**
- * Put `text` into `host`, turning any URLs into real links.
- *
- * Built as nodes rather than markup: this is whatever a session happened to
- * print, and it must never be able to become HTML. The anchor keeps the
- * terminal's own colour and adds an underline, so a link looks like a link
- * without losing whatever the colour already meant.
- */
-function fill(host: HTMLElement, text: string) {
-	const parts = linkParts(text)
-	// the overwhelmingly common case: no link, one text node, no allocation beyond it
-	if (parts.length === 1 && !parts[0]!.href) return void host.append(text)
-	for (const p of parts) {
-		if (!p.href) {
-			host.append(p.text)
-			continue
-		}
-		const a = document.createElement('a')
-		a.href = p.href
-		a.textContent = p.text
-		a.target = '_blank'
-		// noopener because the opened page must not get a handle on this one, and
-		// this page can type into somebody's terminal
-		a.rel = 'noopener noreferrer'
-		a.className = 'underline decoration-dotted underline-offset-2 hover:decoration-solid'
-		host.append(a)
-	}
-}
-
 let ratio = 0
 function advanceRatio(host: HTMLElement) {
 	if (ratio) return ratio
@@ -219,7 +189,7 @@ function advanceRatio(host: HTMLElement) {
 }
 
 /**
- * Draw `g` into `pre`, sizing `panel` around it.
+ * Draw `g` into `pre`, sizing its type to the space it has.
  *
  * Returns whether the grid was too wide to fit legibly, which is the one thing
  * the caller needs back: it is the same test that decides between the two draw
@@ -275,7 +245,7 @@ function drawPicture(p: Picture, url: string | null, cell: number, lineH: number
 	return line
 }
 
-export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boolean, picture: (name: string) => string | null = () => null): boolean {
+export function paint(pre: HTMLElement, g: Grid, wrap: boolean, picture: (name: string) => string | null = () => null, fit = false): boolean {
 	const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 24
 	const byId = new Map(g.styles.map((st) => [st.id, st]))
 	const rows = new Map<number, Span[]>()
@@ -313,11 +283,6 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	// and read as broken every time it was seen — the panel is the window, and one
 	// window at half the width of the next looks like a fault in the window, not a
 	// fact about its contents.
-	//
-	// Cleared rather than merely left unset, because the element persists across
-	// paints and would otherwise keep a width some earlier version put on it.
-	panel.style.maxWidth = ''
-	panel.style.marginInline = ''
 	const advance = advanceRatio(pre)
 	const usable = Math.max(200, pre.clientWidth - PAD)
 	const exact = Math.min(COMFORTABLE, usable / (g.columns * advance))
@@ -341,6 +306,12 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	const cramped = exact < READABLE
 	const reflow = wrap && cramped
 	const size = reflow ? READABLE : Math.max(LEGIBLE, exact)
+	// The opposite case: a grid NARROWER than the panel. Bigger type cannot fill the width
+	// (see COMFORTABLE), so the prose the pane only broke for width is joined back up and
+	// wrapped at the panel's width instead — see reflow.ts. Only when asked (`fit`: the
+	// session's own pane, on a desktop), in Wrapped mode, and when there is real room to
+	// gain: a fifth more width than the grid needs at this size.
+	const lines = fit && wrap && !cramped && usable > g.columns * advance * size * 1.2 ? reflowLines(g) : null
 	pre.style.fontSize = `${size.toFixed(2)}px`
 	pre.style.lineHeight = '1.25'
 	// Centre a grid that does not fill its panel, by padding rather than by
@@ -350,7 +321,9 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	// The panel stays full width regardless; this only moves the text inside it.
 	// Left-aligned in a wide panel it reads as having fallen to one side, which is
 	// how it was reported: "all the text is on the far left".
-	const slack = reflow ? 0 : Math.max(0, usable - g.columns * advance * size)
+	// Not when lines are joined: the prose then reaches the right edge, and the rows kept
+	// exact (code, boxes, the status bar) start at the same left edge it does.
+	const slack = reflow || lines ? 0 : Math.max(0, usable - g.columns * advance * size)
 	pre.style.paddingInline = `${(12 + slack / 2).toFixed(1)}px`
 	pre.style.whiteSpace = reflow ? 'pre-wrap' : 'pre'
 	// Reflowed means it fits: nothing in it may scroll sideways. Reported on an iPhone as
@@ -363,26 +336,9 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 	// break-word, not break-all: a wrapped path or a long token should move whole
 	// rather than be sliced mid-word wherever the edge happens to fall
 	pre.style.overflowWrap = reflow ? 'break-word' : ''
-	// Take the whole height the window has left, rather than a flat 60vh. A cmux
-	// pane is 60 rows and 60vh of a laptop window showed 28 of them — less than
-	// half the session's screen on a view whose only job is to show that screen.
-	// Measured from the chrome around it rather than from the panel's own position,
-	// which moves as the page scrolls.
-	//
-	// Only when the panel is INLINE. Full screen on a phone it is a flex column, and
-	// `flex-1` already gives the screen exactly the space between the bar and the
-	// input — a maxHeight computed from `window.innerHeight` would fight that, and
-	// lose the moment the keyboard opens and changes the height it was computed from.
-	if (fullScreen()) {
-		pre.style.maxHeight = ''
-	} else {
-		const headerH = document.getElementById('bar')?.getBoundingClientRect().height ?? 0
-		// The pane chips of a split tab sit between the bar and the screen (panes.ts).
-		const strip = document.getElementById('panestrip')?.getBoundingClientRect().height ?? 0
-		const above = (panel.firstElementChild?.getBoundingClientRect().height ?? 0) + headerH + strip
-		const below = panel.lastElementChild?.getBoundingClientRect().height ?? 0
-		pre.style.maxHeight = `${Math.max(200, window.innerHeight - above - below - 24)}px`
-	}
+	// No height is set here. The panel is a flex column at every width and `flex-1`
+	// gives the screen exactly the space between the bar and the input — see the
+	// #terminal comment in index.html for the window-derived height this replaced.
 	const out: HTMLElement[] = []
 	// Rows that are drawn, not written, keep their columns even when reflowing — see
 	// `drawn`. Everything below the last full-width rule is the status bar.
@@ -395,7 +351,27 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 		}
 	}
 	const shown = pictures(g.row_spans, g.rows)
+	// The status bar, in joined-lines mode, as pieces side by side across the width. Claude
+	// Code stacks its parts — model, context, usage meters, mode — one per row because the
+	// pane is narrow; a wide terminal puts them on one or two rows. Each row is kept whole,
+	// so a meter stays beside its number, and they flow like words.
+	const status = lines ? document.createElement('div') : null
+	if (status) status.style.cssText = 'display:flex;flex-wrap:wrap;column-gap:4ch;align-items:baseline'
+	// Joined lines are drawn once, at their first row; their other rows are them.
+	const joinedAt = new Map<number, Line>()
+	const within = new Set<number>()
+	for (const l of lines ?? []) {
+		if (l.fixed || l.rows.length < 2) continue
+		joinedAt.set(l.rows[0]!, l)
+		for (const r of l.rows.slice(1)) within.add(r)
+	}
 	for (let r = 0; r < g.rows; r++) {
+		if (within.has(r)) continue
+		const joined = joinedAt.get(r)
+		if (joined) {
+			out.push(fitLine(joined, byId, g))
+			continue
+		}
 		const pic = shown.find((p) => r >= p.top && r <= p.bottom)
 		if (pic) {
 			// One element for the whole block, at its first row; the rest of its rows are it.
@@ -427,7 +403,9 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 		// AND it reaches the right edge, which is what right-aligned means: a deeply
 		// indented line of code starts far in too, but stops wherever its code stops.
 		const reach = Math.max(0, ...spans.map((sp) => sp.column + [...sp.text.trimEnd()].length))
-		const right = reflow && !fixed && textOf(r).trim() !== '' && indent >= g.columns / 3 && reach >= g.columns - 3
+		// Joined-lines mode too: the panel is wider than the grid, so a hint the terminal
+		// put against its right edge ("✔ Update installed") goes against the panel's.
+		const right = ((reflow && !fixed) || lines !== null) && textOf(r).trim() !== '' && indent >= g.columns / 3 && reach >= g.columns - 3
 		if (right) line.style.textAlign = 'right'
 		let col = 0
 		let first = true
@@ -442,26 +420,17 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 			// nothing — the row is no longer a row — and a status bar's 40-space gaps
 			// would wrap into blank lines, so they collapse to a readable separation.
 			if (sp.column > col && !(right && first)) line.append(reflow && !fixed ? '  '.slice(0, Math.min(2, sp.column - col)) : ' '.repeat(sp.column - col))
-			const st = byId.get(sp.style_id)
-			const cell = document.createElement('span')
-			// Where this run starts in the terminal, so a tap can be mapped back to a cell
-			// however the row was laid out (see cellAt).
-			cell.dataset.col = String(sp.column)
-			// inverse swaps them, which is how a selected row or a cursor is drawn
-			const fg = st?.inverse ? (st?.background ?? g.terminal_background) : st?.foreground
-			const bg = st?.inverse ? (st?.foreground ?? g.terminal_foreground) : st?.background
-			if (fg) cell.style.color = fg
-			if (bg && bg !== g.terminal_background) cell.style.background = bg
-			if (st?.bold) cell.style.fontWeight = '700'
-			if (st?.faint) cell.style.opacity = '0.7'
-			if (st?.italic) cell.style.fontStyle = 'italic'
-			if (st?.underline || st?.strikethrough) cell.style.textDecoration = `${st.underline ? 'underline' : ''} ${st.strikethrough ? 'line-through' : ''}`.trim()
-			if (st?.invisible) cell.style.visibility = 'hidden'
+			const cell = styledCell(byId.get(sp.style_id), g, sp.column)
 			// A divider is one character repeated across the whole terminal, and
 			// reflowed it becomes four wrapped lines of dashes where the terminal drew
 			// one — so a rule is clipped to the width instead of wrapped. It reads as
 			// the line it was meant to be, and costs one row rather than four.
 			if (reflow && !fixed && RULE.test(sp.text)) cell.style.cssText += ';display:inline-block;width:100%;white-space:nowrap;overflow:hidden;vertical-align:bottom'
+			// In joined-lines mode a rule goes the other way, out to the panel's full width, so
+			// the input box's lines frame the width the text now uses. Drawn as a border: the
+			// terminal only gave it 47 dashes, and a wider box around them is still 47 long.
+			const ruled = lines !== null && /^─+$/.test(sp.text.trim()) && [...sp.text.trim()].length >= 20
+			if (ruled) cell.style.cssText += ';display:inline-block;width:100%;height:0;vertical-align:middle;border-top:1px solid currentColor'
 			// nodes, never innerHTML: this is whatever the terminal is showing, and it
 			// must not be able to become markup
 			// Until the first visible character of a right-aligned row, its spaces are padding.
@@ -471,15 +440,26 @@ export function paint(pre: HTMLElement, g: Grid, panel: HTMLElement, wrap: boole
 			const lead = right && first ? sp.text.trimStart() : sp.text
 			const text = tail ? lead.trimEnd() : lead
 			if (text) first = false
-			fill(cell, text)
+			if (!ruled) fill(cell, text)
 			line.append(cell)
 			col = sp.column + [...sp.text].length
 		}
 		if (!spans.length) line.append('\u00a0')
+		if (status && r >= footer) {
+			// Each row whole, beside the others \u2014 see `status` below. A blank one is spacing
+			// for a narrow pane and nothing here.
+			// Never shrunk: a flex item is allowed to by default, and the meters were squeezed
+			// into each other ("4… 0.0%"), measured.
+			line.style.flex = 'none'
+			if (textOf(r).trim()) status.append(line)
+			continue
+		}
 		out.push(line)
 	}
+	if (status?.childElementCount) out.push(status)
 	pre.replaceChildren(...out)
 	if (atBottom) pre.scrollTop = pre.scrollHeight
-	return cramped
+	// Either way the Wrapped/Exact button now does something, so it shows.
+	return cramped || lines !== null
 }
 

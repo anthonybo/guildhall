@@ -493,6 +493,10 @@ export function paintList(list: Session[]) {
 		}
 		li.addEventListener('click', toggle)
 		li.addEventListener('keydown', (e) => {
+			// The row's own keys only. A press on a button inside it — the terminal button
+			// — bubbled here, was prevented and toggled the row instead, so a terminal
+			// could not be opened from the keyboard at all.
+			if (e.target !== li) return
 			if (e.key === 'Enter' || e.key === ' ') {
 				e.preventDefault()
 				toggle()
