@@ -9,7 +9,7 @@ import path from 'node:path'
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'guildhall-cmux-'))
 const state = path.join(dir, 'session.json')
 process.env.GUILDHALL_CMUX_STATE = state
-const { cmuxMap, seatFields } = await import('./cmux.ts')
+const { cmuxMap, heldForTest, seatFields, tabForTty, unclaimed } = await import('./cmux.ts')
 
 const panel = (terminal: unknown) => ({ terminal })
 const write = (workspaces: unknown[]) => fs.writeFileSync(state, JSON.stringify({ windows: [{ tabManager: { workspaces } }] }))
@@ -97,4 +97,26 @@ test('in a split tab a session is seated in ITS pane, not the focused one, and t
 	write([{ workspaceId: 'W2', panels: [{ id: CHAT, type: 'terminal', title: 'x', ...attached('s2') }] }])
 	assert.equal(seatFields(cmuxMap().get('s2')!).panes, undefined)
 	assert.equal(cmuxMap().get('s2')?.surface, CHAT)
+})
+
+test('reading the state on every poll holds one read, not every read ever made', () => {
+	// The memory leak: every poll appended each agentless tab to a list that only a session
+	// start ever emptied — 1,950,036 entries and 977MB after 71 hours of polling.
+	const PANE = '0381434D-1330-4105-AEC8-25C08754FB4D'
+	write([
+		{ workspaceId: 'W1', currentDirectory: '/tmp/TEST-ONLY-a', panels: [{ id: PANE, type: 'terminal', ttyName: '/dev/TEST-ONLY-tty', terminal: {} }] },
+		{ workspaceId: 'W2', currentDirectory: '/tmp/TEST-ONLY-b', panels: [] },
+	])
+	for (let i = 0; i < 500; i++) cmuxMap()
+	assert.deepEqual(heldForTest(), { free: 2, ttys: 2 })
+	assert.deepEqual(
+		unclaimed().map((u) => u.dir),
+		['/tmp/TEST-ONLY-a', '/tmp/TEST-ONLY-b'],
+	)
+	assert.equal(tabForTty('TEST-ONLY-tty')?.workspace, 'W1')
+	// A tab that closed is forgotten by the next read rather than kept.
+	write([{ workspaceId: 'W2', currentDirectory: '/tmp/TEST-ONLY-b', panels: [] }])
+	cmuxMap()
+	assert.deepEqual(heldForTest(), { free: 1, ttys: 0 })
+	assert.equal(tabForTty('TEST-ONLY-tty'), undefined)
 })

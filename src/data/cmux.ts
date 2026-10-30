@@ -37,7 +37,7 @@ export const seatFields = (at: Seat) => ({
 	panes: at.panes.length > 1 ? at.panes : undefined,
 })
 
-const byTty = new Map<string, Seat>()
+let byTty = new Map<string, Seat>()
 
 export function cmuxMap() {
 	const m = new Map<string, Seat>()
@@ -47,6 +47,13 @@ export function cmuxMap() {
 	} catch {
 		return m
 	}
+	// Built fresh from this read and swapped in at the end — never added to. This runs on
+	// every poll, and `free` was pushed to here but only emptied by `unclaimed()`, which
+	// runs only when a session is started: one entry per agentless tab every two seconds.
+	// Measured on the headless server after 71 hours: 1,950,036 entries holding 977MB of
+	// a 1,007MB heap, the Mac in swap, and the terminal app the same at 1.4GB.
+	const ttys = new Map<string, Seat>()
+	const loose: { dir: string; at: Seat }[] = []
 	for (const win of st.windows ?? []) {
 		;(win.tabManager?.workspaces ?? []).forEach((ws: any, i: number) => {
 			// Every terminal pane in the tab. A panel's `id` IS the surface id cmux takes —
@@ -62,8 +69,8 @@ export function cmuxMap() {
 				// Every panel by its terminal device — the exact session-to-tab key. See
 				// `tabForTty`.
 				if (pn.ttyName) {
-					byTty.set(String(pn.ttyName), at)
-					byTty.set(String(pn.ttyName).replace(/^\/dev\//, ''), at)
+					ttys.set(String(pn.ttyName), at)
+					ttys.set(String(pn.ttyName).replace(/^\/dev\//, ''), at)
 				}
 				const t = pn.terminal
 				// `terminal.agent` is not the panel's identity, it is its *attachment*:
@@ -92,10 +99,12 @@ export function cmuxMap() {
 				const dir = String(ws.currentDirectory ?? '')
 				// No agent recorded, so which pane holds the session is unknown — unless there is
 				// only one. Otherwise the tab alone, as before.
-				if (dir) free.push({ dir, at: panes.length === 1 ? { ...tab, surface: panes[0].surface } : tab })
+				if (dir) loose.push({ dir, at: panes.length === 1 ? { ...tab, surface: panes[0].surface } : tab })
 			}
 		})
 	}
+	byTty = ttys
+	free = loose
 	return m
 }
 
@@ -114,16 +123,17 @@ export function cmuxMap() {
  * fact both sides share. This is offered as a LAST resort and only when it is
  * unambiguous — see `pairByDirectory`.
  */
-const free: { dir: string; at: Seat }[] = []
+let free: { dir: string; at: Seat }[] = []
 
 export function unclaimed() {
 	// Populated as a side effect of cmuxMap, which is the only thing that parses the
 	// state file; calling it here keeps the two answers from the same read.
-	free.length = 0
-	byTty.clear()
 	cmuxMap()
 	return free.slice()
 }
+
+/** How much the last read left held — for the test that it does not accumulate. */
+export const heldForTest = () => ({ free: free.length, ttys: byTty.size })
 
 /**
  * Which tab a terminal device belongs to.
